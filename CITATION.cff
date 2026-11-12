@@ -1,0 +1,71 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software, please cite it as below, and cite Ho et al. (2026), the analysis it continues.
+type: software
+title: "hcd_priya: a Lyman-alpha forest P1D emulator with high-column-density absorber classes, built on PRIYA simulations"
+authors:
+  - given-names: Ming-Feng
+    family-names: Ho
+    email: mfho@umich.edu
+version: 0.2.0
+license: MIT
+repository-code: "https://github.com/jibanCat/hcd_priya"
+references:
+  - type: article
+    title: >-
+      Small-scale Lyman alpha forest cosmology with PRIYA: constraints from XQ100 and KODIAQ-SQUAD one-dimensional
+      flux power spectra
+    authors:
+      - given-names: Ming-Feng
+        family-names: Ho
+      - given-names: Mahdi
+        family-names: Qezlou
+      - given-names: Simeon
+        family-names: Bird
+      - given-names: Yanhui
+        family-names: Yang
+      - given-names: Camille
+        family-names: Avestruz
+      - given-names: M.A.
+        family-names: Fernandez
+      - given-names: Vid
+        family-names: Iršič
+    journal: Journal of Cosmology and Astroparticle Physics
+    year: 2026
+    issue: "7"
+    start: "94"
+    doi: 10.1088/1475-7516/2026/07/094
+    identifiers:
+      - type: url
+        value: "https://arxiv.org/abs/2509.18271"
+        description: arXiv:2509.18271
+  - type: article
+    title: "PRIYA: a new suite of Lyman-alpha forest simulations for cosmology"
+    authors:
+      - given-names: Simeon
+        family-names: Bird
+      - given-names: Martin
+        family-names: Fernandez
+      - given-names: Ming-Feng
+        family-names: Ho
+      - given-names: Mahdi
+        family-names: Qezlou
+      - given-names: Reza
+        family-names: Monadi
+      - given-names: Yueying
+        family-names: Ni
+      - given-names: Nianyi
+        family-names: Chen
+      - given-names: Rupert
+        family-names: Croft
+      - given-names: Tiziana
+        family-names: Di Matteo
+    journal: Journal of Cosmology and Astroparticle Physics
+    year: 2023
+    issue: "10"
+    start: "37"
+    doi: 10.1088/1475-7516/2023/10/037
+    identifiers:
+      - type: url
+        value: "https://arxiv.org/abs/2306.05471"
+        description: arXiv:2306.05471

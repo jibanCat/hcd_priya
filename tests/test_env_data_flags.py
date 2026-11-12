@@ -13,9 +13,13 @@ or add the CV floor under a production driver, invisible to every audit artifact
       (data_likelihood.assert_env_data_flags_unset);
   (c) an explicit loader kwarg still overrides the env (the test back-door is preserved).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_env_data_flags.py -q
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+     python -m pytest tests/test_env_data_flags.py -q
 """
+
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64
@@ -23,13 +27,14 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
-EBOSS_NPZ = "/home/mfho/data/eboss_dr14_p1d/eboss_dr14_p1d.npz"
+DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
+EBOSS_NPZ = external_path("HCD_P1D_DATA_DIR", "eboss_dr14_p1d/eboss_dr14_p1d.npz")
 _have_desi = os.path.exists(DESI_NPZ) and os.path.exists(DL.DESI_SNR3_NPZ)
 _have_eboss = os.path.exists(EBOSS_NPZ)
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 @pytest.fixture(autouse=True)
@@ -47,7 +52,7 @@ def test_env_data_flags_constant():
 # --------------------------------------------------------------------------------------------- #
 #  (a) DataLeg stamps
 # --------------------------------------------------------------------------------------------- #
-@pytest.mark.skipif(not _have_desi, reason="DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_default_stamps_all_false():
     leg = DL.load_desi_leg()
     assert leg.use_snr3 is False
@@ -55,7 +60,7 @@ def test_desi_default_stamps_all_false():
     assert leg.cv_floor_rank1 is False
 
 
-@pytest.mark.skipif(not _have_desi, reason="DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_env_snr3_is_stamped(monkeypatch):
     monkeypatch.setenv("HCD_DESI_SNR3", "1")
     leg = DL.load_desi_leg()
@@ -63,7 +68,7 @@ def test_desi_env_snr3_is_stamped(monkeypatch):
     assert leg.cv_floor_on is False
 
 
-@pytest.mark.skipif(not _have_desi, reason="DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_env_cv_floor_is_stamped(monkeypatch):
     monkeypatch.setenv("HCD_CV_FLOOR", "1")
     leg = DL.load_desi_leg()
@@ -73,7 +78,7 @@ def test_desi_env_cv_floor_is_stamped(monkeypatch):
     assert leg2.cv_floor_on is True and leg2.cv_floor_rank1 is True
 
 
-@pytest.mark.skipif(not _have_desi, reason="DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_desi_rank1_without_floor_is_not_stamped(monkeypatch):
     """HCD_CV_FLOOR_RANK1 alone is inert (never consulted when the floor is off) — the stamp
     must record what was APPLIED, not the raw env."""
@@ -82,7 +87,7 @@ def test_desi_rank1_without_floor_is_not_stamped(monkeypatch):
     assert leg.cv_floor_on is False and leg.cv_floor_rank1 is False
 
 
-@pytest.mark.skipif(not _have_eboss, reason="eBOSS npz not present")
+@pytest.mark.skipif(not _have_eboss, reason="eBOSS npz not present (set HCD_P1D_DATA_DIR)")
 def test_eboss_env_cv_floor_is_stamped(monkeypatch):
     leg0 = DL.load_eboss_leg()
     assert leg0.cv_floor_on is False and leg0.cv_floor_rank1 is False and leg0.use_snr3 is False
@@ -90,10 +95,10 @@ def test_eboss_env_cv_floor_is_stamped(monkeypatch):
     monkeypatch.setenv("HCD_CV_FLOOR_RANK1", "1")
     leg = DL.load_eboss_leg()
     assert leg.cv_floor_on is True and leg.cv_floor_rank1 is True
-    assert leg.use_snr3 is False                      # SNR3 is a DESI-only concept
+    assert leg.use_snr3 is False  # SNR3 is a DESI-only concept
 
 
-@pytest.mark.skipif(not _have_eboss, reason="eBOSS npz not present")
+@pytest.mark.skipif(not _have_eboss, reason="eBOSS npz not present (set HCD_P1D_DATA_DIR)")
 def test_explicit_kwarg_overrides_env(monkeypatch):
     """The explicit add_cv_floor=False test back-door still beats the env — and the stamp
     reflects the APPLIED value."""
@@ -102,11 +107,17 @@ def test_explicit_kwarg_overrides_env(monkeypatch):
     assert leg.cv_floor_on is False
 
 
-@pytest.mark.skipif(not os.path.exists(
-    "/home/mfho/lya_emulator_full/lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt"),
-    reason="KS data not present")
+@pytest.mark.skipif(
+    not os.path.exists(
+        external_path(
+            "HCD_LYAEMU_PARENT",
+            "lyaemu/data/kodiaq_squad/final-conservative-p1d-karacayli_etal2021.txt",
+        )
+    ),
+    reason="KS data not present (set HCD_LYAEMU_PARENT)",
+)
 def test_ks_leg_stamps_default_false():
-    leg = DL.load_ks_leg()
+    leg = DL.load_ks_leg(k_max=0.069)
     assert leg.use_snr3 is False and leg.cv_floor_on is False and leg.cv_floor_rank1 is False
 
 
@@ -114,7 +125,7 @@ def test_ks_leg_stamps_default_false():
 #  (b) driver-entry refusal
 # --------------------------------------------------------------------------------------------- #
 def test_assert_env_data_flags_unset_passes_on_clean_env():
-    DL.assert_env_data_flags_unset("test-clean")      # must not raise
+    DL.assert_env_data_flags_unset("test-clean")  # must not raise
 
 
 def test_assert_env_data_flags_unset_refuses_set_flag(monkeypatch):
@@ -128,7 +139,7 @@ def test_assert_env_data_flags_unset_refuses_set_flag(monkeypatch):
 
 def test_assert_env_data_flags_unset_allow_optin(monkeypatch):
     monkeypatch.setenv("HCD_CV_FLOOR", "1")
-    DL.assert_env_data_flags_unset("test-allow", allow=True)   # explicit opt-in
+    DL.assert_env_data_flags_unset("test-allow", allow=True)  # explicit opt-in
 
 
 def test_assert_env_data_flags_falsy_token_is_unset(monkeypatch):
@@ -150,4 +161,5 @@ def test_production_drivers_wire_the_tripwire():
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(pytest.main([__file__, "-q"]))

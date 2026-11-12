@@ -6,6 +6,7 @@ cleanliness, the full MultiFidelity forward model (additive<->log-ratio identity
 res_corr on/off, HMC-differentiability), and the delta target measurement / training
 on a synthetic cache.  No real caches or checkpoints are touched (fast).
 """
+
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -19,11 +20,13 @@ from hcd_analysis.emulator import multifidelity as MF
 # static field (a read-only numpy norm dict; is_array flags numpy too) -- benign and
 # expected here (the module filters it in normal use, but pytest installs its own
 # warning capture).  Silence that ONE message for these tests.
-pytestmark = pytest.mark.filterwarnings(
-    "ignore:A JAX array is being set as static:UserWarning")
+pytestmark = pytest.mark.filterwarnings("ignore:A JAX array is being set as static:UserWarning")
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator.data import (
-    load_cache, fit_target_norm, reconstruct_P_filt, Z_LIMITS,
+    load_cache_historical,
+    fit_target_norm,
+    reconstruct_P_filt,
+    Z_LIMITS,
 )
 from tests.emulator._fixture import write_synthetic_cache
 
@@ -49,20 +52,18 @@ def test_interp_res_corr_matches_table_on_grid():
     # (b) the anchored path on bins WELL ABOVE the anchor (k > 10*kbox, where the
     # tanh blend has saturated to w~1).
     z, logk, rc = MF.load_res_corr()
-    zi = 5                                          # z = 3.2
+    zi = 5  # z = 3.2
     zz = z[zi]
     k_eval = jnp.asarray(10.0 ** logk[zi])
     # (a) anchor_mult=0.0 reproduces the raw table EXACTLY on-grid (regression ref).
-    got_raw = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(zz), k_eval,
-                                            anchor_mult=0.0))
+    got_raw = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(zz), k_eval, anchor_mult=0.0))
     assert np.allclose(got_raw, rc[zi], rtol=1e-9, atol=1e-9)
     # (b) anchored path on bins well above the anchor (k > 10*kbox) matches the table;
     #     the tanh tail is asymptotic (worst ~4e-5 at the cut), so use a high-k tol.
-    kbox = float(MF.kbox_skm(zz))                   # ~0.00377 at z=3.2
+    kbox = float(MF.kbox_skm(zz))  # ~0.00377 at z=3.2
     kgrid = 10.0 ** logk[zi]
-    hi = kgrid > 10.0 * kbox                        # 49/59 bins kept
-    got_anch = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(zz),
-                                             jnp.asarray(kgrid)))
+    hi = kgrid > 10.0 * kbox  # 49/59 bins kept
+    got_anch = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(zz), jnp.asarray(kgrid)))
     assert hi.sum() >= 40
     assert np.allclose(got_anch[hi], rc[zi][hi], rtol=0, atol=1e-3)
 
@@ -73,7 +74,7 @@ def test_interp_res_corr_high_k_suppression_and_clamp():
     # the raw table value.  Probe the high-k suppression ABOVE the anchor, and add the
     # anchor assertion (res_corr ~ 1 below 5*kbox).
     z, logk, rc = MF.load_res_corr()
-    kb = float(MF.kbox_skm(3.0))                     # ~0.00376 s/km
+    kb = float(MF.kbox_skm(3.0))  # ~0.00376 s/km
     # high-k probe, all WELL above 5*kbox (~0.0188): suppression untouched by the anchor.
     k = jnp.asarray(np.array([0.05, 0.1, 0.18]))
     val = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(3.0), k))
@@ -81,12 +82,13 @@ def test_interp_res_corr_high_k_suppression_and_clamp():
     assert val[2] < val[0]
     assert np.all((val > 0.8) & (val < 1.1))
     # the anchor: res_corr ~ 1 below 5*kbox (the +6% low-k bump is blended away).
-    klo = jnp.asarray(np.array([0.5 * kb, 1.0 * kb]))   # deep in the anchored zone
+    klo = jnp.asarray(np.array([0.5 * kb, 1.0 * kb]))  # deep in the anchored zone
     vlo = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(3.0), klo))
     assert np.allclose(vlo, 1.0, atol=2e-3)
     # edge clamp: z and k beyond the table support stay finite & in-range
-    big = np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(6.0),
-                                        jnp.asarray(np.array([1e-4, 5.0]))))
+    big = np.asarray(
+        MF.interp_res_corr(z, logk, rc, jnp.asarray(6.0), jnp.asarray(np.array([1e-4, 5.0])))
+    )
     assert np.all(np.isfinite(big)) and np.all((big > 0.7) & (big < 1.2))
 
 
@@ -97,8 +99,10 @@ def test_interp_res_corr_differentiable_and_jit():
     g = jax.grad(f)(jnp.asarray(3.0))
     assert np.isfinite(g)
     jf = jax.jit(lambda zz, kk: MF.interp_res_corr(z, logk, rc, zz, kk))
-    assert np.allclose(np.asarray(jf(jnp.asarray(3.0), k)),
-                       np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(3.0), k)))
+    assert np.allclose(
+        np.asarray(jf(jnp.asarray(3.0), k)),
+        np.asarray(MF.interp_res_corr(z, logk, rc, jnp.asarray(3.0), k)),
+    )
 
 
 # --- Task 1.1: anchor res_corr -> 1 below 5x the L15 box fundamental --------- #
@@ -119,11 +123,11 @@ def test_interp_res_corr_differentiable_and_jit():
 #     anchor and an rc~1-below-5*kbox assertion added.
 def test_interp_res_corr_anchored_to_one_below_5kbox():
     # res_corr must be ~1 well below 5x the L15 box fundamental, and UNCHANGED well above.
-    from hcd_analysis.emulator.multifidelity import (
-        load_res_corr, interp_res_corr, kbox_skm)
+    from hcd_analysis.emulator.multifidelity import load_res_corr, interp_res_corr, kbox_skm
+
     z_rc, logk_rc, rc = load_res_corr()
     z = 3.0
-    kb = float(kbox_skm(z))              # ~0.0037560 s/km (verified)
+    kb = float(kbox_skm(z))  # ~0.0037560 s/km (verified)
     # deep in the anchored zone, INCLUDING the +6.3% bump (raw rc ~1.0616-1.0626 here):
     k_lo = np.array([0.5 * kb, 1.0 * kb])
     # well above 5*kbox (~0.0188): the tanh blend has saturated (k=0.1 is ~6 widths above,
@@ -133,7 +137,7 @@ def test_interp_res_corr_anchored_to_one_below_5kbox():
     rc_hi_anch = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_hi))
     # unanchored reference for k_hi (anchor_mult=0.0 == raw table path)
     rc_hi_raw = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_hi, anchor_mult=0.0))
-    assert np.allclose(rc_lo, 1.0, atol=2e-3)             # anchored to 1 at low k
+    assert np.allclose(rc_lo, 1.0, atol=2e-3)  # anchored to 1 at low k
     assert np.allclose(rc_hi_anch, rc_hi_raw, atol=1e-6)  # untouched at high k
 
 
@@ -146,11 +150,11 @@ def test_interp_res_corr_default_is_5x():
     # interp_res_corr(..., anchor_mult=5.0), and DISCRIMINABLY different from 3.0 (the
     # pre-Task-1.1 value).  A future silent change to the default (e.g. back to 3.0, or to
     # 4.0) flips this test red BEFORE it can move the n_s-driving low-k DESI bins.
-    from hcd_analysis.emulator.multifidelity import (
-        load_res_corr, interp_res_corr, kbox_skm)
+    from hcd_analysis.emulator.multifidelity import load_res_corr, interp_res_corr, kbox_skm
+
     z_rc, logk_rc, rc = load_res_corr()
     z = 3.0
-    kb = float(kbox_skm(z))                      # ~0.0037560 s/km (verified)
+    kb = float(kbox_skm(z))  # ~0.0037560 s/km (verified)
     # a k grid that STRADDLES the anchor: from 0.5x kbox (deep in the anchor zone, where the
     # anchor_mult choice matters most) up to 0.1 s/km (well above any of {3,5}x kbox, where
     # all anchors agree) — so the 5x-vs-3x discrimination is exercised in the blend region.
@@ -159,12 +163,18 @@ def test_interp_res_corr_default_is_5x():
     rc_5x = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_eval, anchor_mult=5.0))
     rc_3x = np.asarray(interp_res_corr(z_rc, logk_rc, rc, z, k_eval, anchor_mult=3.0))
     # the default IS 5.0: bit-identical (rtol 1e-12, atol 0 — exact, same code path).
-    np.testing.assert_allclose(rc_default, rc_5x, rtol=1e-12, atol=0.0,
-                               err_msg="interp_res_corr default anchor_mult is no longer 5.0")
+    np.testing.assert_allclose(
+        rc_default,
+        rc_5x,
+        rtol=1e-12,
+        atol=0.0,
+        err_msg="interp_res_corr default anchor_mult is no longer 5.0",
+    )
     # and it is NOT 3.0 — the test discriminates the default (the 3x anchor moves the blend
     # edge to ~0.011 s/km vs 5x's ~0.019, so they differ measurably in the straddle region).
-    assert not np.allclose(rc_default, rc_3x, rtol=1e-6, atol=0.0), \
-        "interp_res_corr default coincides with anchor_mult=3.0 — the 5x default is not pinned"
+    assert not np.allclose(
+        rc_default, rc_3x, rtol=1e-6, atol=0.0
+    ), "interp_res_corr default coincides with anchor_mult=3.0 — the 5x default is not pinned"
 
 
 # --------------------------------------------------------------------------- #
@@ -196,7 +206,7 @@ def test_smooth_k_basis_shape_and_first_row_constant():
     logk = jnp.asarray(np.linspace(-3, -0.7, 40))
     B = MF.smooth_k_basis(logk, n_basis=4)
     assert B.shape == (4, 40)
-    assert np.allclose(np.asarray(B[0]), 1.0)        # row 0 is the constant
+    assert np.allclose(np.asarray(B[0]), 1.0)  # row 0 is the constant
     # Chebyshev rows are bounded in [-1,1]
     assert np.all(np.abs(np.asarray(B[1:])) <= 1.0 + 1e-9)
 
@@ -209,7 +219,7 @@ def test_delta_head_shapes_jit_vmap_grad():
     cond = jnp.zeros(11)
     g = head(cond, B)
     assert g.shape == (4, 32)
-    assert g.dtype == jnp.float64                    # x64 active
+    assert g.dtype == jnp.float64  # x64 active
     # jit + vmap over a batch
     batch = jnp.ones((5, 11))
     gv = jax.jit(jax.vmap(lambda c: head(c, B)))(batch)
@@ -226,8 +236,8 @@ def test_delta_head_key_sensitivity():
     h1 = MF.DeltaHead(n_basis=3, in_dim=11, key=jax.random.PRNGKey(0))
     h2 = MF.DeltaHead(n_basis=3, in_dim=11, key=jax.random.PRNGKey(1))
     c = jnp.ones(11)
-    assert jnp.allclose(h0(c, B), h1(c, B))          # same key -> identical
-    assert not jnp.allclose(h0(c, B), h2(c, B))      # different key -> different
+    assert jnp.allclose(h0(c, B), h1(c, B))  # same key -> identical
+    assert not jnp.allclose(h0(c, B), h2(c, B))  # different key -> different
 
 
 # --------------------------------------------------------------------------- #
@@ -242,7 +252,8 @@ def _sanitize_unit_cube(d):
     PHYSICAL-RANGE input, so we re-map params_unit into [0,1] (the z_unit column is
     already sane).  Mutates and returns ``d``."""
     pu = d["x"][:, :9]
-    lo = pu.min(0, keepdims=True); hi = pu.max(0, keepdims=True)
+    lo = pu.min(0, keepdims=True)
+    hi = pu.max(0, keepdims=True)
     d["x"] = d["x"].copy()
     d["x"][:, :9] = (pu - lo) / np.where(hi - lo > 0, hi - lo, 1.0)
     return d
@@ -253,7 +264,9 @@ def lf_backbone(tmp_path):
     """A tiny trained-free LF Emulator + norm fit on a synthetic cache."""
     path = tmp_path / "lf.h5"
     write_synthetic_cache(path, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=1)
-    d = _sanitize_unit_cube(load_cache(path))
+    d = _sanitize_unit_cube(
+        load_cache_historical(path, reason="test: a cache in the pre-lineage 3.3 format")
+    )
     norm = fit_target_norm(d, np.arange(len(d["z_grid"])))
     n_k = d["P_tier_p"].shape[1]
     model = Emulator(in_dim=10, n_k=n_k, n_basis=4, key=jax.random.PRNGKey(0))
@@ -265,28 +278,37 @@ def _build_mf(lf_backbone, n_basis=4, log_rho=None):
     d, model, norm, lf_logk = lf_backbone
     eval_logk = np.linspace(np.log10(1e-3), np.log10(0.15), 20)
     basis = MF.smooth_k_basis(jnp.asarray(eval_logk), n_basis=n_basis)
-    head = MF.DeltaHead(n_basis=n_basis, in_dim=11, width=8, n_layers=1,
-                        key=jax.random.PRNGKey(3))
+    head = MF.DeltaHead(n_basis=n_basis, in_dim=11, width=8, n_layers=1, key=jax.random.PRNGKey(3))
     z_rc, logk_rc, rc_vals = MF.load_res_corr()
     if log_rho is None:
         log_rho = np.zeros(len(eval_logk))
     mf = MF.MultiFidelity(
-        lf_model=model, lf_norm=norm, eval_logk=eval_logk, lf_logk=lf_logk,
-        delta_head=head, basis=basis, log_rho=log_rho,
-        z_rc=z_rc, logk_rc=logk_rc, rc_vals=rc_vals)
+        lf_model=model,
+        lf_norm=norm,
+        eval_logk=eval_logk,
+        lf_logk=lf_logk,
+        delta_head=head,
+        basis=basis,
+        log_rho=log_rho,
+        z_rc=z_rc,
+        logk_rc=logk_rc,
+        rc_vals=rc_vals,
+    )
     return mf, eval_logk
 
 
 def test_mf_forward_shapes_positive_jit_vmap(lf_backbone):
     mf, eval_logk = _build_mf(lf_backbone)
     d = lf_backbone[0]
-    x = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
+    x = jnp.asarray(d["x"][0])
+    tau0 = jnp.asarray(d["tau0"][0])
     P = mf.P_mf(x, tau0)
     assert P.shape == (4, len(eval_logk))
-    assert np.all(np.asarray(P) > 0)                 # strictly positive
+    assert np.all(np.asarray(P) > 0)  # strictly positive
     assert P.dtype == jnp.float64
     # jit + vmap
-    xs = jnp.asarray(d["x"][:5]); ts = jnp.asarray(d["tau0"][:5])
+    xs = jnp.asarray(d["x"][:5])
+    ts = jnp.asarray(d["tau0"][:5])
     Pv = jax.jit(jax.vmap(mf.P_mf))(xs, ts)
     assert Pv.shape == (5, 4, len(eval_logk))
     assert np.all(np.isfinite(np.asarray(Pv)))
@@ -298,7 +320,8 @@ def test_mf_logratio_additive_identity(lf_backbone):
     equivalence is exact in code."""
     mf, _ = _build_mf(lf_backbone)
     d = lf_backbone[0]
-    x = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
+    x = jnp.asarray(d["x"][0])
+    tau0 = jnp.asarray(d["tau0"][0])
     f_lf = jnp.exp(mf.lf_logP(x, tau0))
     g = mf.g(x, tau0)
     z_phys = x[9] * (Z_LIMITS[1] - Z_LIMITS[0]) + Z_LIMITS[0]
@@ -314,7 +337,8 @@ def test_mf_res_corr_on_off(lf_backbone):
     class-independent, and the table genuinely suppresses high-k at z=3 (~10%)."""
     mf, eval_logk = _build_mf(lf_backbone)
     d = lf_backbone[0]
-    x = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
+    x = jnp.asarray(d["x"][0])
+    tau0 = jnp.asarray(d["tau0"][0])
     P_with = mf.P_mf(x, tau0, apply_res_corr=True)
     P_no = mf.P_mf(x, tau0, apply_res_corr=False)
     z_phys = float(x[9]) * (Z_LIMITS[1] - Z_LIMITS[0]) + Z_LIMITS[0]
@@ -336,12 +360,14 @@ def test_mf_jit_patterns(lf_backbone):
     unhashable as a static arg) -- documented in P_mf's docstring."""
     mf, _ = _build_mf(lf_backbone)
     d = lf_backbone[0]
-    x = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
+    x = jnp.asarray(d["x"][0])
+    tau0 = jnp.asarray(d["tau0"][0])
     P_eager = np.asarray(mf.P_mf(x, tau0))
 
     @eqx.filter_jit
     def fwd(m, xx, tt):
         return m.P_mf(xx, tt)
+
     assert np.allclose(np.asarray(fwd(mf, x, tau0)), P_eager, rtol=0, atol=1e-12)
 
     jfwd = jax.jit(lambda xx, tt: mf.P_mf(xx, tt))
@@ -353,7 +379,8 @@ def test_mf_second_order_grad_for_nuts(lf_backbone):
     theta must be finite."""
     mf, _ = _build_mf(lf_backbone)
     d = lf_backbone[0]
-    x = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
+    x = jnp.asarray(d["x"][0])
+    tau0 = jnp.asarray(d["tau0"][0])
     f = lambda th: mf.logP_mf(jnp.concatenate([th, x[9:10]]), tau0).sum()
     hvp = jax.grad(lambda th: jax.grad(f)(th).sum())(x[:9])
     assert np.all(np.isfinite(np.asarray(hvp)))
@@ -364,7 +391,8 @@ def test_mf_hmc_differentiable_in_theta(lf_backbone):
     differentiable wrt the 9 cosmology params (the HMC requirement)."""
     mf, _ = _build_mf(lf_backbone)
     d = lf_backbone[0]
-    x0 = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
+    x0 = jnp.asarray(d["x"][0])
+    tau0 = jnp.asarray(d["tau0"][0])
 
     def logP_of_theta(theta9):
         x = jnp.concatenate([theta9, x0[9:10]])
@@ -385,16 +413,17 @@ def test_mf_lf_backbone_is_frozen(lf_backbone):
     weights can never be perturbed regardless of how the MF is differentiated."""
     mf, _ = _build_mf(lf_backbone)
     d = lf_backbone[0]
-    x = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
+    x = jnp.asarray(d["x"][0])
+    tau0 = jnp.asarray(d["tau0"][0])
 
     grad = eqx.filter_grad(lambda m: m.P_mf(x, tau0).sum())(mf)
-    lf_leaves = [np.asarray(l) for l in jax.tree_util.tree_leaves(grad.lf_model)
-                 if eqx.is_array(l)]
-    assert lf_leaves and all(np.all(l == 0.0) for l in lf_leaves)   # frozen -> 0 grad
-    head_leaves = [np.asarray(l) for l in jax.tree_util.tree_leaves(grad.delta_head)
-                   if eqx.is_array(l)]
+    lf_leaves = [np.asarray(l) for l in jax.tree_util.tree_leaves(grad.lf_model) if eqx.is_array(l)]
+    assert lf_leaves and all(np.all(l == 0.0) for l in lf_leaves)  # frozen -> 0 grad
+    head_leaves = [
+        np.asarray(l) for l in jax.tree_util.tree_leaves(grad.delta_head) if eqx.is_array(l)
+    ]
     assert head_leaves and all(np.all(np.isfinite(l)) for l in head_leaves)
-    assert any(np.any(l != 0.0) for l in head_leaves)              # head IS trained
+    assert any(np.any(l != 0.0) for l in head_leaves)  # head IS trained
 
 
 # --------------------------------------------------------------------------- #
@@ -412,16 +441,19 @@ def _build_mf_mode(lf_backbone, mode, n_basis=4, log_rho=None):
         # make it z-varying (per-row offset) so the z-dependence is exercised.
         z_tab = np.array([2.5, 3.0, 4.0])
         tab = 0.1 * np.ones((3, MF.N_CLASSES, K))
-        tab += np.array([0.0, 0.05, 0.12])[:, None, None]   # distinct per-z trend
+        tab += np.array([0.0, 0.05, 0.12])[:, None, None]  # distinct per-z trend
         head = MF.FixedMeanHead(tab, z_tab, n_basis=n_basis)
     elif mode == "linear":
-        head = MF.GlobalLinearHead(in_dim=11, n_classes=MF.N_CLASSES,
-                                   n_basis=n_basis, key=jax.random.PRNGKey(5))
+        head = MF.GlobalLinearHead(
+            in_dim=11, n_classes=MF.N_CLASSES, n_basis=n_basis, key=jax.random.PRNGKey(5)
+        )
     elif mode == "mlp":
-        head = MF.DeltaHead(n_basis=n_basis, in_dim=11, width=8, n_layers=1,
-                            key=jax.random.PRNGKey(3))
-    mf = MF.build_multifidelity(model, norm, lf_logk, head, eval_logk=eval_logk,
-                                log_rho=log_rho, n_basis=n_basis)
+        head = MF.DeltaHead(
+            n_basis=n_basis, in_dim=11, width=8, n_layers=1, key=jax.random.PRNGKey(3)
+        )
+    mf = MF.build_multifidelity(
+        model, norm, lf_logk, head, eval_logk=eval_logk, log_rho=log_rho, n_basis=n_basis
+    )
     return mf, eval_logk
 
 
@@ -430,6 +462,7 @@ def test_default_delta_mode_is_none():
     model): MultiFidelity's __init__ default and build_multifidelity's inferred
     mode for a FixedMeanHead are both 'none'."""
     import inspect
+
     sig = inspect.signature(MF.MultiFidelity.__init__)
     assert sig.parameters["delta_mode"].default == "none"
     assert MF._HEAD_MODE["FixedMeanHead"] == "none"
@@ -443,8 +476,19 @@ def test_mf_invalid_delta_mode_raises(lf_backbone):
     z_rc, logk_rc, rc_vals = MF.load_res_corr()
     head = MF.FixedMeanHead(np.zeros((2, MF.N_CLASSES, 20)), np.array([2.5, 4.0]))
     with pytest.raises(ValueError, match="delta_mode"):
-        MF.MultiFidelity(model, norm, eval_logk, lf_logk, head, basis,
-                         np.zeros(20), z_rc, logk_rc, rc_vals, delta_mode="bogus")
+        MF.MultiFidelity(
+            model,
+            norm,
+            eval_logk,
+            lf_logk,
+            head,
+            basis,
+            np.zeros(20),
+            z_rc,
+            logk_rc,
+            rc_vals,
+            delta_mode="bogus",
+        )
 
 
 def test_fixed_mean_head_is_theta_independent(lf_backbone):
@@ -455,12 +499,16 @@ def test_fixed_mean_head_is_theta_independent(lf_backbone):
     mf, _ = _build_mf_mode(lf_backbone, "none")
     d = lf_backbone[0]
     # two rows with different params but we pin the SAME z_unit/tau0 to isolate theta.
-    x0 = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
-    theta_a = x0.at[:9].set(0.2); theta_b = x0.at[:9].set(0.8)   # same z (x[9]), diff theta
-    g_a = np.asarray(mf.g(theta_a, tau0)); g_b = np.asarray(mf.g(theta_b, tau0))
-    assert np.allclose(g_a, g_b, atol=1e-12)            # theta-independent
+    x0 = jnp.asarray(d["x"][0])
+    tau0 = jnp.asarray(d["tau0"][0])
+    theta_a = x0.at[:9].set(0.2)
+    theta_b = x0.at[:9].set(0.8)  # same z (x[9]), diff theta
+    g_a = np.asarray(mf.g(theta_a, tau0))
+    g_b = np.asarray(mf.g(theta_b, tau0))
+    assert np.allclose(g_a, g_b, atol=1e-12)  # theta-independent
     # but g DOES vary with z (the z-resolved fixed mean table).
-    z_lo = x0.at[9].set(0.1); z_hi = x0.at[9].set(0.9)
+    z_lo = x0.at[9].set(0.1)
+    z_hi = x0.at[9].set(0.9)
     assert not np.allclose(np.asarray(mf.g(z_lo, tau0)), np.asarray(mf.g(z_hi, tau0)))
     # the delta-head coeffs are zeros (no basis / no learned theta term).
     cond = MF.make_cond(x0, tau0)
@@ -473,19 +521,21 @@ def test_fixed_mean_head_g_equals_gbar(lf_backbone):
     recovers the per-z fixed mean exactly."""
     K = 20
     eval_logk = np.linspace(np.log10(1e-3), np.log10(0.15), K)
-    log_rho = np.linspace(-0.3, 0.5, K)                 # nonzero per-k rho
+    log_rho = np.linspace(-0.3, 0.5, K)  # nonzero per-k rho
     d, model, norm, lf_logk = lf_backbone
     z_tab = np.array([2.5, 3.0, 4.0])
     gbar = 0.05 + 0.02 * np.arange(K)[None, None, :] * np.ones((3, MF.N_CLASSES, 1))
-    tab = gbar - log_rho[None, None, :]                 # FixedMeanHead stores gbar - rho
+    tab = gbar - log_rho[None, None, :]  # FixedMeanHead stores gbar - rho
     head = MF.FixedMeanHead(tab, z_tab)
-    mf = MF.build_multifidelity(model, norm, lf_logk, head, eval_logk=eval_logk,
-                                log_rho=log_rho)
-    x = jnp.asarray(d["x"][0]).at[9].set(
-        float((3.0 - MF.Z_LIMITS[0]) / (MF.Z_LIMITS[1] - MF.Z_LIMITS[0])))  # z=3.0
+    mf = MF.build_multifidelity(model, norm, lf_logk, head, eval_logk=eval_logk, log_rho=log_rho)
+    x = (
+        jnp.asarray(d["x"][0])
+        .at[9]
+        .set(float((3.0 - MF.Z_LIMITS[0]) / (MF.Z_LIMITS[1] - MF.Z_LIMITS[0])))
+    )  # z=3.0
     tau0 = jnp.asarray(d["tau0"][0])
-    g = np.asarray(mf.g(x, tau0))                        # (4,K)
-    assert np.allclose(g, gbar[1], atol=1e-9)           # == gbar at z=3.0 (table row 1)
+    g = np.asarray(mf.g(x, tau0))  # (4,K)
+    assert np.allclose(g, gbar[1], atol=1e-9)  # == gbar at z=3.0 (table row 1)
 
 
 @pytest.mark.parametrize("mode", ["none", "linear", "mlp"])
@@ -495,7 +545,8 @@ def test_mf_mode_forward_positive_and_hmc_differentiable(lf_backbone, mode):
     mf, eval_logk = _build_mf_mode(lf_backbone, mode)
     assert mf.delta_mode == mode
     d = lf_backbone[0]
-    x0 = jnp.asarray(d["x"][0]); tau0 = jnp.asarray(d["tau0"][0])
+    x0 = jnp.asarray(d["x"][0])
+    tau0 = jnp.asarray(d["tau0"][0])
     P = np.asarray(mf.P_mf(x0, tau0))
     assert P.shape == (4, len(eval_logk)) and np.all(P > 0)
     # grad wrt theta finite
@@ -513,16 +564,15 @@ def test_mf_mode_forward_positive_and_hmc_differentiable(lf_backbone, mode):
 def test_global_linear_head_amp_is_linear(lf_backbone):
     """delta_mode='linear' (GlobalLinearHead): the amplitude is a SINGLE linear
     functional of the conditioning, and equals the bias b at the unit-cube centre."""
-    head = MF.GlobalLinearHead(in_dim=11, n_classes=4, n_basis=4,
-                               key=jax.random.PRNGKey(0))
+    head = MF.GlobalLinearHead(in_dim=11, n_classes=4, n_basis=4, key=jax.random.PRNGKey(0))
     # zero out random init then set a known linear map.
-    head = eqx.tree_at(lambda h: (h.w, h.b),
-                       head, (jnp.arange(11.0), jnp.asarray(0.3)))
+    head = eqx.tree_at(lambda h: (h.w, h.b), head, (jnp.arange(11.0), jnp.asarray(0.3)))
     centre = jnp.full(11, 0.5)
-    assert np.isclose(float(head.amp(centre)), 0.3)     # amp == b at centre
+    assert np.isclose(float(head.amp(centre)), 0.3)  # amp == b at centre
     # linearity: amp(2x - centre) - amp(centre) == 2*(amp(x) - amp(centre))? Check
     # plain linearity of amp(cond) = w.(cond-0.5)+b.
-    c1 = jnp.full(11, 0.7); c2 = jnp.full(11, 0.9)
+    c1 = jnp.full(11, 0.7)
+    c2 = jnp.full(11, 0.9)
     lhs = float(head.amp(c1) + head.amp(c2) - 2 * head.amp(centre))
     rhs = float(head.amp(c1 + c2 - centre) - head.amp(centre))
     assert np.isclose(lhs, rhs)
@@ -531,14 +581,19 @@ def test_global_linear_head_amp_is_linear(lf_backbone):
 def test_train_global_linear_head_reduces_loss_and_ap_prior(tmp_path):
     """train_global_linear_head fits and reduces the loss; the optional A_p-direction
     prior pulls the linear weight toward the A_p axis (orthogonal component shrinks)."""
-    lfp = tmp_path / "lf.h5"; hrp = tmp_path / "hr.h5"
+    lfp = tmp_path / "lf.h5"
+    hrp = tmp_path / "hr.h5"
     write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
     write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
-    lf = _sanitize_unit_cube(load_cache(lfp)); hr = _sanitize_unit_cube(load_cache(hrp))
+    lf = _sanitize_unit_cube(
+        load_cache_historical(lfp, reason="test: a cache in the pre-lineage 3.3 format")
+    )
+    hr = _sanitize_unit_cube(
+        load_cache_historical(hrp, reason="test: a cache in the pre-lineage 3.3 format")
+    )
     pairs = MF.match_hr_to_lf(lf, hr)
     norm = fit_target_norm(lf, np.arange(len(lf["z_grid"])))
-    model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4,
-                     key=jax.random.PRNGKey(0))
+    model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4, key=jax.random.PRNGKey(0))
     lf_logk = np.log10(lf["kfkms"][0])
     k_eval, eval_logk = MF.build_eval_grid(hr, k_max=0.05, n_k=16)
     tg = MF.measure_delta_targets(lf, hr, model, norm, lf_logk, eval_logk, pairs)
@@ -546,31 +601,56 @@ def test_train_global_linear_head_reduces_loss_and_ap_prior(tmp_path):
     log_rho = np.nan_to_num(MF.mean_log_ratio_rho(tg, eval_logk), nan=0.0)
 
     head, hist = MF.train_global_linear_head(
-        tg, basis, log_rho, eval_logk, n_basis=4, epochs=80, lr=3e-3,
-        coeff_l2=1e-2, mean_prior_w=1e-2)
+        tg,
+        basis,
+        log_rho,
+        eval_logk,
+        n_basis=4,
+        epochs=80,
+        lr=3e-3,
+        coeff_l2=1e-2,
+        mean_prior_w=1e-2,
+    )
     assert hist["loss"][-1] < hist["loss"][0]
 
     # with an A_p-direction prior, the weight's component orthogonal to ap_dir shrinks.
-    ap_dir = np.zeros(11); ap_dir[0] = 1.0              # say param 0 is the A_p axis
+    ap_dir = np.zeros(11)
+    ap_dir[0] = 1.0  # say param 0 is the A_p axis
     head_p, _ = MF.train_global_linear_head(
-        tg, basis, log_rho, eval_logk, n_basis=4, epochs=120, lr=3e-3,
-        coeff_l2=1e-2, mean_prior_w=1e-2, ap_dir=ap_dir, ap_prior_w=1e2)
+        tg,
+        basis,
+        log_rho,
+        eval_logk,
+        n_basis=4,
+        epochs=120,
+        lr=3e-3,
+        coeff_l2=1e-2,
+        mean_prior_w=1e-2,
+        ap_dir=ap_dir,
+        ap_prior_w=1e2,
+    )
     w = np.asarray(head_p.w)
-    perp = w.copy(); perp[0] = 0.0                       # component orthogonal to ap_dir
-    assert np.linalg.norm(perp) < 1e-2                   # strongly suppressed by the prior
+    perp = w.copy()
+    perp[0] = 0.0  # component orthogonal to ap_dir
+    assert np.linalg.norm(perp) < 1e-2  # strongly suppressed by the prior
 
 
 def test_build_default_head_builds_fixed_mean(tmp_path):
     """build_default_head returns a FixedMeanHead whose table is the per-z fixed
     mean minus log_rho, and build_multifidelity infers delta_mode='none'."""
-    lfp = tmp_path / "lf.h5"; hrp = tmp_path / "hr.h5"
+    lfp = tmp_path / "lf.h5"
+    hrp = tmp_path / "hr.h5"
     write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
     write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
-    lf = _sanitize_unit_cube(load_cache(lfp)); hr = _sanitize_unit_cube(load_cache(hrp))
+    lf = _sanitize_unit_cube(
+        load_cache_historical(lfp, reason="test: a cache in the pre-lineage 3.3 format")
+    )
+    hr = _sanitize_unit_cube(
+        load_cache_historical(hrp, reason="test: a cache in the pre-lineage 3.3 format")
+    )
     pairs = MF.match_hr_to_lf(lf, hr)
     norm = fit_target_norm(lf, np.arange(len(lf["z_grid"])))
-    model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4,
-                     key=jax.random.PRNGKey(0))
+    model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4, key=jax.random.PRNGKey(0))
     lf_logk = np.log10(lf["kfkms"][0])
     k_eval, eval_logk = MF.build_eval_grid(hr, k_max=0.05, n_k=16)
     tg = MF.measure_delta_targets(lf, hr, model, norm, lf_logk, eval_logk, pairs)
@@ -578,8 +658,9 @@ def test_build_default_head_builds_fixed_mean(tmp_path):
 
     head = MF.build_default_head(tg, log_rho, n_basis=4)
     assert isinstance(head, MF.FixedMeanHead)
-    mf = MF.build_multifidelity(model, norm, lf_logk, head, eval_logk=eval_logk,
-                                log_rho=log_rho, n_basis=4)
+    mf = MF.build_multifidelity(
+        model, norm, lf_logk, head, eval_logk=eval_logk, log_rho=log_rho, n_basis=4
+    )
     assert mf.delta_mode == "none"
     # forward is finite & positive
     P = np.asarray(mf.P_mf(jnp.asarray(lf["x"][0]), jnp.asarray(lf["tau0"][0])))
@@ -596,18 +677,25 @@ def test_match_and_measure_and_train(tmp_path):
     HR is the SAME design points as LF (same seed + same n_k so the fixture's RNG
     stream aligns and every HR row matches an LF row exactly on the (params, z,
     alpha) key) -- the real HR cache likewise hits exact LF design points."""
-    lfp = tmp_path / "lf.h5"; hrp = tmp_path / "hr.h5"
-    write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
-    write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=12, seed=7)
-    lf = _sanitize_unit_cube(load_cache(lfp))
-    hr = _sanitize_unit_cube(load_cache(hrp))
+    lfp = tmp_path / "lf.h5"
+    hrp = tmp_path / "hr.h5"
+    # 172 true box modes so the synthetic band reaches the 0.05 s/km eval grid (the fixture keeps the first n_k modes).
+    write_synthetic_cache(lfp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=172, seed=7)
+    write_synthetic_cache(hrp, n_sims=4, snaps_per_sim=2, n_alpha=4, n_k=172, seed=7)
+    lf = _sanitize_unit_cube(
+        load_cache_historical(lfp, reason="test: a cache in the pre-lineage 3.3 format")
+    )
+    hr = _sanitize_unit_cube(
+        load_cache_historical(hrp, reason="test: a cache in the pre-lineage 3.3 format")
+    )
     pairs = MF.match_hr_to_lf(lf, hr)
-    assert len(pairs) == len(hr["z_grid"])           # all HR rows match an LF row
+    assert len(pairs) == len(hr["z_grid"])  # all HR rows match an LF row
 
     norm = fit_target_norm(lf, np.arange(len(lf["z_grid"])))
-    model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4,
-                     key=jax.random.PRNGKey(0))
-    lf_logk = np.log10(lf["kfkms"][0])
+    model = Emulator(in_dim=10, n_k=lf["P_tier_p"].shape[1], n_basis=4, key=jax.random.PRNGKey(0))
+    lf_logk = np.log10(
+        lf["kfkms"][0]
+    )  # PRE-2026-10 INTERFACE (row-0 label of the MF mapping); rebuilt at gate D
     # eval grid stays within the synthetic LF k-support (no extrap needed here).
     k_eval, eval_logk = MF.build_eval_grid(hr, k_max=0.05, n_k=16)
     tg = MF.measure_delta_targets(lf, hr, model, norm, lf_logk, eval_logk, pairs)
@@ -619,14 +707,25 @@ def test_match_and_measure_and_train(tmp_path):
     assert log_rho.shape == (16,) and np.all(np.isfinite(log_rho))
 
     head, hist = MF.train_delta_head(
-        tg, basis, log_rho, eval_logk, n_basis=4, width=8, n_layers=1,
-        epochs=60, lr=3e-3, coeff_l2=1e-2, mean_prior_w=1e-2)
-    assert hist["loss"][-1] < hist["loss"][0]        # training reduced the loss
+        tg,
+        basis,
+        log_rho,
+        eval_logk,
+        n_basis=4,
+        width=8,
+        n_layers=1,
+        epochs=60,
+        lr=3e-3,
+        coeff_l2=1e-2,
+        mean_prior_w=1e-2,
+    )
+    assert hist["loss"][-1] < hist["loss"][0]  # training reduced the loss
     assert np.all(np.isfinite(hist["loss"]))
 
 
 def test_build_eval_grid_caps_at_kodiaq():
     import h5py
+
     # build_eval_grid only reads k_max/n_k, not the hr cache contents.
     k_eval, eval_logk = MF.build_eval_grid(hr=None, k_max=0.2, n_k=32)
     assert k_eval.shape == (32,) and np.isclose(k_eval[-1], 0.2)
@@ -655,33 +754,48 @@ def _synth_resolved_targets(K=14, n_z=5, n_rung=4, n_sim=6, seed=0):
     z_unit = (z_phys - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
     rungs = np.arange(n_rung)
     # per-z tau0 ladder: rung sets the base mean-flux level, z scales it up (monotone).
-    tau_by_z = (0.66 + 0.67 * rungs[None, :] / max(n_rung - 1, 1)) * \
-               (0.5 + 0.4 * (z_phys[:, None] - 2.2))                  # (nz,nrung)
+    tau_by_z = (0.66 + 0.67 * rungs[None, :] / max(n_rung - 1, 1)) * (
+        0.5 + 0.4 * (z_phys[:, None] - 2.2)
+    )  # (nz,nrung)
     u = 2 * (eval_logk - eval_logk.min()) / (eval_logk.max() - eval_logk.min()) - 1
     # separable z-trend (rising tilt, larger at low z), rung-trend, + rank-1 sign-flip.
-    gbar_z = (0.06 - 0.012 * (z_phys[:, None] - 2.2)) * (1 + 0.5 * u)[None, :]   # (nz,K)
-    gtau = 0.015 * (rungs[:, None] - rungs.mean()) * (1 + 0.3 * u)[None, :]      # (nr,K)
-    a_k = 0.02 * (1.0 + u)                                                       # (K,)
-    u_z = (z_phys - z_phys.mean()) / np.ptp(z_phys)                            # (nz,)
-    u_tau = (rungs - rungs.mean()) / np.ptp(rungs)                              # (nr,)
-    truth = (gbar_z[:, None, :] + gtau[None, :, :]
-             + a_k[None, None, :] * u_z[:, None, None] * u_tau[None, :, None])  # (nz,nr,K)
+    gbar_z = (0.06 - 0.012 * (z_phys[:, None] - 2.2)) * (1 + 0.5 * u)[None, :]  # (nz,K)
+    gtau = 0.015 * (rungs[:, None] - rungs.mean()) * (1 + 0.3 * u)[None, :]  # (nr,K)
+    a_k = 0.02 * (1.0 + u)  # (K,)
+    u_z = (z_phys - z_phys.mean()) / np.ptp(z_phys)  # (nz,)
+    u_tau = (rungs - rungs.mean()) / np.ptp(rungs)  # (nr,)
+    truth = (
+        gbar_z[:, None, :]
+        + gtau[None, :, :]
+        + a_k[None, None, :] * u_z[:, None, None] * u_tau[None, :, None]
+    )  # (nz,nr,K)
 
     X, T0, AI, G = [], [], [], []
     for s in range(n_sim):
         for zi in range(n_z):
             for ri in range(n_rung):
                 x = np.zeros(10)
-                x[0] = rng.uniform(0.1, 0.9)        # a dummy theta (must be ignored)
+                x[0] = rng.uniform(0.1, 0.9)  # a dummy theta (must be ignored)
                 x[9] = z_unit[zi]
-                noise = rng.normal(0, 0.006, size=K)   # ~0.6% 6-sim noise
+                noise = rng.normal(0, 0.006, size=K)  # ~0.6% 6-sim noise
                 gC0 = truth[zi, ri] + noise
-                g4 = np.tile(gC0[None, :], (4, 1))     # class-independent rho
-                X.append(x); T0.append(tau_by_z[zi, ri]); AI.append(ri); G.append(g4)
-    return (dict(x=np.asarray(X), tau0=np.asarray(T0), alpha_idx=np.asarray(AI),
-                 g=np.asarray(G), hr_row=np.arange(len(X)), lf_row=np.arange(len(X))),
-            eval_logk, dict(truth=truth, z_phys=z_phys, rungs=rungs,
-                            tau_by_z=tau_by_z, eval_logk=eval_logk))
+                g4 = np.tile(gC0[None, :], (4, 1))  # class-independent rho
+                X.append(x)
+                T0.append(tau_by_z[zi, ri])
+                AI.append(ri)
+                G.append(g4)
+    return (
+        dict(
+            x=np.asarray(X),
+            tau0=np.asarray(T0),
+            alpha_idx=np.asarray(AI),
+            g=np.asarray(G),
+            hr_row=np.arange(len(X)),
+            lf_row=np.arange(len(X)),
+        ),
+        eval_logk,
+        dict(truth=truth, z_phys=z_phys, rungs=rungs, tau_by_z=tau_by_z, eval_logk=eval_logk),
+    )
 
 
 def test_resolved_fixed_mean_table_decomposition_shapes():
@@ -691,7 +805,8 @@ def test_resolved_fixed_mean_table_decomposition_shapes():
     log_rho = np.nan_to_num(MF.mean_log_ratio_rho(tg, eval_logk), nan=0.0)
     comp = MF.fixed_mean_table_resolved(tg, log_rho)
     K = len(eval_logk)
-    nz = len(truth["z_phys"]); nt = len(truth["rungs"])
+    nz = len(truth["z_phys"])
+    nt = len(truth["rungs"])
     assert comp["gbar_z_tab"].shape == (nz, MF.N_CLASSES, K)
     assert comp["gtau_tab"].shape == (nt, MF.N_CLASSES, K)
     assert comp["a_k"].shape == (MF.N_CLASSES, K)
@@ -699,8 +814,8 @@ def test_resolved_fixed_mean_table_decomposition_shapes():
     assert comp["z_tab"].shape == (nz,) and comp["tau_tab"].shape == (nt,)
     assert comp["tau_by_z"].shape == (nz, nt)
     assert np.all(np.diff(comp["z_tab"]) > 0)
-    assert np.all(np.diff(comp["tau_tab"]) > 0)               # rung index axis
-    assert np.all(np.diff(comp["tau_by_z"], axis=1) > 0)      # tau0 monotone in rung
+    assert np.all(np.diff(comp["tau_tab"]) > 0)  # rung index axis
+    assert np.all(np.diff(comp["tau_by_z"], axis=1) > 0)  # tau0 monotone in rung
 
 
 def test_resolved_head_g_depends_on_tau0_and_is_differentiable():
@@ -721,7 +836,7 @@ def test_resolved_head_g_depends_on_tau0_and_is_differentiable():
     # finite, NONZERO gradient wrt tau0
     dgt = float(jax.grad(g_of_tau)(jnp.asarray(1.0)))
     assert np.isfinite(dgt)
-    assert abs(dgt) > 1e-6                              # NONZERO (vs pooled head == 0)
+    assert abs(dgt) > 1e-6  # NONZERO (vs pooled head == 0)
     # g actually differs at two different tau0
     cond_lo = MF.make_cond(x, jnp.asarray(0.7))
     cond_hi = MF.make_cond(x, jnp.asarray(1.3))
@@ -743,7 +858,7 @@ def test_resolved_head_reproduces_rho_to_6sim_noise():
         z_unit = (zp - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
         x = jnp.zeros(10).at[9].set(float(z_unit))
         for ri in range(len(truth["rungs"])):
-            t0 = truth["tau_by_z"][zi, ri]          # physical tau0 of this rung at z
+            t0 = truth["tau_by_z"][zi, ri]  # physical tau0 of this rung at z
             cond = MF.make_cond(x, jnp.asarray(float(t0)))
             g = np.asarray(log_rho[None, :] + head(cond, basis))[0]  # class 0
             errs.append(np.abs(g - truth["truth"][zi, ri]))
@@ -761,8 +876,7 @@ def test_resolved_head_clamped_no_nan_over_edges():
     # query z far below/above the table and tau0 far outside the measured ladder
     for z_unit in (-0.5, 0.0, 0.5, 1.5):
         for t0 in (0.01, 0.66, 1.0, 1.33, 5.0):
-            cond = MF.make_cond(jnp.zeros(10).at[9].set(float(z_unit)),
-                                jnp.asarray(float(t0)))
+            cond = MF.make_cond(jnp.zeros(10).at[9].set(float(z_unit)), jnp.asarray(float(t0)))
             g = np.asarray(head(cond, basis))
             assert np.all(np.isfinite(g)), (z_unit, t0)
     # clamp value at the low tau0 edge == clamp value FAR below it (constant-edge):
@@ -798,7 +912,7 @@ def test_pooled_fixed_mean_head_still_tau0_invariant(lf_backbone):
     x0 = jnp.asarray(d["x"][0])
     f = lambda t0: mf.g(x0, t0).sum()
     dgt = float(jax.grad(f)(jnp.asarray(1.0)))
-    assert abs(dgt) < 1e-12                              # pooled head: tau0-independent
+    assert abs(dgt) < 1e-12  # pooled head: tau0-independent
 
 
 # --------------------------------------------------------------------------- #
@@ -811,24 +925,30 @@ def _synth_dndx_targets(n_z=6, n_sim=5, seed=1):
     rng = np.random.default_rng(seed)
     z = np.linspace(2.2, 5.0, n_z)
     # a smooth z-resolved ratio per class (LLS falls through 1, sub/DLA stay >1)
-    truth = np.stack([
-        1.30 - 0.07 * (z - 2.2),                 # LLS: 1.30 -> ~1.1
-        1.29 - 0.02 * (z - 2.2),                 # subDLA
-        1.13 + 0.02 * (z - 2.2),                 # DLA
-    ], axis=1)                                    # (nz,3)
+    truth = np.stack(
+        [
+            1.30 - 0.07 * (z - 2.2),  # LLS: 1.30 -> ~1.1
+            1.29 - 0.02 * (z - 2.2),  # subDLA
+            1.13 + 0.02 * (z - 2.2),  # DLA
+        ],
+        axis=1,
+    )  # (nz,3)
     L, H = [], []
     zl, zh = [], []
     pl, ph = [], []
     for s in range(n_sim):
-        base = rng.uniform(0.3, 0.6, size=3)      # per-sim LF baseline incidence
+        base = rng.uniform(0.3, 0.6, size=3)  # per-sim LF baseline incidence
         ns = rng.uniform(0.85, 0.98)
         for zi in range(n_z):
             lf_dndx = base * (1 + 0.1 * (z[zi] - 2.2))
-            noise = rng.normal(0, 0.02, size=3)   # ~2% 6-sim noise
+            noise = rng.normal(0, 0.02, size=3)  # ~2% 6-sim noise
             hr_dndx = lf_dndx * truth[zi] * (1 + noise)
-            L.append(lf_dndx); H.append(hr_dndx)
-            zl.append(z[zi]); zh.append(z[zi])
-            pl.append(ns); ph.append(ns)
+            L.append(lf_dndx)
+            H.append(hr_dndx)
+            zl.append(z[zi])
+            zh.append(z[zi])
+            pl.append(ns)
+            ph.append(ns)
     lf = dict(dndx=np.asarray(L), z=np.asarray(zl), ns=np.asarray(pl))
     hr = dict(dndx=np.asarray(H), z=np.asarray(zh), ns=np.asarray(ph))
     return lf, hr, z, truth
@@ -886,4 +1006,4 @@ def test_dndx_res_factor_differentiable_in_z_and_clamped():
         assert np.all(np.isfinite(fac)) and np.all(fac > 0)
     lo = np.asarray(MF.dndx_res_factor(tab, jnp.asarray(float(z[0]))))
     below = np.asarray(MF.dndx_res_factor(tab, jnp.asarray(0.0)))
-    assert np.allclose(lo, below)                       # constant-edge extrapolation
+    assert np.allclose(lo, below)  # constant-edge extrapolation

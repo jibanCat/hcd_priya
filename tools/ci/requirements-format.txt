@@ -1,0 +1,10 @@
+# The formatter of the code style (pyproject.toml [tool.black]), every package pinned (CPython 3.11). The CI job
+# "Format" installs exactly this and runs `python -m black --check .`; contributors install it the same way
+# (CONTRIBUTING.md). Change the black pin only in a commit that also reformats the tree with the new version.
+black==26.10.1
+click==8.5.1
+mypy_extensions==1.2.0
+packaging==26.3
+pathspec==1.1.1
+platformdirs==4.14.5
+pytokens==0.4.1

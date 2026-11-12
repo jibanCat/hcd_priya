@@ -1,4 +1,9 @@
-"""v3.3 cache loader for the Phase-2b emulator. Returns numpy arrays (host side).
+"""Training-cache loader for the Phase-2b emulator. Returns numpy arrays (host side).
+
+``load_cache`` is the release loader: cache format 3.4 only, through ``hcd_analysis.tau0_cache.read_cache`` (a
+well-formed lineage record, the payload digest, release eligibility); it also returns the record and the file's
+sha256. A v3.3 cache (written before caches carried lineage) is historical: ``load_cache_historical(path,
+reason=...)`` reads it exactly as the v3.3 loader did.
 
 15->4 coarse-class collapse, tau0 coordinate, native-Nyquist NaN masks, and the
 analytic 1/n_c sample-variance weights. See spec sec.4, sec.7, sec.9.
@@ -9,17 +14,25 @@ cache stores finite zeros for empty classes), which keeps the structural sum
 via ``0·NaN``). Only a bin that is NaN across all fine sub-bins (above native
 Nyquist) stays NaN, so it can be masked out downstream.
 """
+
 from __future__ import annotations
+import logging
+import os
 import warnings
 import h5py, numpy as np
 
-COARSE_SLICES = (slice(0, 1), slice(1, 8), slice(8, 13), slice(13, 15))
-COARSE_NAMES = ("clean", "LLS", "subDLA", "DLA")
+from .. import lineage as _L
+from .. import tau0_cache as _T
+
+# the 15 -> 4 coarse collapse lives with the cache format (jax-free, shared with the carry tool's checks)
+from ..tau0_cache import COARSE_SLICES, COARSE_NAMES, _collapse_counts, _collapse_p1d  # noqa: F401
+
+_log = logging.getLogger(__name__)
 
 # --- Unit-cube input normalization (spec sec.10 / preprocessing audit) --------
 # PRIYA's design box for the production grid, pulled verbatim from the saved
 # emulator config that THIS cache reproduces:
-#   /home/mfho/lya_emulator_full/kodiaq_2_2_4_6-48-48/emulator_params.json
+#   <lya_emulator_full checkout>/kodiaq_2_2_4_6-48-48/emulator_params.json
 #   ("param_names":{ns:0,Ap:1,herei:2,heref:3,alphaq:4,hub:5,omegamh2:6,
 #                    hireionz:7,bhfeedback:8}, "param_limits":[...])
 # This is the actual Emulator.param_limits serialized for this grid (it widens
@@ -28,41 +41,47 @@ COARSE_NAMES = ("clean", "LLS", "subDLA", "DLA")
 # Aligned BY NAME to OUR cache param order
 # [ns, Ap, herei, heref, alphaq, hub, omegamh2, hireionz, bhfeedback]
 # (== PRIYA's param_names order, so the alignment is the identity).
-PARAM_LIMITS = np.array([
-    [0.8,    1.05],     # ns        (emulator_params.json param_limits[0])
-    [1.2e-9, 2.6e-9],   # Ap        (param_limits[1])
-    [3.5,    4.5],      # herei     (param_limits[2])
-    [2.2,    3.2],      # heref     (param_limits[3])
-    [1.3,    3.0],      # alphaq    (param_limits[4])
-    [0.65,   0.75],     # hub       (param_limits[5])
-    [0.14,   0.146],    # omegamh2  (param_limits[6])
-    [6.5,    8.0],      # hireionz  (param_limits[7])
-    [0.03,   0.07],     # bhfeedback(param_limits[8])
-], dtype=np.float64)
+PARAM_LIMITS = np.array(
+    [
+        [0.8, 1.05],  # ns        (emulator_params.json param_limits[0])
+        [1.2e-9, 2.6e-9],  # Ap        (param_limits[1])
+        [3.5, 4.5],  # herei     (param_limits[2])
+        [2.2, 3.2],  # heref     (param_limits[3])
+        [1.3, 3.0],  # alphaq    (param_limits[4])
+        [0.65, 0.75],  # hub       (param_limits[5])
+        [0.14, 0.146],  # omegamh2  (param_limits[6])
+        [6.5, 8.0],  # hireionz  (param_limits[7])
+        [0.03, 0.07],  # bhfeedback(param_limits[8])
+    ],
+    dtype=np.float64,
+)
 
 # --- SAMPLING prior box (the NUTS prior; a SUB-BOX of the emulator's training box) ----------
 # The emulator is TRAINED on the widened PARAM_LIMITS box above, but the PRIYA design DENSITY is
 # sparse in the widened corners: the Bird+2023 LHS densely sampled only the ORIGINAL coarse_grid.py
 # box, and the widening (ns_hi 0.995->1.05, herei_hi 4.1->4.5, heref_lo 2.6->2.2, alphaq_hi
 # 2.5->3.0) added only a few design points. The held-out emulator EXTRAPOLATES badly there —
-# Phase-4b closure: a mock at alphaq=2.98 recovered A_p +3.7sigma, at herei=4.46 +2.0sigma (both
-# OUTSIDE the original box), and the bias equalled the standalone emulator-LOSO Fisher bias (pure
+# Phase-4b closure: mocks at alphaq and herei values OUTSIDE the original box recovered strongly
+# biased A_p, and the bias equalled the standalone emulator-LOSO Fisher bias (pure
 # emulator edge error, not a likelihood/HCD effect). So NUTS samples the IGM params (herei, heref,
 # alphaq) only over their ORIGINAL PRIYA ranges — NO retrain (the emulator box is unchanged; we
 # just do not FIT at its corners). n_s is KEPT extended to 1.05 (PI 2026-06-08: the real n_s may
 # exceed 0.995, eBOSS ~1.009) with the C_emu step-inflation above 0.995 covering the sparse n_s
 # ridge; Ap/hub/omegamh2/hireionz/bhfeedback are identical between the two boxes.
-SAMPLING_LIMITS = np.array([
-    [0.8,    1.05],     # ns        KEEP extended (PI 2026-06-08) + C_emu step-inflation > 0.995
-    [1.2e-9, 2.6e-9],   # Ap        (identical to PARAM_LIMITS)
-    [3.5,    4.1],      # herei     RESTRICT to original PRIYA (widened box had 4.5)
-    [2.6,    3.2],      # heref     RESTRICT to original PRIYA (widened box had 2.2 lo)
-    [1.3,    2.5],      # alphaq    RESTRICT to original PRIYA (widened box had 3.0)
-    [0.65,   0.75],     # hub
-    [0.14,   0.146],    # omegamh2
-    [6.5,    8.0],      # hireionz
-    [0.03,   0.07],     # bhfeedback
-], dtype=np.float64)
+SAMPLING_LIMITS = np.array(
+    [
+        [0.8, 1.05],  # ns        KEEP extended (PI 2026-06-08) + C_emu step-inflation > 0.995
+        [1.2e-9, 2.6e-9],  # Ap        (identical to PARAM_LIMITS)
+        [3.5, 4.1],  # herei     RESTRICT to original PRIYA (widened box had 4.5)
+        [2.6, 3.2],  # heref     RESTRICT to original PRIYA (widened box had 2.2 lo)
+        [1.3, 2.5],  # alphaq    RESTRICT to original PRIYA (widened box had 3.0)
+        [0.65, 0.75],  # hub
+        [0.14, 0.146],  # omegamh2
+        [6.5, 8.0],  # hireionz
+        [0.03, 0.07],  # bhfeedback
+    ],
+    dtype=np.float64,
+)
 
 
 def sampling_unit_bounds(limits=None):
@@ -75,6 +94,7 @@ def sampling_unit_bounds(limits=None):
     lo = normalize_params(lim[:, 0])
     hi = normalize_params(lim[:, 1])
     return np.clip(lo, 0.0, 1.0), np.clip(hi, 0.0, 1.0)
+
 
 # PRIYA zout grid range (coarse_grid.py L153-154: max_z=5.4, min_z=2.0).
 Z_LIMITS = (2.0, 5.4)
@@ -100,63 +120,69 @@ def normalize_params(params):
     hi = PARAM_LIMITS[:, 1]
     return (np.asarray(params) - lo) / (hi - lo)
 
-def _collapse_counts(counts15):
-    return np.stack([counts15[:, s].sum(1) for s in COARSE_SLICES], axis=1)
 
-def _collapse_p1d(p15, counts15):
-    """Count-weighted collapse of fine-bin P1D to coarse classes (R,15,K)->(R,4,K).
-
-    NaN-safe over fine bins. An *empty* coarse class (zero counts) collapses to
-    0.0, not NaN: the production cache stores finite zeros for empty classes
-    (see ``priya_p1d._per_class_p1d_at_scale``), and the downstream structural
-    sum ``P_tier_p = Σ_c w_c·P_filt`` weights an empty class by ``w_c=0`` — a
-    NaN there would poison the whole total via ``0·NaN=NaN``. Only a bin that is
-    NaN across *all* fine sub-bins (genuinely above native Nyquist) stays NaN so
-    it can be masked.
-
-    Corner case: when a single k mixes finite and NaN fine sub-bins within one
-    coarse class, NaN sub-bins contribute 0 while their weight stays in the
-    denominator, slightly under-weighting the surviving finite sub-bins. This is
-    a documented, accepted approximation (no behaviour change)."""
-    R, _, K = p15.shape
-    out = np.full((R, 4, K), np.nan)
-    for ci, s in enumerate(COARSE_SLICES):
-        c = counts15[:, s].astype(float)
-        w = c / np.where(c.sum(1, keepdims=True) == 0, 1.0, c.sum(1, keepdims=True))
-        seg = p15[:, s, :]
-        contrib = np.where(np.isfinite(seg), seg, 0.0) * w[:, :, None]
-        summ = contrib.sum(1)
-        # Fires only for the Nyquist-NaN case (ALL fine sub-bins NaN), NOT for
-        # zero-count empties (those have finite zeros and correctly stay 0.0).
-        allnan = (~np.isfinite(seg)).all(1)
-        summ[allnan] = np.nan
-        out[:, ci, :] = summ
+def load_cache(path, *, validate=True):
+    """Load a release training cache (format 3.4). Refused (tau0_cache.CacheLineageError) unless
+    ``tau0_cache.read_cache`` accepts it: a well-formed ``tau0_cache`` lineage record, datasets and attributes equal to
+    its payload digest, release eligibility, groups matching the record. A v3.3 or older cache is refused; read it with
+    ``load_cache_historical``. The file is hashed at load and must not change while it is read. Returns the arrays of
+    the v3.3 loader plus ``lineage`` (the record) and ``cache_sha256`` (the file's sha256, the digest a model trained
+    on it records). ``kfkms`` is PER_ROW (each row's own velocity grid); the validated GLOBAL_STATIC comoving modes
+    are exposed as ``k_com_hmpc`` (schema.py; docs/kgrid_incident_2026-10.md)."""
+    ident = _L.file_identity(path)
+    d, _attrs, rec = _T.read_cache(path)
+    st = os.stat(path)
+    if (int(st.st_size), int(st.st_mtime_ns)) != (ident["size"], ident["mtime_ns"]):
+        raise _T.CacheLineageError(f"{path}: the cache changed while it was read")
+    out = _assemble(lambda k: d[k], validate)
+    out["lineage"] = rec
+    out["cache_sha256"] = ident["sha256"]
     return out
 
-def load_cache(path):
+
+def load_cache_historical(path, *, reason, validate=True):
+    """Load a cache written before caches carried lineage (format 3.3), or a 3.4 one without checking its lineage,
+    exactly as the v3.3 loader did. ``reason`` (non-empty) is logged. Never the input of a release product: only the
+    carry tool (scripts/carry_validated_cache.py) moves historical rows into a release cache, after validating them.
+    """
+    if not (isinstance(reason, str) and reason.strip()):
+        raise ValueError("load_cache_historical needs a non-empty reason")
     with h5py.File(path, "r") as h:
-        assert h.attrs["cache_version"] == "3.3", h.attrs.get("cache_version")
-        g = lambda k: h[k][:]
-        counts15 = g("tier_c_counts")
-        Pf15, Pu15 = g("P_tier_c_filtered"), g("P_tier_c")
-        out = dict(
-            params=g("params").astype(np.float64),
-            kfkms=g("kfkms").astype(np.float64),
-            P_tier_p=g("P_tier_p").astype(np.float64),
-            target_F=g("target_F").astype(np.float64),
-            scale=g("scale").astype(np.float64),
-            z_grid=g("z_grid").astype(np.float64),
-            z_meta=g("z_meta").astype(np.float64),
-            alpha_idx=g("alpha_idx").astype(np.int32),
-            snap_group_idx=g("snap_group_idx").astype(np.int32),
-            sim_name=np.array([s.decode() if isinstance(s, bytes) else s
-                               for s in h["sim_name"][:]]),
-            snap_dNdX=np.stack([g("snap_dNdX_LLS"), g("snap_dNdX_subDLA"),
-                                g("snap_dNdX_DLA")], axis=1),
-            snap_f_nhi=g("snap_f_nhi").astype(np.float64),
-            snap_total_path_dX=g("snap_total_path_dX").astype(np.float64),
-            snap_n_absorbers=g("snap_n_absorbers").astype(np.float64),
+        ver = h.attrs["cache_version"]
+        ver = ver.decode() if isinstance(ver, bytes) else str(ver)
+        if ver not in _T.HISTORICAL_VERSIONS:
+            raise _T.CacheLineageError(
+                f"{path}: cache version {ver!r} is not one of {_T.HISTORICAL_VERSIONS}"
+            )
+        _log.warning(
+            "historical read of the cache %s (%s): not release-eligible", path, reason.strip()
         )
+        return _assemble(lambda k: h[k][:], validate)
+
+
+def _assemble(get, validate):
+    """The loader's arrays from ``get(name)`` (a stored dataset)."""
+    counts15 = get("tier_c_counts")
+    Pf15, Pu15 = get("P_tier_c_filtered"), get("P_tier_c")
+    g = get
+    out = dict(
+        params=g("params").astype(np.float64),
+        kfkms=g("kfkms").astype(np.float64),
+        nbins_native=g("nbins_native").astype(np.int64),
+        dv_kms=g("dv_kms").astype(np.float64),
+        P_tier_p=g("P_tier_p").astype(np.float64),
+        target_F=g("target_F").astype(np.float64),
+        scale=g("scale").astype(np.float64),
+        z_grid=g("z_grid").astype(np.float64),
+        z_meta=g("z_meta").astype(np.float64),
+        alpha_idx=g("alpha_idx").astype(np.int32),
+        snap_group_idx=g("snap_group_idx").astype(np.int32),
+        sim_name=np.array([s.decode() if isinstance(s, bytes) else s for s in g("sim_name")]),
+        snap_dNdX=np.stack([g("snap_dNdX_LLS"), g("snap_dNdX_subDLA"), g("snap_dNdX_DLA")], axis=1),
+        snap_f_nhi=g("snap_f_nhi").astype(np.float64),
+        snap_total_path_dX=g("snap_total_path_dX").astype(np.float64),
+        snap_n_absorbers=g("snap_n_absorbers").astype(np.float64),
+    )
     coarse_counts = _collapse_counts(counts15)
     Pf4 = _collapse_p1d(Pf15, counts15)
     Pu4 = _collapse_p1d(Pu15, counts15)
@@ -172,29 +198,41 @@ def load_cache(path):
     out["inv_nc"] = np.where(coarse_counts > 0, 1.0 / np.maximum(coarse_counts, 1), 0.0)
 
     # --- Normalized encoder input x = [params_unit (9), z_unit (1)] -----------
-    params_unit = normalize_params(out["params"])                  # (R,9)
+    params_unit = normalize_params(out["params"])  # (R,9)
     z_unit = (out["z_grid"] - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
     out["params_unit"] = params_unit
     out["x"] = np.concatenate([params_unit, z_unit[:, None]], axis=1)  # (R,10)
-    out["in_domain"] = np.all((params_unit >= -1e-9)
-                              & (params_unit <= 1 + 1e-9), axis=1)
+    out["in_domain"] = np.all((params_unit >= -1e-9) & (params_unit <= 1 + 1e-9), axis=1)
     n_oob = int((~out["in_domain"]).sum())
     if n_oob:
-        print(f"WARN load_cache: {n_oob}/{len(out['in_domain'])} rows "
-              f"out of PRIYA param domain (params_unit outside [0,1])")
+        print(
+            f"WARN load_cache: {n_oob}/{len(out['in_domain'])} rows "
+            f"out of PRIYA param domain (params_unit outside [0,1])"
+        )
+    # schema guard (incident 2026-10-05): every key classified; k_com validated across ALL rows, never row 0.
+    if validate:
+        from .schema import validate_cache_schema
+
+        rep = validate_cache_schema(out)
+        out["k_com_hmpc"] = np.asarray(rep["derived"]["k_com_hmpc"], np.float64)
+        out["schema_report"] = rep
     return out
 
 
 # --- Channel transforms + train-split normalisation (spec sec.10) -------------
 
-def signed_log(x):                 # sign-safe transform for Delta_c (smooth through 0)
+
+def signed_log(x):  # sign-safe transform for Delta_c (smooth through 0)
     return np.arcsinh(x)
+
 
 def signed_log_inv(y):
     return np.sinh(y)
 
+
 def safe_log(x, floor=1e-30):
     return np.log(np.maximum(x, floor))
+
 
 def fit_norm(x, train_idx, valid_mask=None, min_std_frac=0.0):
     """Per-column {mean,std} over train rows, NaN-aware.
@@ -218,7 +256,7 @@ def fit_norm(x, train_idx, valid_mask=None, min_std_frac=0.0):
     xt = x[train_idx]
     if valid_mask is not None:
         mt = valid_mask[train_idx]
-        xt = np.where(mt, xt, np.nan)   # invalid -> NaN -> ignored by nanmean/nanstd
+        xt = np.where(mt, xt, np.nan)  # invalid -> NaN -> ignored by nanmean/nanstd
     with warnings.catch_warnings():
         # all-invalid columns are handled by the finite-fallback below; the
         # "empty slice" / "ddof<=0" warnings from nanmean/nanstd are expected.
@@ -238,8 +276,10 @@ def fit_norm(x, train_idx, valid_mask=None, min_std_frac=0.0):
         std = np.maximum(std, floor)
     return {"mean": mean, "std": std}
 
+
 def apply_norm(x, stats):
     return (x - stats["mean"]) / stats["std"]
+
 
 def invert_norm(z, stats):
     return z * stats["std"] + stats["mean"]
@@ -253,10 +293,10 @@ def invert_norm(z, stats):
 #   f_nhi, dndx, P_filt -> safe_log / exp          (strictly-positive amplitudes)
 #   delta               -> signed_log / signed_log_inv  (arcsinh, smooth through 0)
 TARGET_TRANSFORMS = {
-    "f_nhi":  (safe_log, np.exp),
-    "dndx":   (safe_log, np.exp),
+    "f_nhi": (safe_log, np.exp),
+    "dndx": (safe_log, np.exp),
     "P_filt": (safe_log, np.exp),
-    "delta":  (signed_log, signed_log_inv),
+    "delta": (signed_log, signed_log_inv),
 }
 TARGET_CHANNELS = ("f_nhi", "dndx", "P_filt", "delta")
 
@@ -298,7 +338,7 @@ def cell_id(d, idx=None):
     # z grid is discrete (PRIYA zout); map each distinct rounded z to a dense rank
     # so the packed key is a small, stable integer (round-off-proof vs hashing floats).
     uniq_z = np.unique(np.round(np.asarray(d["z_grid"]), 4))
-    z_rank = np.searchsorted(uniq_z, z_key).astype(np.int64)   # 0..(n_z-1)
+    z_rank = np.searchsorted(uniq_z, z_key).astype(np.int64)  # 0..(n_z-1)
     n_alpha = int(np.asarray(d["alpha_idx"]).max()) + 1
     return z_rank * n_alpha + a_idx
 
@@ -328,13 +368,12 @@ def fit_baseline_residual_norm(d, train_idx):
     ``{"mu_marg","sig_marg","sig_cosmo", "cell_mean": {cell_id:(4,K)}}``.
     """
     train_idx = np.asarray(train_idx)
-    logP = safe_log(d["P_filt"])                 # (R,4,K); NaN above Nyquist
-    logP_tr = logP[train_idx]                    # (n,4,K)
+    logP = safe_log(d["P_filt"])  # (R,4,K); NaN above Nyquist
+    logP_tr = logP[train_idx]  # (n,4,K)
 
     # marginal (global) per-(c,k) mean/std over train rows -> standardize baseline head.
-    marg = fit_norm(logP_tr.reshape(len(train_idx), -1),
-                    np.arange(len(train_idx)))
-    shp = logP.shape[1:]                          # (4,K)
+    marg = fit_norm(logP_tr.reshape(len(train_idx), -1), np.arange(len(train_idx)))
+    shp = logP.shape[1:]  # (4,K)
     mu_marg = marg["mean"].reshape(shp)
     sig_marg = marg["std"].reshape(shp)
 
@@ -342,23 +381,23 @@ def fit_baseline_residual_norm(d, train_idx):
     cells_tr = cell_id(d, train_idx)
     cell_mean = {}
     # within-cell variance: average over cells of Var_within(logP) per (c,k).
-    within_var_sum = np.zeros(shp)                # Σ_cells Var_within (per (c,k))
-    within_var_cnt = np.zeros(shp)                # # cells contributing (per (c,k))
+    within_var_sum = np.zeros(shp)  # Σ_cells Var_within (per (c,k))
+    within_var_cnt = np.zeros(shp)  # # cells contributing (per (c,k))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         for cid in np.unique(cells_tr):
             sel = train_idx[cells_tr == cid]
-            block = logP[sel]                     # (m,4,K)
-            cm = np.nanmean(block, axis=0)        # (4,K) cell mean (NaN where all-NaN)
+            block = logP[sel]  # (m,4,K)
+            cm = np.nanmean(block, axis=0)  # (4,K) cell mean (NaN where all-NaN)
             cm = np.where(np.isfinite(cm), cm, mu_marg)  # all-NaN bin -> fall back to mu_marg
             cell_mean[int(cid)] = cm
-            wv = np.nanvar(block, axis=0)         # within-cell variance (4,K)
+            wv = np.nanvar(block, axis=0)  # within-cell variance (4,K)
             ok = np.isfinite(wv)
             within_var_sum += np.where(ok, wv, 0.0)
             within_var_cnt += ok.astype(float)
-    sig_cosmo = np.sqrt(np.where(within_var_cnt > 0,
-                                 within_var_sum / np.maximum(within_var_cnt, 1),
-                                 0.0))
+    sig_cosmo = np.sqrt(
+        np.where(within_var_cnt > 0, within_var_sum / np.maximum(within_var_cnt, 1), 0.0)
+    )
     # a (c,k) with no within-cell spread (e.g. a single train sim per cell, or an
     # empty class) -> sig_cosmo 0; floor to a neutral 1.0 so the residual whitening
     # never divides by zero (those bins carry no cosmology signal anyway).
@@ -393,8 +432,8 @@ def fit_target_norm(d, train_idx):
     f_nhi_valid = _valid_target_mask(d["snap_f_nhi"])
     dndx_valid = _valid_target_mask(d["snap_dNdX"])
     stats = {
-        "f_nhi":  fit_norm(fwd("f_nhi")(d["snap_f_nhi"]), train_blocks, f_nhi_valid),
-        "dndx":   fit_norm(fwd("dndx")(d["snap_dNdX"]), train_blocks, dndx_valid),
+        "f_nhi": fit_norm(fwd("f_nhi")(d["snap_f_nhi"]), train_blocks, f_nhi_valid),
+        "dndx": fit_norm(fwd("dndx")(d["snap_dNdX"]), train_blocks, dndx_valid),
         # P_filt: the normalization REDESIGN. norm_stats["P_filt"] is the structured
         # baseline/residual dict (mu_marg, sig_marg, sig_cosmo, cell_mean), NOT the
         # old flat {mean,std}. The θ-blind baseline head targets the σ_marg-
@@ -407,13 +446,12 @@ def fit_target_norm(d, train_idx):
         # Floor the per-(c,k) std at 1% of the channel's median std (DELTA_STD_FLOOR_FRAC)
         # — a principled relative floor that lifts the collapsed bins to the channel
         # scale while leaving the well-conditioned bins (std ≫ floor) untouched.
-        "delta":  fit_norm(fwd("delta")(d["delta"]), train_idx,
-                           min_std_frac=DELTA_STD_FLOOR_FRAC),
+        "delta": fit_norm(fwd("delta")(d["delta"]), train_idx, min_std_frac=DELTA_STD_FLOOR_FRAC),
     }
     return stats
 
 
-def edge_emphasis_k_weight(kfkms, edge_gain=3.0, lowk_extra=1.0, mid_frac=0.5):
+def edge_emphasis_k_weight(k_com_hmpc, edge_gain=3.0, lowk_extra=1.0):
     """Per-k RESIDUAL loss weight (K,): a U-shaped low/high-k EDGE emphasis.
 
     The deployed residual head is flat mid-band but biased at the band EDGES — low-k
@@ -426,26 +464,28 @@ def edge_emphasis_k_weight(kfkms, edge_gain=3.0, lowk_extra=1.0, mid_frac=0.5):
     finite k-range. The weight is ``1 + edge_gain·g(u)`` where g(u) is a symmetric
     parabola ``(2u−1)²`` (0 at mid, 1 at both edges), PLUS an extra low-k ramp
     ``lowk_extra·(1−u)`` so the A_p-relevant low-k edge gets additional pull (A_p is
-    the priority param). ``mid_frac`` is unused historically; kept for signature
-    stability. The weight is normalized to mean 1 over finite bins so the overall
+    the priority param). The input is the GLOBAL_STATIC comoving mode grid (schema.py); the profile depends
+    only on log-k position, so it is the same for every row's velocity grid. The weight is normalized to mean 1 over finite bins so the overall
     p_resid term scale (hence its balance against term_w) is unchanged — only the
     RELATIVE per-k attention shifts. Non-finite/zero k bins get weight 1.
 
     Returns a float64 (K,) array. With edge_gain=0 and lowk_extra=0 it is all-ones
     (the uniform/back-compat case).
     """
-    k = np.asarray(kfkms, dtype=np.float64)
-    if k.ndim == 2:
-        k = k[0]
+    k = np.asarray(k_com_hmpc, dtype=np.float64)
+    if k.ndim != 1:
+        raise ValueError(
+            "per-row grid passed; pass the validated k_com_hmpc (GLOBAL_STATIC), see schema.py"
+        )
     w = np.ones_like(k)
     good = np.isfinite(k) & (k > 0)
     if good.sum() < 2 or (edge_gain == 0.0 and lowk_extra == 0.0):
         return w
     lk = np.log10(k[good])
-    u = (lk - lk.min()) / max(lk.max() - lk.min(), 1e-12)      # 0 at low-k .. 1 at high-k
-    g = (2.0 * u - 1.0) ** 2                                    # symmetric edge bump
-    wg = 1.0 + edge_gain * g + lowk_extra * (1.0 - u)          # +extra low-k ramp
-    wg = wg / wg.mean()                                        # mean-1 over finite bins
+    u = (lk - lk.min()) / max(lk.max() - lk.min(), 1e-12)  # 0 at low-k .. 1 at high-k
+    g = (2.0 * u - 1.0) ** 2  # symmetric edge bump
+    wg = 1.0 + edge_gain * g + lowk_extra * (1.0 - u)  # +extra low-k ramp
+    wg = wg / wg.mean()  # mean-1 over finite bins
     w[good] = wg
     return w
 
@@ -464,15 +504,14 @@ def datarange_mask(d, z_lo=None, z_hi=None, k_min=None):
     z_lo = DATA_RANGE["z_lo"] if z_lo is None else z_lo
     z_hi = DATA_RANGE["z_hi"] if z_hi is None else z_hi
     k_min = DATA_RANGE["k_min"] if k_min is None else k_min
-    z = np.asarray(d["z_grid"])                                  # (R,)
-    kf = np.asarray(d["kfkms"])                                  # (R,K)
-    in_z = (z >= z_lo - 1e-9) & (z <= z_hi + 1e-9)               # (R,)
-    in_k = np.isfinite(kf) & (kf >= k_min)                      # (R,K)
-    return in_z[:, None] & in_k                                  # (R,K)
+    z = np.asarray(d["z_grid"])  # (R,)
+    kf = np.asarray(d["kfkms"])  # (R,K)
+    in_z = (z >= z_lo - 1e-9) & (z <= z_hi + 1e-9)  # (R,)
+    in_k = np.isfinite(kf) & (kf >= k_min)  # (R,K)
+    return in_z[:, None] & in_k  # (R,K)
 
 
-def datarange_loss_weight(d, idx, z_lo=None, z_hi=None, k_min=None,
-                          oor_weight=None):
+def datarange_loss_weight(d, idx, z_lo=None, z_hi=None, k_min=None, oor_weight=None):
     """Per-(row,k) SOFT data-range loss weight (n,K) for rows ``idx``.
 
     In-range (z,k) bins get weight 1.0; OUT-of-range bins (z∉[z_lo,z_hi] OR k<k_min)
@@ -485,12 +524,21 @@ def datarange_loss_weight(d, idx, z_lo=None, z_hi=None, k_min=None,
     Returns a float64 (n,K) array."""
     oor_weight = DATARANGE_OOR_WEIGHT if oor_weight is None else oor_weight
     idx = np.asarray(idx)
-    in_range = datarange_mask(d, z_lo=z_lo, z_hi=z_hi, k_min=k_min)[idx]   # (n,K)
+    in_range = datarange_mask(d, z_lo=z_lo, z_hi=z_hi, k_min=k_min)[idx]  # (n,K)
     return np.where(in_range, 1.0, oor_weight).astype(np.float64)
 
 
-def make_batch(d, idx, norm_stats, k_weight=None, datarange=False,
-               z_lo=None, z_hi=None, k_min=None, oor_weight=None):
+def make_batch(
+    d,
+    idx,
+    norm_stats,
+    k_weight=None,
+    datarange=False,
+    z_lo=None,
+    z_hi=None,
+    k_min=None,
+    oor_weight=None,
+):
     """Assemble the exact dict joint_loss consumes for rows ``idx`` (spec sec.4).
 
     Targets t_* are in standardized log/arcsinh space; bins above native Nyquist
@@ -514,19 +562,19 @@ def make_batch(d, idx, norm_stats, k_weight=None, datarange=False,
     de-bias term (``model.coherent_debias_term``) can segment-sum per cell.
     """
     idx = np.asarray(idx)
-    grp = d["snap_group_idx"][idx]                         # (n,) block index per row
+    grp = d["snap_group_idx"][idx]  # (n,) block index per row
 
-    t_f_nhi = apply_norm(safe_log(d["snap_f_nhi"][grp]), norm_stats["f_nhi"])   # (n,30)
-    t_dndx = apply_norm(safe_log(d["snap_dNdX"][grp]), norm_stats["dndx"])      # (n,3)
-    t_delta = apply_norm(signed_log(d["delta"][idx]), norm_stats["delta"])      # (n,3,K)
+    t_f_nhi = apply_norm(safe_log(d["snap_f_nhi"][grp]), norm_stats["f_nhi"])  # (n,30)
+    t_dndx = apply_norm(safe_log(d["snap_dNdX"][grp]), norm_stats["dndx"])  # (n,3)
+    t_delta = apply_norm(signed_log(d["delta"][idx]), norm_stats["delta"])  # (n,3,K)
 
     # P_filt normalization REDESIGN: split into the θ-blind BASELINE target
     # t_p_base (σ_marg-standardized cell-mean) and the σ_cosmo-whitened RESIDUAL
     # target t_p_resid (the cosmology signal). See fit_baseline_residual_norm.
     pf = norm_stats["P_filt"]
-    logP = safe_log(d["P_filt"][idx])                                          # (n,4,K)
-    cells = cell_id(d, idx)                                                    # (n,)
-    m_cell = np.empty_like(logP)                                              # (n,4,K) cell-mean per row
+    logP = safe_log(d["P_filt"][idx])  # (n,4,K)
+    cells = cell_id(d, idx)  # (n,)
+    m_cell = np.empty_like(logP)  # (n,4,K) cell-mean per row
     cell_mean = pf["cell_mean"]
     n_fallback = 0
     for r, cid in enumerate(cells):
@@ -549,9 +597,10 @@ def make_batch(d, idx, norm_stats, k_weight=None, datarange=False,
             f"train_cells; fell back to mu_marg. Expected for tau0-edge-holdout "
             f"batches (whole z-slices removed); those rows' t_p_base/t_p_resid are "
             f"non-physical — score such holdouts in physical space, not per-head.",
-            RuntimeWarning)
-    t_p_base = (m_cell - pf["mu_marg"]) / pf["sig_marg"]                        # (n,4,K)
-    t_p_resid = (logP - m_cell) / pf["sig_cosmo"]                              # (n,4,K)
+            RuntimeWarning,
+        )
+    t_p_base = (m_cell - pf["mu_marg"]) / pf["sig_marg"]  # (n,4,K)
+    t_p_resid = (logP - m_cell) / pf["sig_cosmo"]  # (n,4,K)
 
     # A4b: Head-A masks = finite AND (cache value > 0). The CDDF/dN/dX structural
     # zeros (e.g. f_nhi bin 0) are safe_log-floored to ~-69; mask them out of the
@@ -562,16 +611,15 @@ def make_batch(d, idx, norm_stats, k_weight=None, datarange=False,
     # inv_nalpha: 1 / (#rows sharing this row's snap-block) over the FULL cache,
     # so alpha-siblings (same snap, different alpha rescale) each get weight 1/n_a
     # and a snap-block is not over-counted relative to its number of alpha samples.
-    block_counts = np.bincount(d["snap_group_idx"],
-                               minlength=int(d["snap_group_idx"].max()) + 1)
-    inv_nalpha = 1.0 / block_counts[grp].astype(np.float64)                     # (n,)
+    block_counts = np.bincount(d["snap_group_idx"], minlength=int(d["snap_group_idx"].max()) + 1)
+    inv_nalpha = 1.0 / block_counts[grp].astype(np.float64)  # (n,)
 
     # mean_F_clean: kept (unused by the loss) for batch-contract stability. The
     # A3 meanF loss term was removed (it had zero model gradient — see joint_loss);
     # mean-flux consistency is structural (tau0 = -ln(target_F) is an input). We
     # use exp(-tau0), the definitional mean flux tau0 encodes, until a dedicated
     # mean-F head is wired (deferred, out of scope).
-    mean_F_clean = np.exp(-d["tau0"][idx]).astype(np.float64)                   # (n,)
+    mean_F_clean = np.exp(-d["tau0"][idx]).astype(np.float64)  # (n,)
 
     # global (z,τ₀)-cell id per row + the static segment count n_cells = n_z·n_alpha
     # (cell_id packs z_rank·n_alpha + alpha_idx, so the max id is n_z·n_alpha-1). The
@@ -613,7 +661,8 @@ def make_batch(d, idx, norm_stats, k_weight=None, datarange=False,
         # per-(row,k) SOFT down-weight; out-of-range bins get oor_weight (~0.2).
         # Per-ROW (depends on z), so it pads/batches like every other array.
         batch["datarange_weight"] = datarange_loss_weight(
-            d, idx, z_lo=z_lo, z_hi=z_hi, k_min=k_min, oor_weight=oor_weight)
+            d, idx, z_lo=z_lo, z_hi=z_hi, k_min=k_min, oor_weight=oor_weight
+        )
     return batch
 
 
@@ -629,8 +678,7 @@ def reconstruct_P_filt(P_filt_base, P_filt_resid, pf_stats):
     """
     base = np.asarray(P_filt_base)
     resid = np.asarray(P_filt_resid)
-    logP = (base * pf_stats["sig_marg"] + pf_stats["mu_marg"]) \
-        + pf_stats["sig_cosmo"] * resid
+    logP = (base * pf_stats["sig_marg"] + pf_stats["mu_marg"]) + pf_stats["sig_cosmo"] * resid
     return np.exp(logP)
 
 
@@ -646,7 +694,8 @@ def untransform_prediction(pred_dict, norm_stats):
     out = {}
     if "P_filt_base" in pred_dict and "P_filt_resid" in pred_dict:
         out["P_filt"] = reconstruct_P_filt(
-            pred_dict["P_filt_base"], pred_dict["P_filt_resid"], norm_stats["P_filt"])
+            pred_dict["P_filt_base"], pred_dict["P_filt_resid"], norm_stats["P_filt"]
+        )
     for ch, arr in pred_dict.items():
         if ch in ("P_filt_base", "P_filt_resid"):
             continue
@@ -656,6 +705,7 @@ def untransform_prediction(pred_dict, norm_stats):
 
 
 # --- Cross-validation / extrapolation splits (spec sec.7) ---------------------
+
 
 def kfold_loso(sim_name, n_folds=8):
     """Return [(train_row_idx, val_row_idx), ...]; sims partitioned into n_folds
@@ -671,6 +721,44 @@ def kfold_loso(sim_name, n_folds=8):
         folds.append((all_idx[~is_val], all_idx[is_val]))
     return folds
 
+
+def production_row_split(sim_name, *, val_seed=12345, val_frac=0.10, holdout_sim=None):
+    """The production split: a fixed random row-val fraction (early stopping only) over every row, optionally after
+    removing ONE held-out simulation entirely (the upstream-matched leave-one-simulation-out protocol of gate C).
+    Returns (train_idx, val_idx, held_idx). Without ``holdout_sim`` it is exactly the historical inline split of
+    scripts/train_production_emulator.py."""
+    sim_name = np.asarray(sim_name)
+    if holdout_sim is None:
+        avail, held = np.arange(sim_name.size), np.array([], dtype=int)
+    else:
+        held = np.where(sim_name == holdout_sim)[0]
+        if held.size == 0:
+            raise ValueError(f"holdout simulation {holdout_sim!r} is not in the cache")
+        avail = np.where(sim_name != holdout_sim)[0]
+    perm = np.random.default_rng(val_seed).permutation(avail.size)
+    n_val = int(val_frac * avail.size)
+    return np.sort(avail[perm[n_val:]]), np.sort(avail[perm[:n_val]]), held
+
+
+def multi_holdout_row_split(sim_name, held_sims, *, val_seed=12345, val_frac=0.10):
+    """``production_row_split`` with a SET of held-out simulations (the split rule ``multi_holdout_row_split/1``, used
+    by grouped cross-validation folds): every row of ``held_sims`` is removed, then a fixed random ``val_frac`` of the
+    remaining rows (permutation seeded by ``val_seed``) is the validation split (early stopping only). Returns
+    (train_idx, val_idx, held_idx), sorted. With no held-out simulation it is the production split, with one it is
+    ``production_row_split``'s; numerically identical to the W-1 experiment's splitter. The number of simulations is
+    whatever the cache holds (nothing here assumes a count)."""
+    sim_name = np.asarray(sim_name).astype(str)
+    held_sims = [str(s) for s in held_sims]
+    missing = sorted(set(held_sims) - set(sim_name.tolist()))
+    if missing:
+        raise ValueError(f"held-out simulations not in the cache: {missing}")
+    is_held = np.isin(sim_name, held_sims)
+    avail, held = np.flatnonzero(~is_held), np.flatnonzero(is_held)
+    perm = np.random.default_rng(val_seed).permutation(avail.size)
+    n_val = int(val_frac * avail.size)
+    return np.sort(avail[perm[n_val:]]), np.sort(avail[perm[:n_val]]), held
+
+
 def tau0_edge_holdout(tau0, frac=0.15):
     """Hold out the low+high tau0 tails (the extrapolation probe in tau0-space)."""
     order = np.argsort(tau0)
@@ -680,7 +768,7 @@ def tau0_edge_holdout(tau0, frac=0.15):
     return tr, ho
 
 
-# Kim2013 central mean-flux curve (== tau0_rescale.obs_mean_tau_kim2013): the cache's
+# Kim07 central mean-flux curve (== tau0_rescale.obs_mean_tau_kim2013): the cache's
 # tau0 = alpha_factor * KIM_AMP*(1+z)^KIM_SLOPE, so alpha_factor = tau0/Kim(z) is the
 # z-INDEPENDENT ladder coordinate (the natural axis for a smooth sigma(tau0) interp).
 KIM_AMP, KIM_SLOPE = 2.3e-3, 3.65
@@ -719,8 +807,8 @@ def make_tau0_bands(tau0, z_grid, n_tb=4):
         rungs = np.unique(np.round(alpha, 6))
         lo, hi = rungs.min(), rungs.max()
         atol = 1e-4 * (hi - lo) + 1e-12
-        band[np.abs(alpha - lo) <= atol] = 0                 # least-absorption edge
-        band[np.abs(alpha - hi) <= atol] = n_tb - 1          # most-absorption edge
+        band[np.abs(alpha - lo) <= atol] = 0  # least-absorption edge
+        band[np.abs(alpha - hi) <= atol] = n_tb - 1  # most-absorption edge
         interior = band < 0
         if interior.any():
             edges = np.unique(np.quantile(alpha[interior], np.linspace(0, 1, n_tb - 1)))
@@ -728,8 +816,9 @@ def make_tau0_bands(tau0, z_grid, n_tb=4):
                 edges = np.linspace(alpha[interior].min(), alpha[interior].max(), n_tb - 1)
             ib = np.clip(np.digitize(alpha[interior], edges[1:-1], right=False), 0, n_tb - 3)
             band[interior] = 1 + ib
-    centres = np.array([np.mean(alpha[band == b]) if (band == b).any() else np.nan
-                        for b in range(n_tb)])
+    centres = np.array(
+        [np.mean(alpha[band == b]) if (band == b).any() else np.nan for b in range(n_tb)]
+    )
     return band.astype(int), centres
 
 
@@ -753,6 +842,6 @@ def make_splits(d, fold, n_folds=8, holdout_frac=0.15):
     if fold >= len(folds):
         raise IndexError(f"fold {fold} out of range (have {len(folds)} folds)")
     tr, va = folds[fold]
-    train_idx = tr[pool_mask[tr]]   # drop holdout rows from train
-    val_idx = va[pool_mask[va]]     # and from val
+    train_idx = tr[pool_mask[tr]]  # drop holdout rows from train
+    val_idx = va[pool_mask[va]]  # and from val
     return train_idx, val_idx, holdout_idx

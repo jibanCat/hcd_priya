@@ -8,6 +8,7 @@ Run::
 
     python3 tests/test_cddf_dx_patch.py
 """
+
 from __future__ import annotations
 
 import json
@@ -77,11 +78,13 @@ class TestPerSnapPatch(unittest.TestCase):
         factor = (1 + float(orig["z"])) * self.h
         np.testing.assert_allclose(
             float(patched["dX_per_sightline"]),
-            float(orig["dX_per_sightline"]) * factor, rtol=1e-12,
+            float(orig["dX_per_sightline"]) * factor,
+            rtol=1e-12,
         )
         np.testing.assert_allclose(
             float(patched["total_path"]),
-            float(orig["total_path"]) * factor, rtol=1e-12,
+            float(orig["total_path"]) * factor,
+            rtol=1e-12,
         )
 
     def test_invariants_preserved(self):
@@ -139,7 +142,9 @@ class TestStackedPatch(unittest.TestCase):
         path_total_buggy = float(d0["total_path"]) + float(d1["total_path"])
         dN = 10.0 ** log_nhi_edges[1:] - 10.0 ** log_nhi_edges[:-1]
         f_stacked_buggy = np.where(
-            dN > 0, n_absorbers / (dN * path_total_buggy), 0.0,
+            dN > 0,
+            n_absorbers / (dN * path_total_buggy),
+            0.0,
         )
         save_dict = {
             f"{bin_label}__f_nhi": f_stacked_buggy,
@@ -176,9 +181,8 @@ class TestStackedPatch(unittest.TestCase):
         patched = P.patch_stacked_cddf(self.stk_path, self.h)
         # Expected: Σ_i (1+z_i)·h · buggy_path_i
         d0, d1 = self.snaps
-        expected = (
-            (1 + 3.0) * self.h * float(d0["total_path"])
-            + (1 + 4.0) * self.h * float(d1["total_path"])
+        expected = (1 + 3.0) * self.h * float(d0["total_path"]) + (1 + 4.0) * self.h * float(
+            d1["total_path"]
         )
         got = float(patched[f"{self.bin_label}__total_path"].ravel()[0])
         np.testing.assert_allclose(got, expected, rtol=1e-12)
@@ -192,7 +196,9 @@ class TestStackedPatch(unittest.TestCase):
         with np.errstate(divide="ignore", invalid="ignore"):
             f_recompute = np.where(dN > 0, n / (dN * path), 0.0)
         np.testing.assert_allclose(
-            f_recompute, patched[f"{self.bin_label}__f_nhi"], rtol=1e-12,
+            f_recompute,
+            patched[f"{self.bin_label}__f_nhi"],
+            rtol=1e-12,
         )
 
     def test_idempotent(self):

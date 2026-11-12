@@ -9,6 +9,7 @@ C^-1-orthogonal to the 2-param alpha_res span, already scaled to the +-5% He-II 
 The selection is factored into a pure helper ``_rcinj_primary_spec(repo, environ)`` so it is testable without
 building a ctx or running NUTS.
 """
+
 import importlib.util
 import os
 
@@ -45,14 +46,18 @@ def test_strength_scales_both_forms():
     m = _load_runstepA()
     a = m._rcinj_primary_spec(repo="/x", environ={"RCINJ_RC_STRENGTH": "0.5"})
     assert a["strength"] == 0.5 and a.get("actual_res_corr") is True
-    b = m._rcinj_primary_spec(repo="/x", environ={"RCINJ_OOS_MEMBER": "b2", "RCINJ_RC_STRENGTH": "1.5"})
+    b = m._rcinj_primary_spec(
+        repo="/x", environ={"RCINJ_OOS_MEMBER": "b2", "RCINJ_RC_STRENGTH": "1.5"}
+    )
     assert b["member"] == "b2" and b["strength"] == 1.5
 
 
 def test_defaults_to_process_environ():
     """environ=None reads os.environ (the production path); default (unset) is actual_res_corr."""
     m = _load_runstepA()
-    saved = {k: os.environ.pop(k) for k in ("RCINJ_OOS_MEMBER", "RCINJ_RC_STRENGTH") if k in os.environ}
+    saved = {
+        k: os.environ.pop(k) for k in ("RCINJ_OOS_MEMBER", "RCINJ_RC_STRENGTH") if k in os.environ
+    }
     try:
         spec = m._rcinj_primary_spec()
         assert spec.get("actual_res_corr") is True and spec["strength"] == 1.0

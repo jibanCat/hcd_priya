@@ -25,6 +25,7 @@ Three checks here:
 Run:
     python3 tests/test_omega_hi.py
 """
+
 from __future__ import annotations
 
 import sys
@@ -50,8 +51,7 @@ def test_prefactor_at_h_equals_1():
     expected = 9.63e-24
     rel_err = abs(pref - expected) / expected
     assert rel_err < 2e-3, (
-        f"prefactor(h=1) = {pref:.4e}, expected {expected:.4e} "
-        f"(rel err {rel_err:.2%})"
+        f"prefactor(h=1) = {pref:.4e}, expected {expected:.4e} " f"(rel err {rel_err:.2%})"
     )
     print(f"  ✓ prefactor(h=1) = {pref:.4e} cm²  (expected ≈ 9.63e-24)")
 
@@ -62,8 +62,7 @@ def test_h_scaling():
     p10 = _prefactor(1.0, 1.0, 1.0)
     ratio = (p07 * 0.7) / (p10 * 1.0)
     assert abs(ratio - 1.0) < 1e-10, (
-        f"h-scaling broken: prefactor(0.7)·0.7/prefactor(1.0) = {ratio:.6f}, "
-        f"expected 1.0"
+        f"h-scaling broken: prefactor(0.7)·0.7/prefactor(1.0) = {ratio:.6f}, " f"expected 1.0"
     )
     print(f"  ✓ prefactor scales as 1/h  (p(0.7)·0.7 / p(1)·1 = {ratio:.6f})")
 
@@ -83,15 +82,14 @@ def test_realistic_dla_magnitude():
     Ω_HI^DLA ≈ 4.4e-4, safely inside the published range.
     """
     omega = omega_hi_from_catalog(sum_NHI_cm2=1.4e25, dX_total=4.4e5, hubble=0.7)
-    assert 1e-4 < omega < 3e-3, (
-        f"Ω_HI^DLA = {omega:.3e}, outside plausible range [1e-4, 3e-3]"
-    )
+    assert 1e-4 < omega < 3e-3, f"Ω_HI^DLA = {omega:.3e}, outside plausible range [1e-4, 3e-3]"
     print(f"  ✓ representative DLA-catalog input → Ω_HI = {omega:.2e} (expected 1e-4 .. 3e-3)")
 
 
 def test_zero_path_returns_nan():
     """ΔX = 0 should not divide-by-zero; should return NaN safely."""
     import math
+
     v = omega_hi_from_catalog(sum_NHI_cm2=1.0, dX_total=0.0, hubble=0.7)
     assert math.isnan(v), f"Ω_HI with ΔX=0 should be NaN, got {v}"
     print("  ✓ ΔX=0 returns NaN safely")

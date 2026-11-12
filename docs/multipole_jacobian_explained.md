@@ -254,7 +254,7 @@ on the `(r, |μ|)` grid.
 
 To run::
 
-    cd /home/mfho/hcd_priya
+    cd <repo>
     for t in tests/test_clustering.py tests/test_lya_bias.py; do python3 "$t"; done
 
 To regenerate the validation figures::
@@ -266,7 +266,7 @@ To regenerate the real-data test-10 plot::
     python3 scripts/run_test10.py --mode rmu
 
 (takes ~ 11 min on a Great Lakes login node; reads
-`/nfs/turbo/umor-yueyingn/mfho/emu_full/<sim>/output/SPECTRA_022/lya_forest_spectra_grid_480.hdf5`
+`$HCD_LF_RAW_DIR/<sim>/output/SPECTRA_022/lya_forest_spectra_grid_480.hdf5`
 and the matching catalog).
 
 ---

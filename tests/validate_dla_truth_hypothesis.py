@@ -40,8 +40,8 @@ SUMMARY_H5 = REPO_ROOT / "figures" / "analysis" / "data" / "dla_truth_summary.h5
 # Thresholds — bake these into the gate. Move to a config later if needed.
 # ---------------------------------------------------------------------------
 
-H1_TOL_DEX = 0.05      # |mean Δlog NHI| ≤ this within 95% CI
-H2_SIGMA_DEX = 0.15    # σ Δlog NHI strictly less than this
+H1_TOL_DEX = 0.05  # |mean Δlog NHI| ≤ this within 95% CI
+H2_SIGMA_DEX = 0.15  # σ Δlog NHI strictly less than this
 H3_COMPLETENESS = 0.80
 H4_PURITY = 0.70
 
@@ -49,6 +49,7 @@ H4_PURITY = 0.70
 # ---------------------------------------------------------------------------
 # Aggregation helpers
 # ---------------------------------------------------------------------------
+
 
 def _aggregate_delta(h5_path: Path) -> tuple[np.ndarray, dict]:
     """Read the validation summary HDF5 and concatenate per-(sim, snap)
@@ -66,9 +67,14 @@ def _aggregate_delta(h5_path: Path) -> tuple[np.ndarray, dict]:
     """
     all_dlog: list[np.ndarray] = []
     per_file = {
-        "sim": [], "snap": [], "z": [],
-        "n_truth": [], "n_recovered_dla": [], "n_recovered_lls_or_stronger": [],
-        "n_matched_dla": [], "n_matched_loose": [],
+        "sim": [],
+        "snap": [],
+        "z": [],
+        "n_truth": [],
+        "n_recovered_dla": [],
+        "n_recovered_lls_or_stronger": [],
+        "n_matched_dla": [],
+        "n_matched_loose": [],
     }
     with h5py.File(h5_path, "r") as f:
         s = f["summary"]
@@ -105,6 +111,7 @@ def _ci95_of_mean(x: np.ndarray) -> tuple[float, float]:
 # ---------------------------------------------------------------------------
 # Hypothesis tests — each returns (passed: bool, line: str)
 # ---------------------------------------------------------------------------
+
 
 def hypothesis_1(dlog: np.ndarray) -> tuple[bool, str]:
     m, hw = _ci95_of_mean(dlog)
@@ -158,6 +165,7 @@ def hypothesis_4(per_file: dict) -> tuple[bool, str]:
 # Pretty output
 # ---------------------------------------------------------------------------
 
+
 def _per_z_breakdown(per_file: dict, dlog_per_file: list[np.ndarray] | None = None):
     """
     Group by z (rounded to 0.1) and report aggregate completeness, purity,
@@ -168,7 +176,7 @@ def _per_z_breakdown(per_file: dict, dlog_per_file: list[np.ndarray] | None = No
     z_keys = np.round(z_arr, 1)
     rows = []
     for zk in sorted(set(z_keys)):
-        sel = (z_keys == zk)
+        sel = z_keys == zk
         n_truth = int(np.sum(np.array(per_file["n_truth"])[sel]))
         n_rec = int(np.sum(np.array(per_file["n_recovered_dla"])[sel]))
         n_match_dla = int(np.sum(np.array(per_file["n_matched_dla"])[sel]))
@@ -176,25 +184,30 @@ def _per_z_breakdown(per_file: dict, dlog_per_file: list[np.ndarray] | None = No
         comp = n_match_loose / max(n_truth, 1)
         purity = n_match_dla / max(n_rec, 1)
         if dlog_per_file is not None:
-            dlogs = np.concatenate([
-                d for d, s in zip(dlog_per_file, sel) if s and d.size
-            ]) if any(sel) else np.array([])
+            dlogs = (
+                np.concatenate([d for d, s in zip(dlog_per_file, sel) if s and d.size])
+                if any(sel)
+                else np.array([])
+            )
         else:
             dlogs = np.array([])
         if dlogs.size:
-            m = float(np.mean(dlogs)); s = float(np.std(dlogs, ddof=1))
+            m = float(np.mean(dlogs))
+            s = float(np.std(dlogs, ddof=1))
         else:
             m, s = float("nan"), float("nan")
-        rows.append({
-            "z": float(zk),
-            "n_truth": n_truth,
-            "n_rec_dla": n_rec,
-            "n_matched_dla": n_match_dla,
-            "completeness": comp,
-            "purity": purity,
-            "mean_dlog": m,
-            "sigma_dlog": s,
-        })
+        rows.append(
+            {
+                "z": float(zk),
+                "n_truth": n_truth,
+                "n_rec_dla": n_rec,
+                "n_matched_dla": n_match_dla,
+                "completeness": comp,
+                "purity": purity,
+                "mean_dlog": m,
+                "sigma_dlog": s,
+            }
+        )
     return rows
 
 
@@ -218,8 +231,10 @@ def main():
         print("No matched-pair Δlog NHI values found in summary.h5; nothing to test.")
         return 1
 
-    print(f"Loaded {dlog.size} matched (truth, recovered) DLA pairs from "
-          f"{len(per_file['sim'])} (sim, snap) files\n")
+    print(
+        f"Loaded {dlog.size} matched (truth, recovered) DLA pairs from "
+        f"{len(per_file['sim'])} (sim, snap) files\n"
+    )
 
     p1, l1 = hypothesis_1(dlog)
     p2, l2 = hypothesis_2(dlog)
@@ -238,54 +253,70 @@ def main():
     print("# DLA truth-validation hypothesis test summary")
     print()
     print(f"Source: `{SUMMARY_H5.relative_to(REPO_ROOT)}`")
-    print(f"Files aggregated: {len(per_file['sim'])} "
-          f"(sim, snap) pairs across {len(set(per_file['sim']))} sims.")
-    print(f"Total truth DLAs: {sum(per_file['n_truth'])}; "
-          f"recovered DLA-class systems: {sum(per_file['n_recovered_dla'])}; "
-          f"matched DLA-vs-DLA pairs: {dlog.size}.")
+    print(
+        f"Files aggregated: {len(per_file['sim'])} "
+        f"(sim, snap) pairs across {len(set(per_file['sim']))} sims."
+    )
+    print(
+        f"Total truth DLAs: {sum(per_file['n_truth'])}; "
+        f"recovered DLA-class systems: {sum(per_file['n_recovered_dla'])}; "
+        f"matched DLA-vs-DLA pairs: {dlog.size}."
+    )
     print()
     print("| Hypothesis | Statistic | Threshold | Recovered | Verdict |")
     print("|---|---|---|---|---|")
     m, hw = _ci95_of_mean(dlog)
-    print(f"| H1 (no bias) | mean Δlog NHI | ≤ {H1_TOL_DEX} dex (95 % CI) | "
-          f"{m:+.4f} ± {hw:.4f} | {'PASS' if p1 else 'FAIL'} |")
+    print(
+        f"| H1 (no bias) | mean Δlog NHI | ≤ {H1_TOL_DEX} dex (95 % CI) | "
+        f"{m:+.4f} ± {hw:.4f} | {'PASS' if p1 else 'FAIL'} |"
+    )
     sigma = float(np.std(dlog, ddof=1))
-    print(f"| H2 (scatter) | σ Δlog NHI    | < {H2_SIGMA_DEX} dex | {sigma:.4f} | "
-          f"{'PASS' if p2 else 'FAIL'} |")
+    print(
+        f"| H2 (scatter) | σ Δlog NHI    | < {H2_SIGMA_DEX} dex | {sigma:.4f} | "
+        f"{'PASS' if p2 else 'FAIL'} |"
+    )
     n_truth = sum(per_file["n_truth"])
     n_match_loose = sum(per_file["n_matched_loose"])
-    print(f"| H3 (complete) | matched / truth | ≥ {H3_COMPLETENESS:.2f} | "
-          f"{n_match_loose}/{n_truth} = {n_match_loose / max(n_truth, 1):.3f} | "
-          f"{'PASS' if p3 else 'FAIL'} |")
+    print(
+        f"| H3 (complete) | matched / truth | ≥ {H3_COMPLETENESS:.2f} | "
+        f"{n_match_loose}/{n_truth} = {n_match_loose / max(n_truth, 1):.3f} | "
+        f"{'PASS' if p3 else 'FAIL'} |"
+    )
     n_rec = sum(per_file["n_recovered_dla"])
     n_match_dla = sum(per_file["n_matched_dla"])
-    print(f"| H4 (purity)   | matched / recovered DLA | ≥ {H4_PURITY:.2f} | "
-          f"{n_match_dla}/{n_rec} = {n_match_dla / max(n_rec, 1):.3f} | "
-          f"{'PASS' if p4 else 'FAIL'} |")
+    print(
+        f"| H4 (purity)   | matched / recovered DLA | ≥ {H4_PURITY:.2f} | "
+        f"{n_match_dla}/{n_rec} = {n_match_dla / max(n_rec, 1):.3f} | "
+        f"{'PASS' if p4 else 'FAIL'} |"
+    )
     print()
     print("## Per-z breakdown")
     print()
-    print("| z | N_truth | N_rec(DLA) | matched | completeness | purity | "
-          "⟨Δlog NHI⟩ | σ |")
+    print("| z | N_truth | N_rec(DLA) | matched | completeness | purity | " "⟨Δlog NHI⟩ | σ |")
     print("|---|---|---|---|---|---|---|---|")
     dlog_pf = _load_per_file_dlog(SUMMARY_H5, per_file)
     for r in _per_z_breakdown(per_file, dlog_pf):
-        print(f"| {r['z']:.1f} | {r['n_truth']} | {r['n_rec_dla']} | "
-              f"{r['n_matched_dla']} | {r['completeness']:.3f} | "
-              f"{r['purity']:.3f} | {r['mean_dlog']:+.4f} | "
-              f"{r['sigma_dlog']:.4f} |")
+        print(
+            f"| {r['z']:.1f} | {r['n_truth']} | {r['n_rec_dla']} | "
+            f"{r['n_matched_dla']} | {r['completeness']:.3f} | "
+            f"{r['purity']:.3f} | {r['mean_dlog']:+.4f} | "
+            f"{r['sigma_dlog']:.4f} |"
+        )
     print()
     if all([p1, p2, p3, p4]):
-        print("**All four hypotheses pass.** The τ-peak DLA finder reproduces "
-              "particle-based truth NHI within the published tolerance and "
-              "matches ≥ 80 % truth completeness with ≥ 70 % purity.")
+        print(
+            "**All four hypotheses pass.** The τ-peak DLA finder reproduces "
+            "particle-based truth NHI within the published tolerance and "
+            "matches ≥ 80 % truth completeness with ≥ 70 % purity."
+        )
     else:
-        failing = [name for name, p in
-                   zip(("H1", "H2", "H3", "H4"), (p1, p2, p3, p4)) if not p]
-        print(f"**Failing hypotheses: {', '.join(failing)}.** Review per-z "
-              "breakdown above; diagnose either the τ → NHI conversion "
-              "(H1/H2), the τ-peak finder coverage (H3), or false-positive "
-              "rate (H4).")
+        failing = [name for name, p in zip(("H1", "H2", "H3", "H4"), (p1, p2, p3, p4)) if not p]
+        print(
+            f"**Failing hypotheses: {', '.join(failing)}.** Review per-z "
+            "breakdown above; diagnose either the τ → NHI conversion "
+            "(H1/H2), the τ-peak finder coverage (H3), or false-positive "
+            "rate (H4)."
+        )
     return 0
 
 

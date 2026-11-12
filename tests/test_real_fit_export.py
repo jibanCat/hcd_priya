@@ -14,9 +14,13 @@ summaries) and it round-trips.
 These are NUISANCE posteriors, NOT the blinded A_p/n_s -- exported UNBLINDED (like the health
 json). Tests are LIGHT: pure helpers on synthetic numpy dicts + a synthetic result dict.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_real_fit_export.py -q
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+     python -m pytest tests/test_real_fit_export.py -q
 """
+
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import json
 import os
@@ -29,7 +33,7 @@ import hcd_analysis.emulator  # noqa: F401  x64 BEFORE jax
 from hcd_analysis.emulator import closure_legb as CL
 from hcd_analysis.emulator.inference import PARAM_NAMES
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def _load_script(name):
@@ -48,12 +52,24 @@ def _leg(name, metals_on):
     return SimpleNamespace(name=name, metals_on=metals_on)
 
 
-def _ctx(metal_prior="uniform", legs=(), siII=("DESI",), sample_res=False,
-         fix_alpha_res=False, z_global=(2.2, 2.6, 3.0), sample_metals=True):
+def _ctx(
+    metal_prior="uniform",
+    legs=(),
+    siII=("DESI",),
+    sample_res=False,
+    fix_alpha_res=False,
+    z_global=(2.2, 2.6, 3.0),
+    sample_metals=True,
+):
     return SimpleNamespace(
-        metal_prior=metal_prior, legs=list(legs), metal_siII_legs=tuple(siII),
-        sample_res=sample_res, fix_alpha_res=fix_alpha_res, z_global=np.asarray(z_global),
-        sample_metals=sample_metals)
+        metal_prior=metal_prior,
+        legs=list(legs),
+        metal_siII_legs=tuple(siII),
+        sample_res=sample_res,
+        fix_alpha_res=fix_alpha_res,
+        z_global=np.asarray(z_global),
+        sample_metals=sample_metals,
+    )
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -64,15 +80,22 @@ def test_reconstruct_flatlog2node_metal_nodes():
     order; f2/k2 are the SiII nodes ONLY on metal_siII_legs (DESI), None on eBOSS. The per-node
     values are jnp.stack([z0, z1]) of the sampled sites (mirrors _metal_2node_sites). a_siiii/a_siii
     are 0.0 on this path (the scalar amplitudes are unused)."""
-    ctx = _ctx(metal_prior="flatlog2node",
-               legs=(_leg("DESI", True), _leg("eBOSS", True)), siII=("DESI",))
+    ctx = _ctx(
+        metal_prior="flatlog2node", legs=(_leg("DESI", True), _leg("eBOSS", True)), siII=("DESI",)
+    )
     draw = {
-        "f_SiIII_DESI_z0": 0.004, "f_SiIII_DESI_z1": 0.02,
-        "k_SiIII_DESI_z0": 2e-3, "k_SiIII_DESI_z1": 5e-2,
-        "f_SiII_DESI_z0": 0.005, "f_SiII_DESI_z1": 0.006,
-        "k_SiII_DESI_z0": 3e-3, "k_SiII_DESI_z1": 4e-3,
-        "f_SiIII_eBOSS_z0": 0.007, "f_SiIII_eBOSS_z1": 0.008,
-        "k_SiIII_eBOSS_z0": 6e-3, "k_SiIII_eBOSS_z1": 7e-3,
+        "f_SiIII_DESI_z0": 0.004,
+        "f_SiIII_DESI_z1": 0.02,
+        "k_SiIII_DESI_z0": 2e-3,
+        "k_SiIII_DESI_z1": 5e-2,
+        "f_SiII_DESI_z0": 0.005,
+        "f_SiII_DESI_z1": 0.006,
+        "k_SiII_DESI_z0": 3e-3,
+        "k_SiII_DESI_z1": 4e-3,
+        "f_SiIII_eBOSS_z0": 0.007,
+        "f_SiIII_eBOSS_z1": 0.008,
+        "k_SiIII_eBOSS_z0": 6e-3,
+        "k_SiIII_eBOSS_z1": 7e-3,
     }
     metal_nodes, b_res, alpha_res, a_siiii, a_siii = RF._reconstruct_nuisance(ctx, draw)
     assert set(metal_nodes.keys()) == {"DESI", "eBOSS"}
@@ -90,7 +113,7 @@ def test_reconstruct_flatlog2node_metal_nodes():
     # scalar amplitudes unused on the node path; no f_res in this draw
     assert float(a_siiii) == 0.0 and float(a_siii) == 0.0
     assert b_res is None
-    assert alpha_res is None   # fix_alpha_res False + no alpha_res site
+    assert alpha_res is None  # fix_alpha_res False + no alpha_res site
 
 
 def test_reconstruct_flatlog2node_without_sample_metals_is_empty():
@@ -99,7 +122,7 @@ def test_reconstruct_flatlog2node_without_sample_metals_is_empty():
     KeyError) -- it yields metal_nodes={} + a_siiii=a_siii=0 (metals-off), matching the model."""
     ctx = _ctx(metal_prior="flatlog2node", legs=(_leg("DESI", True),), sample_metals=False)
     metal_nodes, b_res, alpha_res, a_siiii, a_siii = RF._reconstruct_nuisance(ctx, {})
-    assert metal_nodes == {}                         # empty, mirrors _metal_2node_sites (no KeyError)
+    assert metal_nodes == {}  # empty, mirrors _metal_2node_sites (no KeyError)
     assert float(a_siiii) == 0.0 and float(a_siii) == 0.0
 
 
@@ -147,16 +170,24 @@ def test_reconstruct_sample_res_builds_bres():
     """sample_res=True + f_res_amp/slope in the draw: b_res_global == _bres_of_z(z_global, amp,
     slope) (the deployed option-b forward, closure_legb:1853). amp=0 => b_res identically 0."""
     ctx = _ctx(metal_prior="flatlog2node", legs=(_leg("DESI", True),), sample_res=True)
-    draw = {"f_res_amp": 0.03, "f_res_slope": 0.4,
-            "f_SiIII_DESI_z0": 0.004, "f_SiIII_DESI_z1": 0.02,
-            "k_SiIII_DESI_z0": 2e-3, "k_SiIII_DESI_z1": 5e-2,
-            "f_SiII_DESI_z0": 0.005, "f_SiII_DESI_z1": 0.006,
-            "k_SiII_DESI_z0": 3e-3, "k_SiII_DESI_z1": 4e-3}
+    draw = {
+        "f_res_amp": 0.03,
+        "f_res_slope": 0.4,
+        "f_SiIII_DESI_z0": 0.004,
+        "f_SiIII_DESI_z1": 0.02,
+        "k_SiIII_DESI_z0": 2e-3,
+        "k_SiIII_DESI_z1": 5e-2,
+        "f_SiII_DESI_z0": 0.005,
+        "f_SiII_DESI_z1": 0.006,
+        "k_SiII_DESI_z0": 3e-3,
+        "k_SiII_DESI_z1": 4e-3,
+    }
     _, b_res, _, _, _ = RF._reconstruct_nuisance(ctx, draw)
     want = np.asarray(CL._bres_of_z(np.asarray(ctx.z_global), 0.03, 0.4))
     assert np.allclose(np.asarray(b_res), want)
     # amp=0 -> b_res == 0 for any slope (the golden no-op)
-    draw0 = dict(draw); draw0["f_res_amp"] = 0.0
+    draw0 = dict(draw)
+    draw0["f_res_amp"] = 0.0
     _, b_res0, _, _, _ = RF._reconstruct_nuisance(ctx, draw0)
     assert np.allclose(np.asarray(b_res0), 0.0)
 
@@ -165,12 +196,27 @@ def test_nuisance_export_keys_selects_fres_and_metal_nodes():
     """the export-key collector picks up f_res_amp/slope + every f_/k_ metal-node key, and NOTHING
     else (theta/tau0/alpha/a_SiIII are NOT nuisance-node keys here)."""
     samples = {
-        "theta_unit": 1, "tau0_vec": 1, "alpha_hcd_z": 1, "alpha_lls": 1, "a_SiIII": 1,
-        "f_res_amp": 1, "f_res_slope": 1,
-        "f_SiIII_DESI_z0": 1, "k_SiII_DESI_z1": 1, "f_SiII_DESI_z0": 1, "k_SiIII_eBOSS_z1": 1}
+        "theta_unit": 1,
+        "tau0_vec": 1,
+        "alpha_hcd_z": 1,
+        "alpha_lls": 1,
+        "a_SiIII": 1,
+        "f_res_amp": 1,
+        "f_res_slope": 1,
+        "f_SiIII_DESI_z0": 1,
+        "k_SiII_DESI_z1": 1,
+        "f_SiII_DESI_z0": 1,
+        "k_SiIII_eBOSS_z1": 1,
+    }
     keys = set(RF._nuisance_export_keys(samples))
-    assert keys == {"f_res_amp", "f_res_slope", "f_SiIII_DESI_z0", "k_SiII_DESI_z1",
-                    "f_SiII_DESI_z0", "k_SiIII_eBOSS_z1"}
+    assert keys == {
+        "f_res_amp",
+        "f_res_slope",
+        "f_SiIII_DESI_z0",
+        "k_SiII_DESI_z1",
+        "f_SiII_DESI_z0",
+        "k_SiIII_eBOSS_z1",
+    }
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -183,14 +229,28 @@ def _minimal_result(nuisance_chains, bounds):
     P = len(names)
     rng = np.random.default_rng(0)
     packed = rng.normal(size=(C, N, P))
-    packed[:, :, :len(PARAM_NAMES)] = 0.5   # unit-cube theta block (finite denorm)
-    battery = dict(rhat_max=1.001, ess_bulk_min=100.0, ess_tail_min=100.0, ebfmi_min=0.7,
-                   n_divergent=0, treedepth_sat_frac=0.0)
-    return dict(packed=packed, names=names, battery=battery, per_chain_div=[0] * C,
-                members=[f"{REPO}/checkpoints/final_prod_seed0.eqx"], leg_name="DESI",
-                n_real_rows=10, ll_chains=[np.zeros(N) for _ in range(C)],
-                kept_global=np.array([True]),
-                nuisance_chains=nuisance_chains, nuisance_bounds=bounds)
+    packed[:, :, : len(PARAM_NAMES)] = 0.5  # unit-cube theta block (finite denorm)
+    battery = dict(
+        rhat_max=1.001,
+        ess_bulk_min=100.0,
+        ess_tail_min=100.0,
+        ebfmi_min=0.7,
+        n_divergent=0,
+        treedepth_sat_frac=0.0,
+    )
+    return dict(
+        packed=packed,
+        names=names,
+        battery=battery,
+        per_chain_div=[0] * C,
+        members=[f"{REPO}/checkpoints/final_prod_seed0.eqx"],
+        leg_name="DESI",
+        n_real_rows=10,
+        ll_chains=[np.zeros(N) for _ in range(C)],
+        kept_global=np.array([True]),
+        nuisance_chains=nuisance_chains,
+        nuisance_bounds=bounds,
+    )
 
 
 def test_export_writes_nuisance_artifact_and_roundtrips(tmp_path):
@@ -198,17 +258,22 @@ def test_export_writes_nuisance_artifact_and_roundtrips(tmp_path):
     (rail summaries) with the expected site keys; the npz round-trips the arrays and the json
     carries frac_near_lo/hi for the LogUniform f-node sites."""
     N = 5
-    ch0 = {"f_SiIII_DESI_z0": np.array([0.0031, 0.02, 0.0031, 0.029, 0.01]),
-           "f_res_amp": np.array([0.001, -0.002, 0.0, 0.003, 0.0015])}
-    ch1 = {"f_SiIII_DESI_z0": np.array([0.02, 0.02, 0.0298, 0.005, 0.006]),
-           "f_res_amp": np.array([0.002, 0.0, -0.001, 0.0, 0.001])}
+    ch0 = {
+        "f_SiIII_DESI_z0": np.array([0.0031, 0.02, 0.0031, 0.029, 0.01]),
+        "f_res_amp": np.array([0.001, -0.002, 0.0, 0.003, 0.0015]),
+    }
+    ch1 = {
+        "f_SiIII_DESI_z0": np.array([0.02, 0.02, 0.0298, 0.005, 0.006]),
+        "f_res_amp": np.array([0.002, 0.0, -0.001, 0.0, 0.001]),
+    }
     assert all(len(v) == N for v in {**ch0, **ch1}.values())
     bounds = {"f": (0.003, 0.03), "k": (1e-3, 0.1)}
     result = _minimal_result([ch0, ch1], bounds)
 
     out_dir = str(tmp_path)
-    RF.export_getdist(result, out_dir, "real_desi", offset={"ns": 0.0, "Ap": 0.0},
-                      blind=False, survey="desi")
+    RF.export_getdist(
+        result, out_dir, "real_desi", offset={"ns": 0.0, "Ap": 0.0}, blind=False, survey="desi"
+    )
 
     npz_path = os.path.join(out_dir, "real_desi.nuisance.npz")
     json_path = os.path.join(out_dir, "real_desi.nuisance.json")
@@ -243,8 +308,9 @@ def test_export_without_nuisance_is_noop(tmp_path):
     (additive-only, does not disturb the existing chain columns)."""
     result = _minimal_result([{}, {}], {"f": (0.003, 0.03), "k": (1e-3, 0.1)})  # 2 chains, no sites
     out_dir = str(tmp_path)
-    RF.export_getdist(result, out_dir, "real_ks", offset={"ns": 0.0, "Ap": 0.0},
-                      blind=False, survey="ks")
+    RF.export_getdist(
+        result, out_dir, "real_ks", offset={"ns": 0.0, "Ap": 0.0}, blind=False, survey="ks"
+    )
     assert not os.path.exists(os.path.join(out_dir, "real_ks.nuisance.npz"))
     assert not os.path.exists(os.path.join(out_dir, "real_ks.nuisance.json"))
     # the normal chain export is untouched

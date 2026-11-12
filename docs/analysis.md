@@ -8,7 +8,7 @@ Narrative of the HCD analysis pipeline, step by step, with inline figures at eac
 
 ## 1. Pipeline overview
 
-For each (sim, snap) we execute five independent stages, each writing one self-contained output file into `/scratch/.../hcd_outputs/<sim>/snap_NNN/`:
+For each (sim, snap) we execute five independent stages, each writing one self-contained output file into `$HCD_OUTPUTS_DIR/<sim>/snap_NNN/`:
 
 ```
   tau/H/1/1215 HDF5
@@ -67,7 +67,7 @@ Observational overlays pulled **verbatim from the `sbird/dla_data` GitHub reposi
 |---|---|---|---|---|
 | ■ | Prochaska & Wolfe 2009 | SDSS DR5 | 2.2–5.5 | `dndx.txt` |
 | ▲ | Noterdaeme+2012 | BOSS DR9 | 2.15–3.35 | `dla_data.dndx_not()` |
-| ⬥ | Ho+2021 | SDSS DR16 (CNN) | 2.08–4.92 | `ho21/dndx_all.txt` |
+| ⬥ | Ho+2021 | SDSS DR16Q (GP) | 2.08–4.92 | `ho21/dndx_all.txt` |
 
 (An earlier version of this doc also listed Sanchez-Ramirez+2016 and Crighton+2015. Those values were **not present** in `sbird/dla_data` and I had fabricated them from memory; both have now been removed.)
 
@@ -137,7 +137,7 @@ Testing four masks on the full 691 200-sightline sample at snap 017 (z=3, sim ns
 
 ![Four-way mask comparison on full sample](../figures/diagnostics/priya_mask_comparison.png)
 
-*Left:* absolute P1D; all curves overlap. *Right:* ratio to unmasked, zoomed in. **PRIYA stays within ±1 % of unmasked across the whole emulator range (k_cyc ∈ [10⁻³, 3×10⁻²])**, rising only to 3 % near Nyquist. This matches the PRIYA paper's stated tolerance ("<1% when the mask size was doubled", arXiv:2306.05471 §3.3).
+*Left:* absolute P1D; all curves overlap. *Right:* ratio to unmasked, zoomed in. **PRIYA stays within ±1 % of unmasked across the whole emulator range (k_cyc ∈ [10⁻³, 3×10⁻²])**, rising only to 3 % near Nyquist. This matches the PRIYA paper's stated tolerance ("<1% when the mask size was doubled", arXiv:2306.05471 §2.7).
 
 The two other masks (deprecated) diverge at high k because they touch forest-level pixels that shouldn't be masked. See `docs/masking_strategy.md` for the full evidence that led us to adopt the PRIYA recipe as production.
 
@@ -209,7 +209,7 @@ dedicated doc:
 > **[docs/hcd_mf_analysis.md](hcd_mf_analysis.md)** — comprehensive HCD
 > MF story: bootstrap + fiducial-slice tests, matched-pair HR vs LF,
 > per-class template convergence, global G1/G2 linear-in-A_p fit,
-> held-out validation on the 4th HR sim (ns0.914), z = 2.2 anomaly, and
+> held-out validation on the 4th HR sim (ns0.914; April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF), z = 2.2 anomaly, and
 > the A_p threshold finding for dN/dX(DLA) z-evolution.
 
 Summary headlines:
@@ -230,7 +230,7 @@ Summary headlines:
 - **Global linear-in-A_p MF**: G1 (single slope) achieves ≤ 1 %
   residual for 5/6 quantities; G2 (+ z-drift) brings dN/dX(DLA) from
   1.0 → 0.7 %.  Ω_HI(DLA) is the noisy one at 1.3 %.
-- **Held-out test on ns0.914** (4th HR sim, no LF counterpart):
+- **Held-out test on ns0.914** (4th HR sim, no LF counterpart; April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF):
   `Q_HR_pred = Q_LF_nearest · R_MF(A_p, z)` recovers all 6 HR
   quantities to 1.5–4.3 %.
 - **Physical finding**: dN/dX(DLA) has an A_p threshold at

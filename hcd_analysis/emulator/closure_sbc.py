@@ -13,6 +13,7 @@ then ``ecdf_pit_bands`` per quantity → pass/fail (Säilynoja+2022 simultaneous
 end and prints per-quantity pass/fail + #divergences. Heavy orchestration is kept out of
 import time (everything is under functions / ``__main__``).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,7 +30,11 @@ import jax.numpy as jnp
 
 from hcd_analysis.emulator import train as T
 from hcd_analysis.emulator.closure_ctx import (
-    Ctx, ctx_kim, log_lik_from_ctx, param_names, unpack,
+    Ctx,
+    ctx_kim,
+    log_lik_from_ctx,
+    param_names,
+    unpack,
 )
 from hcd_analysis.emulator.meanflux_prior import meanflux_tau0_prior
 from hcd_analysis.emulator.inference import hcd_incidence_prior
@@ -37,10 +42,14 @@ from hcd_analysis.emulator.predict import predict_P_obs
 from hcd_analysis.emulator.closure_mocks import draw_leg_a_truth, make_leg_a_mock
 from hcd_analysis.emulator.sampler_numpyro import run_nuts
 from hcd_analysis.emulator.closure_diagnostics import (
-    sbc_ranks_multiparam, loglik_rank, thin_to_ess, ecdf_pit_bands,
+    sbc_ranks_multiparam,
+    loglik_rank,
+    thin_to_ess,
+    ecdf_pit_bands,
 )
 
-REPO = "/home/mfho/hcd_priya"
+from hcd_analysis.paths import REPO_ROOT_STR as REPO  # this checkout (emulator-debug 2026-10)
+
 # The ONE production model: the C_emu LOSO error vector was built from the final_fold*
 # recipe, so final_fold0 is the matched pair (plan §5).
 CKPT = f"{REPO}/checkpoints/final_fold0"
@@ -61,9 +70,16 @@ DIVERGENCE_RETRY_TARGET_ACCEPT = (0.95, 0.99)
 # ----------------------------------------------------------------------------
 # Build a production ctx from final_fold0 + error_vector.npz.
 # ----------------------------------------------------------------------------
-def build_ctx(n_z=3, seed=0, ckpt=CKPT, error_vector=ERROR_VECTOR,
-              shot_inflate=10.0, cemu_inflate=1.0, xclass_error_vector=None,
-              ensemble_ckpts=None):
+def build_ctx(
+    n_z=3,
+    seed=0,
+    ckpt=CKPT,
+    error_vector=ERROR_VECTOR,
+    shot_inflate=10.0,
+    cemu_inflate=1.0,
+    xclass_error_vector=None,
+    ensemble_ckpts=None,
+):
     """Build a real Ctx matched to the production (final_fold0, error_vector.npz) pair.
 
     Picks ``n_z`` in-range redshifts, maps each to its z-band slice of the (4,K,Zb,Tb)
@@ -85,33 +101,42 @@ def build_ctx(n_z=3, seed=0, ckpt=CKPT, error_vector=ERROR_VECTOR,
     """
     if ensemble_ckpts is not None:
         from hcd_analysis.emulator.ensemble import load_ensemble
+
         model, meta, norm = load_ensemble(list(ensemble_ckpts))
     else:
         model, meta, norm = T.load_checkpoint(ckpt)
     pf = {k: jnp.asarray(norm["P_filt"][k]) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
     ev = np.load(error_vector, allow_pickle=True)
-    sigma = ev["sigma"]                                # (4,K,Zb,Tb)
+    sigma = ev["sigma"]  # (4,K,Zb,Tb)
     C4, K, Zb, Tb = sigma.shape
     alpha_centres = jnp.asarray(ev["tau0_band_centres"])
     dla_shot_flag_k = jnp.asarray(ev["dla_shot_flag"])
-    z_band_edges = ev["z_band_edges"]                  # (Zb+1,) = [-inf, ...interior..., inf]
+    z_band_edges = ev["z_band_edges"]  # (Zb+1,) = [-inf, ...interior..., inf]
 
     rng = np.random.default_rng(seed)
     # n_z in-range redshifts (data range z∈[2.2,4.6]); map each to a z-band slice of sigma.
     z = np.linspace(2.4, 4.2, n_z)
     zb_of_z = np.clip(np.digitize(z, z_band_edges[1:-1]), 0, Zb - 1)
-    sigma_zb = jnp.asarray(np.stack([sigma[:, :, zb_of_z[i], :] for i in range(n_z)]))  # (n_z,4,K,Tb)
+    sigma_zb = jnp.asarray(
+        np.stack([sigma[:, :, zb_of_z[i], :] for i in range(n_z)])
+    )  # (n_z,4,K,Tb)
 
     # OPT-IN cross-class block, sliced onto the SAME per-z z-band grid as sigma_zb.
     rho_zb = None
     if xclass_error_vector is not None:
         evx = np.load(xclass_error_vector, allow_pickle=True)
-        rho = evx["rho"]                               # (4,4,K,Zb,Tb)
-        assert rho.shape[2:] == (K, Zb, Tb), \
-            f"xclass rho {rho.shape} incompatible with diagonal grid (K,Zb,Tb)=({K},{Zb},{Tb})"
-        assert np.allclose(np.asarray(evx["tau0_band_centres"]), np.asarray(alpha_centres)), \
-            "xclass τ₀-band centres differ from the diagonal error vector"
-        rho_zb = jnp.asarray(np.stack([rho[:, :, :, zb_of_z[i], :] for i in range(n_z)]))  # (n_z,4,4,K,Tb)
+        rho = evx["rho"]  # (4,4,K,Zb,Tb)
+        assert rho.shape[2:] == (
+            K,
+            Zb,
+            Tb,
+        ), f"xclass rho {rho.shape} incompatible with diagonal grid (K,Zb,Tb)=({K},{Zb},{Tb})"
+        assert np.allclose(
+            np.asarray(evx["tau0_band_centres"]), np.asarray(alpha_centres)
+        ), "xclass τ₀-band centres differ from the diagonal error vector"
+        rho_zb = jnp.asarray(
+            np.stack([rho[:, :, :, zb_of_z[i], :] for i in range(n_z)])
+        )  # (n_z,4,4,K,Tb)
 
     # z_unit per the cache Z_LIMITS (2.0..5.4)
     z_unit = jnp.asarray((z - 2.0) / (5.4 - 2.0))
@@ -121,35 +146,56 @@ def build_ctx(n_z=3, seed=0, ckpt=CKPT, error_vector=ERROR_VECTOR,
     tau0_mu, tau0_sigma = meanflux_tau0_prior(z)
 
     # HCD incidence prior (per-class μ,σ) from a toy structural w_c at the z pivot.
-    w_c_fid = jnp.asarray([1.0, 0.05, 0.02, 0.01])     # toy structural weights (clean,LLS,sub,DLA)
+    w_c_fid = jnp.asarray([1.0, 0.05, 0.02, 0.01])  # toy structural weights (clean,LLS,sub,DLA)
     alpha_mu_, alpha_sd_ = hcd_incidence_prior(w_c_fid[1:], z=3.0)  # (3,) on (LLS,sub,DLA)
 
     # a fiducial truth (unit-cube interior) to forward-model the fixture cosmic_cov.
     theta_fid = jnp.asarray(rng.uniform(0.35, 0.65, size=9))
     tau0_fid = jnp.asarray(np.asarray(tau0_mu))
     alpha_fid = jnp.asarray(np.maximum(np.asarray(alpha_mu_), 1e-4))
-    dla_core = jnp.asarray(rng.uniform(0, 1e-3, size=(n_z, K)))     # toy positive FIXED core
+    dla_core = jnp.asarray(rng.uniform(0, 1e-3, size=(n_z, K)))  # toy positive FIXED core
 
     # valid_k = finite-σ bins (the real data-range mask: above-Nyquist σ rows are all-NaN).
     finite_sig = np.isfinite(np.asarray(sigma_zb)).all(axis=(1, 3))  # (n_z,K)
     valid_k = jnp.asarray(finite_sig)
 
     # forward-model the fiducial → cosmic_cov as a 5% fractional floor (MVP placeholder).
-    P_fid = jnp.stack([predict_P_obs(model, theta_fid, z_unit[i], tau0_fid[i], alpha_fid,
-                                     pf, dla_core[i]) for i in range(n_z)])  # (n_z,K)
+    P_fid = jnp.stack(
+        [
+            predict_P_obs(model, theta_fid, z_unit[i], tau0_fid[i], alpha_fid, pf, dla_core[i])
+            for i in range(n_z)
+        ]
+    )  # (n_z,K)
     cosmic_cov = jnp.asarray((0.05 * np.nan_to_num(np.asarray(P_fid))) ** 2 + 1e-30)
-    P_data = jnp.where(valid_k, P_fid, jnp.nan)        # placeholder (SBC overwrites per mock)
+    P_data = jnp.where(valid_k, P_fid, jnp.nan)  # placeholder (SBC overwrites per mock)
 
     dla_shot_flag = jnp.asarray(np.broadcast_to(np.asarray(dla_shot_flag_k), (n_z, K)))
 
     ctx = Ctx(
-        model=model, pf_stats=pf, z=z, z_unit=z_unit, sigma_zb=sigma_zb,
-        alpha_centres=alpha_centres, cosmic_cov=cosmic_cov, P_data=P_data,
-        dla_core=dla_core, dla_shot_flag=dla_shot_flag, valid_k=valid_k, w_c_fid=w_c_fid,
-        tau0_mu=tau0_mu, tau0_sigma=tau0_sigma, alpha_hcd_mu=jnp.asarray(alpha_mu_),
-        alpha_hcd_sigma=jnp.asarray(alpha_sd_), n_z=n_z, K=int(K), Tb=int(Tb),
-        shot_inflate=shot_inflate, cemu_inflate=cemu_inflate, include_logdet=True,
-        rho_zb=rho_zb)
+        model=model,
+        pf_stats=pf,
+        z=z,
+        z_unit=z_unit,
+        sigma_zb=sigma_zb,
+        alpha_centres=alpha_centres,
+        cosmic_cov=cosmic_cov,
+        P_data=P_data,
+        dla_core=dla_core,
+        dla_shot_flag=dla_shot_flag,
+        valid_k=valid_k,
+        w_c_fid=w_c_fid,
+        tau0_mu=tau0_mu,
+        tau0_sigma=tau0_sigma,
+        alpha_hcd_mu=jnp.asarray(alpha_mu_),
+        alpha_hcd_sigma=jnp.asarray(alpha_sd_),
+        n_z=n_z,
+        K=int(K),
+        Tb=int(Tb),
+        shot_inflate=shot_inflate,
+        cemu_inflate=cemu_inflate,
+        include_logdet=True,
+        rho_zb=rho_zb,
+    )
     return ctx
 
 
@@ -160,8 +206,8 @@ def _draws_matrix(samples, n_z):
     """Stack NUTS sample sites into a (L, P) matrix in the packed param order
     [θ9, τ₀(n_z), α_lls, α_subdla, α_dla]. ``tau0_vec`` and ``alpha_dla`` are read from
     the deterministic sites (the τ₀ and DLA the forward model actually used)."""
-    theta = np.asarray(samples["theta_unit"])          # (L,9)
-    tau0 = np.asarray(samples["tau0_vec"])             # (L,n_z)
+    theta = np.asarray(samples["theta_unit"])  # (L,9)
+    tau0 = np.asarray(samples["tau0_vec"])  # (L,n_z)
     a_lls = np.asarray(samples["alpha_lls"])[:, None]  # (L,1)
     a_sub = np.asarray(samples["alpha_subdla"])[:, None]
     a_dla = np.asarray(samples["alpha_dla"])[:, None]  # deterministic softplus
@@ -176,6 +222,7 @@ def _loglik_of_draws(ctx_mock, draws):
     def one(vec):
         th, t0, al = unpack(jnp.asarray(vec), n_z)
         return log_lik_from_ctx(th, t0, al, ctx_mock)
+
     return np.asarray(jax.vmap(one)(jnp.asarray(draws)))
 
 
@@ -203,20 +250,24 @@ def aggregate_leg_a(records, n_z, *, prob=0.95):
     # include the a_SiIII / hierarchical-latent columns _draws_matrix appends, and use the mock's
     # kept-z tau0 count). Fall back to param_names(n_z) for cache-grid records without names.
     _rec_names = next((r["names"] for r in records if r.get("names")), None)
-    all_names = (list(_rec_names) if _rec_names is not None else list(param_names(n_z))) + ["loglik"]
-    rankable = [r for r in records
-                if r.get("draws") is not None and np.asarray(r["draws"]).shape[0] >= 2]
+    all_names = (list(_rec_names) if _rec_names is not None else list(param_names(n_z))) + [
+        "loglik"
+    ]
+    rankable = [
+        r for r in records if r.get("draws") is not None and np.asarray(r["draws"]).shape[0] >= 2
+    ]
     L_list = [int(np.asarray(r["draws"]).shape[0]) for r in rankable]
     L_eff = int(min(L_list)) if L_list else 0
     rank_rows = []
     if rankable and L_eff >= 2:
         for rec in rankable:
-            draws = np.asarray(rec["draws"]); lld = np.asarray(rec["ll_draws"])
+            draws = np.asarray(rec["draws"])
+            lld = np.asarray(rec["ll_draws"])
             sub = np.linspace(0, draws.shape[0] - 1, L_eff).round().astype(int)
             pranks = sbc_ranks_multiparam(np.asarray(rec["truth_vec"]), draws[sub])  # (P,)
             llrank = loglik_rank(float(rec["ll_true"]), lld[sub])
             rank_rows.append(np.concatenate([pranks, [llrank]]))
-    ranks = np.array(rank_rows, dtype=int)                      # (n_kept, P+1)
+    ranks = np.array(rank_rows, dtype=int)  # (n_kept, P+1)
     passed, ecdf_bands = {}, {}
     if ranks.size and L_eff >= 2:
         for j, nm in enumerate(all_names):
@@ -228,14 +279,33 @@ def aggregate_leg_a(records, n_z, *, prob=0.95):
     n_excluded = int(len(records) - len(rankable))
     # the ECDF gate is only correctly sized at L_eff ≥ L_FLOOR; below it the bands over-reject
     # and pass/fail is PATH-only, not a calibration verdict.
-    return dict(names=all_names, ranks=ranks, L=L_eff, gate_valid=bool(L_eff >= L_FLOOR),
-                n_div_total=n_div_total, n_divergent=n_divergent, n_excluded=n_excluded,
-                n_kept=int(ranks.shape[0]) if ranks.size else 0,
-                passed=passed, ecdf_bands=ecdf_bands)
+    return dict(
+        names=all_names,
+        ranks=ranks,
+        L=L_eff,
+        gate_valid=bool(L_eff >= L_FLOOR),
+        n_div_total=n_div_total,
+        n_divergent=n_divergent,
+        n_excluded=n_excluded,
+        n_kept=int(ranks.shape[0]) if ranks.size else 0,
+        passed=passed,
+        ecdf_bands=ecdf_bands,
+    )
 
 
-def run_leg_a_sbc(ctx0: Ctx, *, n_mocks, n_warmup, n_samples, seed, thin=True,
-                  prob=0.95, verbose=True, mock_indices=None, return_per_mock=False):
+def run_leg_a_sbc(
+    ctx0: Ctx,
+    *,
+    n_mocks,
+    n_warmup,
+    n_samples,
+    seed,
+    thin=True,
+    prob=0.95,
+    verbose=True,
+    mock_indices=None,
+    return_per_mock=False,
+):
     """Full Leg-A true-SBC over ``n_mocks`` mocks. Returns a dict of per-quantity ranks +
     pass/fail + divergence bookkeeping.
 
@@ -255,7 +325,7 @@ def run_leg_a_sbc(ctx0: Ctx, *, n_mocks, n_warmup, n_samples, seed, thin=True,
     key0 = jax.random.PRNGKey(int(seed))
     idxs = list(range(int(n_mocks))) if mock_indices is None else list(mock_indices)
 
-    records = []            # per mock: truth_vec, draws (or None if excluded), ll_*, n_div
+    records = []  # per mock: truth_vec, draws (or None if excluded), ll_*, n_div
     for m in idxs:
         # the mock is a PURE function of (key0, m) via fold_in → a shard subset reproduces
         # exactly the mocks a full run would draw (Talts+2018 valid sharded SBC).
@@ -268,49 +338,63 @@ def run_leg_a_sbc(ctx0: Ctx, *, n_mocks, n_warmup, n_samples, seed, thin=True,
         samples = n_div = None
         for attempt, ta in enumerate(ta_schedule):
             samples, n_div, _extra = run_nuts(
-                ctx_mock, n_warmup=n_warmup, n_samples=n_samples,
-                seed=base_seed + attempt, target_accept=ta)
+                ctx_mock,
+                n_warmup=n_warmup,
+                n_samples=n_samples,
+                seed=base_seed + attempt,
+                target_accept=ta,
+            )
             if n_div == 0:
                 if attempt and verbose:
                     print(f"  [mock {m}] cleared divergences at target_accept={ta}")
                 break
             if verbose:
-                print(f"  [mock {m}] {n_div} divergence(s) at target_accept={ta}"
-                      + (" -> retry" if attempt < len(ta_schedule) - 1 else ""))
-        if n_div > 0:                               # still divergent after the schedule
+                print(
+                    f"  [mock {m}] {n_div} divergence(s) at target_accept={ta}"
+                    + (" -> retry" if attempt < len(ta_schedule) - 1 else "")
+                )
+        if n_div > 0:  # still divergent after the schedule
             if verbose:
                 print(f"  [mock {m}] still divergent after retries -> FLAGGED + excluded")
-            records.append(dict(truth_vec=truth_vec, draws=None, ll_true=None,
-                                ll_draws=None, n_div=int(n_div)))
+            records.append(
+                dict(truth_vec=truth_vec, draws=None, ll_true=None, ll_draws=None, n_div=int(n_div))
+            )
             continue
 
-        draws = _draws_matrix(samples, ctx0.n_z)        # (Lraw, P)
+        draws = _draws_matrix(samples, ctx0.n_z)  # (Lraw, P)
         if thin:
             draws_t, step, ess_min = thin_to_ess(draws)
         else:
             draws_t, step, ess_min = draws, 1, float(draws.shape[0])
         L = draws_t.shape[0]
-        if L < 2:                                        # degenerate chain: cannot rank
+        if L < 2:  # degenerate chain: cannot rank
             if verbose:
                 print(f"  [mock {m}] thinned to L={L} (<2) -> excluded")
-            records.append(dict(truth_vec=truth_vec, draws=None, ll_true=None,
-                                ll_draws=None, n_div=0))
+            records.append(
+                dict(truth_vec=truth_vec, draws=None, ll_true=None, ll_draws=None, n_div=0)
+            )
             continue
 
         # log-lik of the truth + thinned draws on the SAME mock data (Modrak+2023); ranking is
         # DEFERRED to aggregate_leg_a so EVERY mock (across shards) ranks against the IDENTICAL
         # #draws L_eff (valid-on-one-grid, Talts+2018).
-        ll_true = float(log_lik_from_ctx(
-            jnp.asarray(truth["theta9"]), jnp.asarray(truth["tau0_vec"]),
-            jnp.asarray(truth["alpha_hcd"]), ctx_mock))
-        ll_draws = _loglik_of_draws(ctx_mock, draws_t)          # (L,)
-        records.append(dict(truth_vec=truth_vec, draws=draws_t, ll_true=ll_true,
-                            ll_draws=ll_draws, n_div=0))
+        ll_true = float(
+            log_lik_from_ctx(
+                jnp.asarray(truth["theta9"]),
+                jnp.asarray(truth["tau0_vec"]),
+                jnp.asarray(truth["alpha_hcd"]),
+                ctx_mock,
+            )
+        )
+        ll_draws = _loglik_of_draws(ctx_mock, draws_t)  # (L,)
+        records.append(
+            dict(truth_vec=truth_vec, draws=draws_t, ll_true=ll_true, ll_draws=ll_draws, n_div=0)
+        )
         if verbose:
             print(f"  [mock {m}] L={L} (step {step}, ess_min {ess_min:.1f})")
 
     if return_per_mock:
-        return records                              # raw per-mock records for the shard merge
+        return records  # raw per-mock records for the shard merge
     return aggregate_leg_a(records, ctx0.n_z, prob=prob)
 
 
@@ -320,23 +404,38 @@ def run_leg_a_sbc(ctx0: Ctx, *, n_mocks, n_warmup, n_samples, seed, thin=True,
 def _smoke(args):
     print(f"[smoke] building ctx (n_z={args.n_z}) from {CKPT}")
     ctx0 = build_ctx(n_z=args.n_z, seed=args.seed)
-    print(f"[smoke] ctx: n_z={ctx0.n_z} K={ctx0.K} Tb={ctx0.Tb} "
-          f"valid_k/z={[int(np.asarray(ctx0.valid_k)[i].sum()) for i in range(ctx0.n_z)]}")
-    print(f"[smoke] running Leg-A SBC: N={args.n_mocks} mocks, "
-          f"warmup/samples={args.n_warmup}/{args.n_samples}")
-    res = run_leg_a_sbc(ctx0, n_mocks=args.n_mocks, n_warmup=args.n_warmup,
-                        n_samples=args.n_samples, seed=args.seed, prob=args.prob)
+    print(
+        f"[smoke] ctx: n_z={ctx0.n_z} K={ctx0.K} Tb={ctx0.Tb} "
+        f"valid_k/z={[int(np.asarray(ctx0.valid_k)[i].sum()) for i in range(ctx0.n_z)]}"
+    )
+    print(
+        f"[smoke] running Leg-A SBC: N={args.n_mocks} mocks, "
+        f"warmup/samples={args.n_warmup}/{args.n_samples}"
+    )
+    res = run_leg_a_sbc(
+        ctx0,
+        n_mocks=args.n_mocks,
+        n_warmup=args.n_warmup,
+        n_samples=args.n_samples,
+        seed=args.seed,
+        prob=args.prob,
+    )
     print("\n========== Leg-A SBC smoke summary ==========")
-    print(f"mocks kept={res['n_kept']}/{args.n_mocks}  "
-          f"divergent(excluded)={res['n_divergent']}  total_div={res['n_div_total']}  "
-          f"L(thinned ranked-against)={res['L']}  gate_valid(L≥{L_FLOOR})={res['gate_valid']}")
+    print(
+        f"mocks kept={res['n_kept']}/{args.n_mocks}  "
+        f"divergent(excluded)={res['n_divergent']}  total_div={res['n_div_total']}  "
+        f"L(thinned ranked-against)={res['L']}  gate_valid(L≥{L_FLOOR})={res['gate_valid']}"
+    )
     if res["passed"]:
         print(f"per-quantity ECDF-band pass/fail (prob={args.prob}):")
         for nm in res["names"]:
             print(f"  {nm:14s} : {'PASS' if res['passed'][nm] else 'FAIL'}")
         n_pass = sum(res["passed"].values())
-        verdict = ("a CALIBRATION verdict" if res["gate_valid"]
-                   else f"PATH-only — L={res['L']}<{L_FLOOR}, the band over-rejects at small L")
+        verdict = (
+            "a CALIBRATION verdict"
+            if res["gate_valid"]
+            else f"PATH-only — L={res['L']}<{L_FLOOR}, the band over-rejects at small L"
+        )
         print(f"\n{n_pass}/{len(res['names'])} quantities PASS ({verdict})")
     else:
         print("no kept mocks -> no band test (increase N or reduce divergences)")
@@ -345,8 +444,11 @@ def _smoke(args):
 
 def main():
     ap = argparse.ArgumentParser(description="Phase-C T4a Leg-A true-SBC orchestration")
-    ap.add_argument("--smoke", action="store_true",
-                    help="run the FULL path at tiny size (N≈20, n_z=1) and print pass/fail")
+    ap.add_argument(
+        "--smoke",
+        action="store_true",
+        help="run the FULL path at tiny size (N≈20, n_z=1) and print pass/fail",
+    )
     ap.add_argument("--n-mocks", type=int, default=20)
     ap.add_argument("--n-warmup", type=int, default=60)
     ap.add_argument("--n-samples", type=int, default=60)

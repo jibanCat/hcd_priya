@@ -19,6 +19,7 @@ Overlays: unmasked, τ-space mask (my Phase B), PRIYA mask (exact recipe).
 Purpose: let a reader identify which real-space scale maps to which k, and
 confirm the mask artefact k-location matches the transition-width feature.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,6 +28,7 @@ from pathlib import Path
 
 import h5py
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -40,9 +42,16 @@ from hcd_analysis.masking import (
     apply_tauspace_mask_to_batch,
     priya_dla_mask_row,
 )
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
 SIM = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
-HDF5 = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full") / SIM / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
+HDF5 = (
+    Path(external_path("HCD_LF_RAW_DIR"))
+    / SIM
+    / "output"
+    / "SPECTRA_017"
+    / "lya_forest_spectra_grid_480.hdf5"
+)
 CAT_PATH = ROOT / "tests" / "out" / "snap_017_fastfix_catalog.npz"
 DIAG = ROOT / "figures" / "diagnostics"
 
@@ -57,9 +66,11 @@ def pick_sightlines(catalog, n_max=691200):
 
     # Build "highest log N per sightline" map
     order = np.lexsort((-lN, si))  # per sightline, highest lN first
-    si_sorted = si[order]; lN_sorted = lN[order]
+    si_sorted = si[order]
+    lN_sorted = lN[order]
     first_idx = np.concatenate([[True], np.diff(si_sorted) != 0])
-    top_si = si_sorted[first_idx]; top_lN = lN_sorted[first_idx]
+    top_si = si_sorted[first_idx]
+    top_lN = lN_sorted[first_idx]
 
     # Filter to requested class bands, pick the FIRST one that has a cleanly
     # isolated single absorber (easier to read in the plot).
@@ -86,10 +97,18 @@ def pick_sightlines(catalog, n_max=691200):
         if cand not in in_cat:
             results["clean"] = (cand, None, "clean (no HCD)")
             break
-    results["LLS"]   = tuple(pick(17.2, 19.0, "LLS (17.2 ≤ log N < 19)")[:2]) + ("LLS (17.2 ≤ log N < 19)",)
-    results["subDLA"]= tuple(pick(19.0, 20.3, "subDLA (19 ≤ log N < 20.3)")[:2])+ ("subDLA (19 ≤ log N < 20.3)",)
-    results["smallDLA"]=tuple(pick(20.3, 21.0, "small DLA (20.3 ≤ log N < 21)")[:2])+ ("small DLA (20.3 ≤ log N < 21)",)
-    results["largeDLA"]=tuple(pick(21.0, 23.0, "large DLA (log N ≥ 21)")[:2])+ ("large DLA (log N ≥ 21)",)
+    results["LLS"] = tuple(pick(17.2, 19.0, "LLS (17.2 ≤ log N < 19)")[:2]) + (
+        "LLS (17.2 ≤ log N < 19)",
+    )
+    results["subDLA"] = tuple(pick(19.0, 20.3, "subDLA (19 ≤ log N < 20.3)")[:2]) + (
+        "subDLA (19 ≤ log N < 20.3)",
+    )
+    results["smallDLA"] = tuple(pick(20.3, 21.0, "small DLA (20.3 ≤ log N < 21)")[:2]) + (
+        "small DLA (20.3 ≤ log N < 21)",
+    )
+    results["largeDLA"] = tuple(pick(21.0, 23.0, "large DLA (log N ≥ 21)")[:2]) + (
+        "large DLA (log N ≥ 21)",
+    )
     return results
 
 
@@ -100,14 +119,15 @@ def main():
     header = read_header(HDF5)
     dv_kms = pixel_dv_kms(header)
     cat = AbsorberCatalog.load_npz(CAT_PATH)
-    print(f"snap_017 z={header.redshift:.2f}  dv={dv_kms:.2f}  "
-          f"catalog: {cat.summary()}")
+    print(f"snap_017 z={header.redshift:.2f}  dv={dv_kms:.2f}  " f"catalog: {cat.summary()}")
 
     # <F>_all for tau_eff
-    F_sum = 0.0; F_n = 0
+    F_sum = 0.0
+    F_n = 0
     for _, _, tau in iter_tau_batches(HDF5, batch_size=4096, n_skewers=None):
         F = np.exp(-tau.astype(np.float64))
-        F_sum += F.sum(); F_n += F.size
+        F_sum += F.sum()
+        F_n += F.size
     mean_F_all = F_sum / F_n
     tau_eff = -np.log(max(mean_F_all, 1e-30))
     print(f"  <F>_all = {mean_F_all:.4f}   τ_eff = {tau_eff:.4f}")
@@ -118,7 +138,7 @@ def main():
         print(f"  {k:>9s}:  sightline {si}   {info}   [{label}]")
 
     # Read all picked sightlines
-    si_list = [picks[k][0] for k in ["clean","LLS","subDLA","smallDLA","largeDLA"]]
+    si_list = [picks[k][0] for k in ["clean", "LLS", "subDLA", "smallDLA", "largeDLA"]]
     with h5py.File(HDF5, "r") as f:
         rows = np.stack([f["tau/H/1/1215"][s, :].astype(np.float64) for s in si_list])
 
@@ -130,12 +150,15 @@ def main():
     tau_ts_all = np.zeros_like(rows)
     tau_priya_all = np.zeros_like(rows)
     for i, (s, ab, _lab) in enumerate(picks.values()):
-        row = rows[i:i+1]  # shape (1, nbins)
+        row = rows[i : i + 1]  # shape (1, nbins)
         # τ-space (my Phase-B) mask
         if ab is not None:
             tau_ts_all[i] = apply_tauspace_mask_to_batch(
-                row, s, cat,
-                mask_classes=["LLS","subDLA","DLA"], tau_eff=tau_eff,
+                row,
+                s,
+                cat,
+                mask_classes=["LLS", "subDLA", "DLA"],
+                tau_eff=tau_eff,
             )[0]
         else:
             tau_ts_all[i] = rows[i]
@@ -148,29 +171,49 @@ def main():
             tau_priya_all[i][mask_priya] = tau_eff
 
     # ---- Build figure: 5 rows (class) × 4 columns (τ, F, δF, P1D) ---------
-    labels = ["clean","LLS","subDLA","smallDLA","largeDLA"]
-    nrows = len(labels); ncols = 4
+    labels = ["clean", "LLS", "subDLA", "smallDLA", "largeDLA"]
+    nrows = len(labels)
+    ncols = 4
     fig, axes = plt.subplots(nrows, ncols, figsize=(19, 14))
 
-    k_cyc = np.fft.rfftfreq(header.nbins, d=dv_kms)      # cyclic k [s/km]
+    k_cyc = np.fft.rfftfreq(header.nbins, d=dv_kms)  # cyclic k [s/km]
     # angular PRIYA-convention k = 2π × cyclic
     k_ang = 2.0 * np.pi * k_cyc
 
     for i, lab in enumerate(labels):
         si, ab, desc = picks[lab]
-        row = rows[i]; row_ts = tau_ts_all[i]; row_px = tau_priya_all[i]
+        row = rows[i]
+        row_ts = tau_ts_all[i]
+        row_px = tau_priya_all[i]
 
         # (1) log tau
         ax = axes[i, 0]
         ax.plot(v, np.log10(np.maximum(row, 1e-3)), lw=1.2, color="k", label="unmasked")
         if ab is not None:
-            ax.plot(v, np.log10(np.maximum(row_ts, 1e-3)), lw=1.0, color="C0", alpha=0.7, label="τ-space mask")
-            ax.plot(v, np.log10(np.maximum(row_px, 1e-3)), lw=1.0, color="C3", alpha=0.7, label="PRIYA mask")
+            ax.plot(
+                v,
+                np.log10(np.maximum(row_ts, 1e-3)),
+                lw=1.0,
+                color="C0",
+                alpha=0.7,
+                label="τ-space mask",
+            )
+            ax.plot(
+                v,
+                np.log10(np.maximum(row_px, 1e-3)),
+                lw=1.0,
+                color="C3",
+                alpha=0.7,
+                label="PRIYA mask",
+            )
         ax.axhline(np.log10(tau_eff), color="gray", ls=":", alpha=0.6, lw=0.8)
         ax.set_ylabel(f"log10 τ\n[{desc}]", fontsize=9)
-        if i == 0: ax.set_title("τ(v)")
-        if i == nrows-1: ax.set_xlabel("v [km/s]")
-        if i == 0: ax.legend(fontsize=8)
+        if i == 0:
+            ax.set_title("τ(v)")
+        if i == nrows - 1:
+            ax.set_xlabel("v [km/s]")
+        if i == 0:
+            ax.legend(fontsize=8)
         ax.grid(alpha=0.3)
 
         # (2) F
@@ -181,48 +224,57 @@ def main():
             ax.plot(v, np.exp(-row_px), lw=1.0, color="C3", alpha=0.7)
         ax.axhline(mean_F_all, color="gray", ls=":", alpha=0.6, lw=0.8)
         ax.set_ylim(-0.05, 1.05)
-        if i == 0: ax.set_title("F(v) = exp(-τ)")
-        if i == nrows-1: ax.set_xlabel("v [km/s]")
+        if i == 0:
+            ax.set_title("F(v) = exp(-τ)")
+        if i == nrows - 1:
+            ax.set_xlabel("v [km/s]")
         ax.grid(alpha=0.3)
 
         # (3) δF
         ax = axes[i, 2]
-        dF = np.exp(-row)/mean_F_all - 1
+        dF = np.exp(-row) / mean_F_all - 1
         ax.plot(v, dF, lw=1.2, color="k")
         if ab is not None:
-            ax.plot(v, np.exp(-row_ts)/mean_F_all - 1, lw=1.0, color="C0", alpha=0.7)
-            ax.plot(v, np.exp(-row_px)/mean_F_all - 1, lw=1.0, color="C3", alpha=0.7)
+            ax.plot(v, np.exp(-row_ts) / mean_F_all - 1, lw=1.0, color="C0", alpha=0.7)
+            ax.plot(v, np.exp(-row_px) / mean_F_all - 1, lw=1.0, color="C3", alpha=0.7)
         ax.axhline(0, color="gray", ls=":", alpha=0.6, lw=0.8)
         ax.set_ylim(-1.2, 1.2)
-        if i == 0: ax.set_title("δF(v) = F/⟨F⟩ - 1")
-        if i == nrows-1: ax.set_xlabel("v [km/s]")
+        if i == 0:
+            ax.set_title("δF(v) = F/⟨F⟩ - 1")
+        if i == nrows - 1:
+            ax.set_xlabel("v [km/s]")
         ax.grid(alpha=0.3)
 
         # (4) single-sightline P1D
         ax = axes[i, 3]
+
         def _p1d(delta):
             ft = np.fft.rfft(delta * dv_kms)
-            return np.abs(ft)**2 / (header.nbins * dv_kms)
-        p_unm = _p1d(np.exp(-row)/mean_F_all - 1)
+            return np.abs(ft) ** 2 / (header.nbins * dv_kms)
+
+        p_unm = _p1d(np.exp(-row) / mean_F_all - 1)
         ax.loglog(k_cyc[1:], p_unm[1:], lw=1.2, color="k", label="unmasked")
         if ab is not None:
-            p_ts = _p1d(np.exp(-row_ts)/mean_F_all - 1)
-            p_px = _p1d(np.exp(-row_px)/mean_F_all - 1)
+            p_ts = _p1d(np.exp(-row_ts) / mean_F_all - 1)
+            p_px = _p1d(np.exp(-row_px) / mean_F_all - 1)
             ax.loglog(k_cyc[1:], p_ts[1:], lw=1.0, color="C0", alpha=0.7, label="τ-space")
             ax.loglog(k_cyc[1:], p_px[1:], lw=1.0, color="C3", alpha=0.7, label="PRIYA")
         # Annotate feature scales.  1/b ~ 30 km/s → k_cyc ≈ 0.03, in PRIYA ≈ 0.19.
-        ax.axvline(1/100., color="gray", ls=":", alpha=0.5)  # k=0.01 → 100 km/s
-        ax.axvline(1/30., color="gray", ls=":", alpha=0.5)   # k=0.033 → 30 km/s (b)
-        ax.text(1/100.*1.02, 1e-5, "1/(100 km/s)", fontsize=7, rotation=90, color="gray")
-        ax.text(1/30.*1.02,  1e-5, "1/(30 km/s) ≈ b", fontsize=7, rotation=90, color="gray")
+        ax.axvline(1 / 100.0, color="gray", ls=":", alpha=0.5)  # k=0.01 → 100 km/s
+        ax.axvline(1 / 30.0, color="gray", ls=":", alpha=0.5)  # k=0.033 → 30 km/s (b)
+        ax.text(1 / 100.0 * 1.02, 1e-5, "1/(100 km/s)", fontsize=7, rotation=90, color="gray")
+        ax.text(1 / 30.0 * 1.02, 1e-5, "1/(30 km/s) ≈ b", fontsize=7, rotation=90, color="gray")
         if i == 0:
             ax.set_title("Single-sightline P1D")
             # Add an upper axis for PRIYA angular k
-            secax = ax.secondary_xaxis('top', functions=(lambda x: 2*np.pi*x,
-                                                           lambda x: x/(2*np.pi)))
+            secax = ax.secondary_xaxis(
+                "top", functions=(lambda x: 2 * np.pi * x, lambda x: x / (2 * np.pi))
+            )
             secax.set_xlabel("k (PRIYA angular, 2π·k) [rad·s/km]", fontsize=9)
-        if i == 0: ax.legend(fontsize=8)
-        if i == nrows-1: ax.set_xlabel("k (cyclic) [s/km]")
+        if i == 0:
+            ax.legend(fontsize=8)
+        if i == nrows - 1:
+            ax.set_xlabel("k (cyclic) [s/km]")
         ax.grid(alpha=0.3, which="both")
         ax.set_xlim(5e-4, 5e-2)
         ax.set_ylim(1e-6, 1e2)

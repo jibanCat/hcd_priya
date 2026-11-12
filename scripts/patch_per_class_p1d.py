@@ -6,7 +6,9 @@ stream the tau file once and append a p1d_per_class.h5 file with four
 subset P1Ds (clean / LLS / subDLA / DLA) plus their mean-F and sightline
 counts, all in HDF5 with metadata attributes.
 
-Does NOT modify any existing output; only adds p1d_per_class.h5.
+Does NOT modify any existing output; only adds p1d_per_class.h5. A catalogue that the pipeline resume paths would
+refuse (catalog.load_validated_catalog: a pre-fix box-edge duplicate, an impossible span, a non-finite N_HI) is
+reported as REFUSED and nothing is written for that snapshot.
 
 Usage:
     python3 scripts/patch_per_class_p1d.py                       # all done snaps
@@ -15,7 +17,9 @@ Usage:
     python3 scripts/patch_per_class_p1d.py --force               # overwrite existing
     python3 scripts/patch_per_class_p1d.py --hires               # /hires subtree only
 """
+
 from __future__ import annotations
+import os
 
 import argparse
 import json
@@ -26,13 +30,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from hcd_analysis.catalog import AbsorberCatalog
+from hcd_analysis.catalog import CatalogIntegrityError, load_validated_catalog
 from hcd_analysis.io import parse_sim_params, spectra_files_for_sim, SimInfo
 from hcd_analysis.p1d import compute_p1d_per_class, save_p1d_per_class_hdf5
 
-LF_DATA_ROOT = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full")
-HIRES_DATA_ROOT = Path("/nfs/turbo/lsa-cavestru/mfho/priya/emu_full_hires")
-OUTPUT_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+LF_DATA_ROOT = Path(os.environ.get("HCD_LF_RAW_DIR", "<HCD_LF_RAW_DIR unset>"))
+HIRES_DATA_ROOT = Path(os.environ.get("HCD_HR_RAW_DIR", "<HCD_HR_RAW_DIR unset>"))
+OUTPUT_ROOT = Path(os.environ.get("HCD_OUTPUTS_DIR", "<HCD_OUTPUTS_DIR unset>"))
 FORCE = False
 
 
@@ -65,16 +69,27 @@ def patch_one(snap_dir: Path) -> str:
     hdf5_path = spectra_map[snap_num]
 
     try:
-        cat = AbsorberCatalog.load_npz(cat_path)
+        cat = load_validated_catalog(
+            cat_path, nbins
+        )  # the pipeline resume-path guard: refuses a pre-fix catalogue
+    except CatalogIntegrityError as e:
+        return f"REFUSED {snap_dir.name}: {e}"
+    try:
         res = compute_p1d_per_class(
             hdf5_path=hdf5_path,
-            nbins=nbins, dv_kms=dv_kms,
+            nbins=nbins,
+            dv_kms=dv_kms,
             catalog=cat,
-            batch_size=4096, n_skewers=None,
+            batch_size=4096,
+            n_skewers=None,
         )
         save_p1d_per_class_hdf5(
-            out_h5, res,
-            sim_name=sim_name, snap=snap_num, z=z, dv_kms=dv_kms,
+            out_h5,
+            res,
+            sim_name=sim_name,
+            snap=snap_num,
+            z=z,
+            dv_kms=dv_kms,
             extra_attrs={
                 "nbins": nbins,
                 "mode": "hires" if is_hires else "LF",
@@ -86,9 +101,11 @@ def patch_one(snap_dir: Path) -> str:
         )
     except Exception as e:
         return f"ERROR {snap_dir.name}: {e}"
-    return (f"OK z={z:.2f} counts(cl/LLS/sub/DLA)={res['n_sightlines_clean']}/"
-            f"{res['n_sightlines_LLS']}/{res['n_sightlines_subDLA']}/{res['n_sightlines_DLA']}: "
-            f"{sim_name[:30]}")
+    return (
+        f"OK z={z:.2f} counts(cl/LLS/sub/DLA)={res['n_sightlines_clean']}/"
+        f"{res['n_sightlines_LLS']}/{res['n_sightlines_subDLA']}/{res['n_sightlines_DLA']}: "
+        f"{sim_name[:30]}"
+    )
 
 
 def main():
@@ -96,10 +113,10 @@ def main():
     parser.add_argument("--n-workers", type=int, default=4)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--hires", action="store_true",
-                        help="Only process the /hires subtree")
-    parser.add_argument("--lf-only", action="store_true",
-                        help="Only process the LF (non-hires) subtree")
+    parser.add_argument("--hires", action="store_true", help="Only process the /hires subtree")
+    parser.add_argument(
+        "--lf-only", action="store_true", help="Only process the LF (non-hires) subtree"
+    )
     args = parser.parse_args()
     global FORCE
     FORCE = args.force
@@ -116,7 +133,7 @@ def main():
         if snap_dir.name.startswith("snap_") and (snap_dir / "catalog.npz").exists():
             snap_dirs.append(snap_dir)
     if args.limit:
-        snap_dirs = snap_dirs[:args.limit]
+        snap_dirs = snap_dirs[: args.limit]
     print(f"Found {len(snap_dirs)} snap dirs to check/patch")
 
     t0 = time.time()
@@ -125,10 +142,14 @@ def main():
         futs = [ex.submit(patch_one, d) for d in snap_dirs]
         for i, fut in enumerate(as_completed(futs), 1):
             r = fut.result()
-            if r.startswith("OK"):                  counters["OK"] += 1
-            elif r.startswith("ALREADY_DONE"):      counters["ALREADY_DONE"] += 1
-            elif r.startswith(("SKIP", "NO_")):     counters["SKIP"] += 1
-            else:                                   counters["ERROR"] += 1
+            if r.startswith("OK"):
+                counters["OK"] += 1
+            elif r.startswith("ALREADY_DONE"):
+                counters["ALREADY_DONE"] += 1
+            elif r.startswith(("SKIP", "NO_")):
+                counters["SKIP"] += 1
+            else:
+                counters["ERROR"] += 1
             if i % 25 == 0 or i == len(snap_dirs):
                 print(f"  [{i}/{len(snap_dirs)}] {time.time()-t0:.0f}s  {counters}  last={r}")
 

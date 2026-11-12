@@ -1,0 +1,6 @@
+# Findings of tools/ci/check_dist_content.py that are already known, so that CI fails only on a new one. Each line is
+# one occurrence: rule, member and the sha256 of the stripped line, tab-separated; the text itself is never written
+# here. Every entry is a line already public on the default branch, waiting for the cleanup that removes it
+# (docs/release_checklist.md, section 3). CI fails on an occurrence not listed and on an entry no longer found, so
+# remove an entry in the change that fixes its line. tests/test_dist_content.py pins the entries this file may hold:
+# adding one means editing that test. The release gate (--release) ignores this list; it must be empty at a release.

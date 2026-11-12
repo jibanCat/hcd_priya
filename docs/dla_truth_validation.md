@@ -1,5 +1,9 @@
 # DLA truth validation: τ-peak finder vs particle-based colden
 
+> **Historical (2026-04-27): this validation ran on catalogues made before the bug-8 fix
+> (`docs/bugs_found.md`, bug 8: box-edge systems listed twice). It has not been rerun on the corrected
+> catalogues.**
+
 This document records the validation of the production τ-peak DLA finder
 (`hcd_analysis.catalog.find_systems_in_skewer` + the fast-mode sum-rule NHI
 estimator `voigt_utils.nhi_from_tau_fast`) against an independent
@@ -250,7 +254,7 @@ The HiRes-only validation tells us:
    and consistent with the slight under-prediction the production
    pipeline reports vs PW09 / Noterdaeme+2012 / Ho+2021 — see
    `docs/analysis.md` §3.
-4. **No rerun is warranted.** The four hypotheses pass cleanly; any
+4. **No rerun was judged warranted at the time (2026-04-27, before the bug-8 fix).** The four hypotheses passed cleanly; any
    anomaly that would justify a full reprocess would have to show up as
    either (a) a > 0.05 dex bias, (b) > 0.15 dex scatter, (c) < 80 %
    completeness, or (d) < 70 % purity. None of those apply.

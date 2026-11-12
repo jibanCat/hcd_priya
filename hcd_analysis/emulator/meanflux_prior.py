@@ -2,13 +2,14 @@
 
 The τ_eff–cosmology degeneracy biases cosmology unless τ₀(z) is anchored on the
 observed mean flux (design §4); this module is the PRODUCER of that anchor. For the MVP
-the centre μ_z is the **Kim2013 curve** (``KIM_AMP·(1+z)^KIM_SLOPE``), the SAME curve the
+the centre μ_z is the **Kim07 curve** (``KIM_AMP·(1+z)^KIM_SLOPE``), the SAME curve the
 cache's τ₀ ladder is built on — so the prior is matched to the cache by construction
 (α = τ₀/Kim(z) = 1 at the centre, the ladder's interior). The width is a fractional
 fraction of μ_z (the measurement width); ``flat=True`` gives a genuinely-wide-but-finite
 prior for the ∞-prior scan (NOT σ=1e30 — that would make the Normal ill-conditioned and
 the ladder coord σ/Kim numerically huge; we use a wide MULTIPLE of the nominal width).
 """
+
 from __future__ import annotations
 
 import jax
@@ -16,10 +17,12 @@ import jax.numpy as jnp
 
 from .data import KIM_AMP, KIM_SLOPE
 
-assert jax.config.read("jax_enable_x64"), \
-    "x64 must be on (import hcd_analysis.emulator before jax)"
+# the conversions (no prior) live in mean_flux_model; re-exported here unchanged for the historical callers
+from .mean_flux_model import TAU0_PIVOT_Z, kim_tau0, tau0_alpha_priya  # noqa: F401
 
-# Nominal fractional width of the mean-flux prior, δτ₀/τ₀. The Kim2013 / Becker19 ⟨F⟩(z)
+assert jax.config.read("jax_enable_x64"), "x64 must be on (import hcd_analysis.emulator before jax)"
+
+# Nominal fractional width of the mean-flux prior, δτ₀/τ₀. The Kim07 / Becker19 ⟨F⟩(z)
 # is measured to a few-percent; 0.05 is a conservative measurement-width MVP value (the
 # production value should track the actual ⟨F⟩(z) error budget — see LYA-CONSULT below).
 DEFAULT_FRAC_SIGMA = 0.05
@@ -38,12 +41,7 @@ FLAT_SIGMA_MULT = 20.0
 BECKER13_TAU0 = 0.751
 BECKER13_BETA = 2.90
 BECKER13_C = -0.132
-BECKER13_ZREF = 3.5     # the pivot (1+z)/(1+3.5) = (1+z)/4.5 in Becker+2013 Eq. 6
-
-
-def kim_tau0(z):
-    """Kim2013 central mean-flux τ₀(z) = KIM_AMP·(1+z)^KIM_SLOPE (the cache ladder anchor)."""
-    return KIM_AMP * (1.0 + jnp.asarray(z)) ** KIM_SLOPE
+BECKER13_ZREF = 3.5  # the pivot (1+z)/(1+3.5) = (1+z)/4.5 in Becker+2013 Eq. 6
 
 
 def becker13_tau0(z):
@@ -62,33 +60,23 @@ def becker13_tau0(z):
 # §5: "τ₀ absorbs residual HCD contamination at high k … should not be placed with a Gaussian prior
 # unless co-varied with a HCD a_HCD"). The degeneracy-break is the SMOOTH 2-param structure (no
 # per-z wiggle) + co-varying HCD, not a tight prior. These REPLACE the 13 independent per-z rungs.
-TAU0_AMP_RANGE = (0.75, 1.25)    # PRIYA uniform prior on amplitude τ₀ (×, center 1.0 = Kim07)
-DTAU0_RANGE = (-0.40, 0.25)      # PRIYA uniform prior on slope dτ₀ (center 0 = Kim07 slope)
-TAU0_PIVOT_Z = 3.0               # the (1+z)/(1+z_p) pivot (PRIYA (1+z)/4 → z_p=3)
+TAU0_AMP_RANGE = (0.75, 1.25)  # PRIYA uniform prior on amplitude τ₀ (×, center 1.0 = Kim07)
+DTAU0_RANGE = (-0.40, 0.25)  # PRIYA uniform prior on slope dτ₀ (center 0 = Kim07 slope)
+# TAU0_PIVOT_Z: the (1+z)/(1+z_p) pivot, with kim_tau0 and tau0_alpha_priya re-exported from mean_flux_model
 # (legacy τ₀-space power-law-with-C widths, kept for the Becker-anchored utility path only:)
 TAU0_LOGA_SIGMA = 0.05
 TAU0_BETA_SIGMA = 0.15
-
-
-def tau0_alpha_priya(z, tau0_amp, dtau0, *, z_pivot=TAU0_PIVOT_Z):
-    """PRIYA mean-flux model in the α = τ₀/Kim LADDER coordinate (Bird+2023 §2.7.1, Eq.2.14–15:
-    τ_eff = τ₀·((1+z)/4)^dτ₀·τ_Kim): ``α(z) = tau0_amp · ((1+z)/(1+z_pivot))^dtau0``.
-
-    Replaces the 13 INDEPENDENT per-z α rungs with this 2-parameter smooth curve, so τ₀ evolves
-    on a physically-informed amplitude+slope (PRIYA-native) instead of a free per-z wiggle that
-    biases A_p. ``tau0_amp=1, dtau0=0`` = the Kim central rung (the cache ladder anchor).
-    Multiply by ``kim_tau0(z)`` for τ₀(z). Differentiable in (tau0_amp, dtau0) for NUTS."""
-    z = jnp.asarray(z)
-    return tau0_amp * ((1.0 + z) / (1.0 + z_pivot)) ** dtau0
 
 
 def fit_tau0_alpha_priya(z, alpha_z, *, z_pivot=TAU0_PIVOT_Z):
     """LSQ (tau0_amp, dtau0) for a sim's per-z α(z)=τ₀/Kim — the CLOSURE truth params (and the
     real-fit prior center when fed Becker/Kim). Linear fit of log α vs log((1+z)/(1+z_pivot))."""
     import numpy as _np
-    z = _np.asarray(z, float); a = _np.asarray(alpha_z, float)
+
+    z = _np.asarray(z, float)
+    a = _np.asarray(alpha_z, float)
     x = _np.log((1.0 + z) / (1.0 + z_pivot))
-    b, c = _np.polyfit(x, _np.log(a), 1)       # slope b = dtau0, intercept c = log(tau0_amp)
+    b, c = _np.polyfit(x, _np.log(a), 1)  # slope b = dtau0, intercept c = log(tau0_amp)
     return float(_np.exp(c)), float(b)
 
 
@@ -111,14 +99,16 @@ def fit_tau0_powerlaw(z, tau0, *, zref=BECKER13_ZREF):
     (host-side; used to set the closure mock's true τ₀ amplitude+slope, and the
     closure prior center)."""
     import numpy as _np
-    z = _np.asarray(z, dtype=float); tau0 = _np.asarray(tau0, dtype=float)
+
+    z = _np.asarray(z, dtype=float)
+    tau0 = _np.asarray(tau0, dtype=float)
     best = None
     for c in _np.linspace(-0.20, 0.05, 26):
         y = tau0 - c
         if _np.any(y <= 0):
             continue
         x = _np.log((1.0 + z) / (1.0 + zref))
-        b, a = _np.polyfit(x, _np.log(y), 1)          # slope b, intercept a = logA
+        b, a = _np.polyfit(x, _np.log(y), 1)  # slope b, intercept a = logA
         resid = _np.sum((a + b * x - _np.log(y)) ** 2)
         if best is None or resid < best[0]:
             best = (resid, a, b, c)
@@ -131,7 +121,7 @@ def fit_tau0_powerlaw(z, tau0, *, zref=BECKER13_ZREF):
 def meanflux_tau0_prior(z, *, frac_sigma=DEFAULT_FRAC_SIGMA, flat=False, center="kim"):
     """Per-z mean-flux prior ``(tau0_mu, tau0_sigma)`` in τ₀ units.
 
-    ``center="kim"`` (default, MVP): μ_z = Kim2013 ⟨τ_eff⟩(z) — matched to the cache τ₀
+    ``center="kim"`` (default, MVP): μ_z = Kim07 ⟨τ_eff⟩(z) — matched to the cache τ₀
     ladder (α=τ₀/Kim(z)=1 at centre).  ``center="becker13"``: μ_z = Becker+2013 Eq. 6
     (the DLA-masked + metal-corrected curve the DESI/KS pipelines use) — the production
     anchor.  σ_z = frac_sigma·μ_z (the measurement width; Becker+2013 reports ~3–8%
@@ -148,10 +138,10 @@ def meanflux_tau0_prior(z, *, frac_sigma=DEFAULT_FRAC_SIGMA, flat=False, center=
 
     LYA-CONSULT: the PRODUCTION μ_z must be the OBSERVED mean-flux optical depth
     ⟨τ_eff⟩(z) = −ln⟨F⟩(z) **in the data's DLA-masked / metal-corrected state** (the
-    Becker+2019 / Turner+2024 / Kim+2013 choice the data pipeline actually uses, incl.
-    which metal/DLA treatment ⟨F⟩(z) was measured under). Using the Kim2013 curve here is
+    Becker+2019 / Turner+2024 / Kim+2007 choice the data pipeline actually uses, incl.
+    which metal/DLA treatment ⟨F⟩(z) was measured under). Using the Kim07 curve here is
     a deliberate MVP so the prior is matched to the cache ladder (α=1 at centre); it is
-    NOT a claim that Kim2013 is the right observational anchor. The Lyα agent must pick
+    NOT a claim that Kim07 is the right observational anchor. The Lyα agent must pick
     the production ⟨F⟩(z) (and its z-dependent error budget for ``frac_sigma``); do not
     ship the cosmology result on the Kim MVP without that sign-off.
     """

@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,10 +29,19 @@ sys.path.insert(0, str(ROOT))
 from hcd_analysis.catalog import build_catalog
 from hcd_analysis.cddf import measure_cddf
 from hcd_analysis.io import read_header, pixel_dv_kms
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-SIM_NAME = "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
-HDF5 = Path("/nfs/turbo/umor-yueyingn/mfho/emu_full") / SIM_NAME / "output" / "SPECTRA_017" / "lya_forest_spectra_grid_480.hdf5"
-OLD_CAT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs") / SIM_NAME / "snap_017" / "catalog.npz"
+SIM_NAME = (
+    "ns0.803Ap2.2e-09herei4.05heref2.67alphaq2.21hub0.735omegamh20.141hireionz7.17bhfeedback0.056"
+)
+HDF5 = (
+    Path(external_path("HCD_LF_RAW_DIR"))
+    / SIM_NAME
+    / "output"
+    / "SPECTRA_017"
+    / "lya_forest_spectra_grid_480.hdf5"
+)
+OLD_CAT = Path(external_path("HCD_OUTPUTS_DIR")) / SIM_NAME / "snap_017" / "catalog.npz"
 NEW_CAT = ROOT / "tests" / "out" / "snap_017_fixed_catalog.npz"
 DIAG_DIR = ROOT / "figures" / "diagnostics"
 
@@ -39,17 +49,20 @@ DIAG_DIR = ROOT / "figures" / "diagnostics"
 def prochaska2014_logf(logN):
     """Prochaska+2014 CDDF PchipInterpolator (from scripts/plot_intermediate.py)."""
     from scipy.interpolate import PchipInterpolator
+
     _logN = np.array([12.0, 15.0, 17.0, 18.0, 20.0, 21.0, 21.5, 22.0])
     _logf = np.array([-9.72, -14.41, -17.94, -19.39, -21.28, -22.82, -23.95, -25.50])
-    return PchipInterpolator(_logN, _logf)(np.clip(np.asarray(logN, dtype=float),
-                                                     _logN[0], _logN[-1]))
+    return PchipInterpolator(_logN, _logf)(
+        np.clip(np.asarray(logN, dtype=float), _logN[0], _logN[-1])
+    )
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--n-workers", type=int, default=8)
-    parser.add_argument("--n-skewers", type=int, default=None,
-                        help="Optional row cap for debug (None = all 691200)")
+    parser.add_argument(
+        "--n-skewers", type=int, default=None, help="Optional row cap for debug (None = all 691200)"
+    )
     args = parser.parse_args()
 
     NEW_CAT.parent.mkdir(parents=True, exist_ok=True)
@@ -57,7 +70,9 @@ def main():
 
     header = read_header(HDF5)
     dv_kms = pixel_dv_kms(header)
-    print(f"snap 017  z={header.redshift}  nbins={header.nbins}  dv={dv_kms:.3f} km/s  n_skewers={header.n_skewers}")
+    print(
+        f"snap 017  z={header.redshift}  nbins={header.nbins}  dv={dv_kms:.3f} km/s  n_skewers={header.n_skewers}"
+    )
 
     # -- Rebuild catalog with fixed fitter --------------------------------
     print(f"Building catalog with fixed fitter (n_workers={args.n_workers})...")
@@ -96,8 +111,22 @@ def main():
 
     fig, ax = plt.subplots(1, 2, figsize=(13, 5))
 
-    ax[0].hist(old_logN, bins=bins, histtype="step", lw=1.8, label=f"pre-fix  N={len(old_logN)}", color="C3")
-    ax[0].hist(new_logN, bins=bins, histtype="step", lw=1.8, label=f"post-fix N={len(new_logN)}", color="C0")
+    ax[0].hist(
+        old_logN,
+        bins=bins,
+        histtype="step",
+        lw=1.8,
+        label=f"pre-fix  N={len(old_logN)}",
+        color="C3",
+    )
+    ax[0].hist(
+        new_logN,
+        bins=bins,
+        histtype="step",
+        lw=1.8,
+        label=f"post-fix N={len(new_logN)}",
+        color="C0",
+    )
     for thr, name in [(17.2, "LLS"), (19.0, "subDLA"), (20.3, "DLA")]:
         ax[0].axvline(thr, color="gray", lw=0.7, ls=":")
         ax[0].text(thr + 0.02, 5e4, name, color="gray", fontsize=8)
@@ -119,14 +148,25 @@ def main():
     cddf_new = measure_cddf(cat_new, header, log_nhi_bins=cddf_bins)
 
     # Prochaska truth
-    truth = 10.0**prochaska2014_logf(cddf_new["log_nhi_centres"])
+    truth = 10.0 ** prochaska2014_logf(cddf_new["log_nhi_centres"])
 
-    ax[1].step(cddf_old["log_nhi_centres"], cddf_old["f_nhi"], where="mid",
-               lw=1.8, label="pre-fix", color="C3")
-    ax[1].step(cddf_new["log_nhi_centres"], cddf_new["f_nhi"], where="mid",
-               lw=1.8, label="post-fix", color="C0")
-    ax[1].plot(cddf_new["log_nhi_centres"], truth, "k--", lw=1.4,
-               label="Prochaska+2014")
+    ax[1].step(
+        cddf_old["log_nhi_centres"],
+        cddf_old["f_nhi"],
+        where="mid",
+        lw=1.8,
+        label="pre-fix",
+        color="C3",
+    )
+    ax[1].step(
+        cddf_new["log_nhi_centres"],
+        cddf_new["f_nhi"],
+        where="mid",
+        lw=1.8,
+        label="post-fix",
+        color="C0",
+    )
+    ax[1].plot(cddf_new["log_nhi_centres"], truth, "k--", lw=1.4, label="Prochaska+2014")
     for thr in (17.2, 19.0, 20.3):
         ax[1].axvline(thr, color="gray", lw=0.7, ls=":")
     ax[1].set_yscale("log")
@@ -146,12 +186,12 @@ def main():
     # -- Summary ----------------------------------------------------------
     print("\nClass counts:")
     print(f"             LLS      subDLA    DLA")
-    old_lls = int(((old_logN>=17.2)&(old_logN<19)).sum())
-    old_sub = int(((old_logN>=19)&(old_logN<20.3)).sum())
-    old_dla = int((old_logN>=20.3).sum())
-    new_lls = int(((new_logN>=17.2)&(new_logN<19)).sum())
-    new_sub = int(((new_logN>=19)&(new_logN<20.3)).sum())
-    new_dla = int((new_logN>=20.3).sum())
+    old_lls = int(((old_logN >= 17.2) & (old_logN < 19)).sum())
+    old_sub = int(((old_logN >= 19) & (old_logN < 20.3)).sum())
+    old_dla = int((old_logN >= 20.3).sum())
+    new_lls = int(((new_logN >= 17.2) & (new_logN < 19)).sum())
+    new_sub = int(((new_logN >= 19) & (new_logN < 20.3)).sum())
+    new_dla = int((new_logN >= 20.3).sum())
     print(f"  pre-fix   {old_lls:>7d}  {old_sub:>7d}   {old_dla:>5d}")
     print(f"  post-fix  {new_lls:>7d}  {new_sub:>7d}   {new_dla:>5d}")
     print(f"  DLA gain: ×{new_dla/max(old_dla,1):.1f}")
@@ -159,6 +199,7 @@ def main():
 
 class _DummyCat:
     """Adapter so measure_cddf can consume the raw pre-fix catalog.npz."""
+
     def __init__(self, OLD_cat, z):
         self.absorbers = _DummyAbs(OLD_cat)
         self.z = z
@@ -177,10 +218,14 @@ class _DummyAbsorber:
     def __init__(self, NHI, log_NHI):
         self.NHI = NHI
         self.log_NHI = log_NHI
-        if log_NHI >= 20.3: self.absorber_class = "DLA"
-        elif log_NHI >= 19.0: self.absorber_class = "subDLA"
-        elif log_NHI >= 17.2: self.absorber_class = "LLS"
-        else: self.absorber_class = "forest"
+        if log_NHI >= 20.3:
+            self.absorber_class = "DLA"
+        elif log_NHI >= 19.0:
+            self.absorber_class = "subDLA"
+        elif log_NHI >= 17.2:
+            self.absorber_class = "LLS"
+        else:
+            self.absorber_class = "forest"
 
 
 if __name__ == "__main__":

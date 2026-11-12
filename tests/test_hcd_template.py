@@ -4,6 +4,7 @@ Minimal unit tests for hcd_analysis.hcd_template.
 Run as:
     python3 tests/test_hcd_template.py
 """
+
 from __future__ import annotations
 
 import sys
@@ -26,14 +27,14 @@ from hcd_analysis.hcd_template import (
 
 def test_class_ratio_eq6_has_c_plateau():
     """Eq.6 per-class ratio -> c_i(z) at high k (NOT pure boost); c0_LargeDLA<1 => sub-1."""
-    k = np.linspace(1e-3, 0.1, 400)          # angular s/km
+    k = np.linspace(1e-3, 0.1, 400)  # angular s/km
     r = class_ratio(k, 3.0)
     # at the largest k the boost term ~0, ratio -> c(z); c0 LLS≈0.985, LargeDLA≈0.334
     assert 0.9 < r["LLS"][-1] < 1.0, r["LLS"][-1]
-    assert r["Large-DLA"][-1] < 0.5, r["Large-DLA"][-1]      # genuine sub-1 plateau
+    assert r["Large-DLA"][-1] < 0.5, r["Large-DLA"][-1]  # genuine sub-1 plateau
     # high-k plateau matches the c0 table to the z-scaling
     zfac = (1 + 3.0) / (1 + 2.0)
-    assert np.allclose(r["Large-DLA"][-1], _C0[3] * zfac ** 0.4653, rtol=0.05)
+    assert np.allclose(r["Large-DLA"][-1], _C0[3] * zfac**0.4653, rtol=0.05)
     # low-k boost is above the plateau for LLS (real contamination)
     assert r["LLS"][0] > r["LLS"][-1]
 
@@ -49,8 +50,9 @@ def _user_reference_DLA4corr(kf, z, alpha):
     b_z = b_0 * ((1 + z) / (1 + z_0)) ** b_1
     factor = np.ones(kf.size)
     for i in range(4):
-        factor += (alpha[i] * ((1 + z) / (1 + z_0)) ** -3.55
-                   * ((a_z[i] * np.exp(b_z[i] * kf) - 1) ** -2))
+        factor += (
+            alpha[i] * ((1 + z) / (1 + z_0)) ** -3.55 * ((a_z[i] * np.exp(b_z[i] * kf) - 1) ** -2)
+        )
     return factor
 
 
@@ -60,8 +62,9 @@ def test_matches_user_reference_across_z_and_k():
         for alpha in [np.full(4, 0.1), np.array([0.2, 0.1, 0.05, 0.3])]:
             ours = template_factor(kf, z, alpha)
             ref = _user_reference_DLA4corr(kf, z, alpha)
-            assert np.allclose(ours, ref, atol=1e-12), \
-                f"z={z} alpha={alpha}: mismatch max={np.max(np.abs(ours-ref))}"
+            assert np.allclose(
+                ours, ref, atol=1e-12
+            ), f"z={z} alpha={alpha}: mismatch max={np.max(np.abs(ours-ref))}"
     print("  ✓ template_factor matches user DLA4corr exactly")
 
 
@@ -95,7 +98,7 @@ def test_contributions_sum_to_total():
 
 def test_correct_p1d_inverts_template():
     kf = np.linspace(0.002, 0.05, 20)
-    P_forest = 0.1 + np.exp(-kf * 30.)  # arbitrary smooth model
+    P_forest = 0.1 + np.exp(-kf * 30.0)  # arbitrary smooth model
     alpha_true = np.array([0.08, 0.15, 0.12, 0.25])
     P_obs = P_forest * template_factor(kf, 3.0, alpha_true)
     P_back = correct_p1d(kf, P_obs, 3.0, alpha_true)
@@ -105,21 +108,23 @@ def test_correct_p1d_inverts_template():
 
 def test_fit_recovers_alpha_on_dense_lowk_grid():
     # Use enough low-k points for the 4-parameter fit to be non-degenerate.
-    kf = np.concatenate([
-        np.linspace(0.0005, 0.005, 30),
-        np.linspace(0.006, 0.05, 40),
-    ])
-    P_forest = 0.5 + np.exp(-kf * 40.)
+    kf = np.concatenate(
+        [
+            np.linspace(0.0005, 0.005, 30),
+            np.linspace(0.006, 0.05, 40),
+        ]
+    )
+    P_forest = 0.5 + np.exp(-kf * 40.0)
     alpha_true = np.array([0.12, 0.18, 0.10, 0.22])
     np.random.seed(42)
-    P_obs = P_forest * template_factor(kf, 3.0, alpha_true) \
-            * (1 + 0.005 * np.random.randn(kf.size))  # 0.5 % multiplicative noise
+    P_obs = (
+        P_forest * template_factor(kf, 3.0, alpha_true) * (1 + 0.005 * np.random.randn(kf.size))
+    )  # 0.5 % multiplicative noise
     res = fit_alpha(kf, P_obs, P_forest, z=3.0, alpha0=np.full(4, 0.05))
     err = np.abs(res["alpha"] - alpha_true)
     # Tolerance generous to accommodate the poor constraint on Large-DLA when
     # the noise is above that class's contribution level.
-    assert np.all(err < 0.08), \
-        f"recovered α = {res['alpha']}, true α = {alpha_true}, err = {err}"
+    assert np.all(err < 0.08), f"recovered α = {res['alpha']}, true α = {alpha_true}, err = {err}"
     print(f"  ✓ fit recovered α (err {err.round(3)}) at 0.5% noise")
 
 

@@ -63,9 +63,8 @@ the recommended path is the three rows above.
    can run them on your machine, not just look at the committed
    outputs — the moment you change `n_skewers` or pick a different
    sim, you're already doing science.
-2. Read `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER_2026_04_28.md` (the most recent state of
-   the project) and skim `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER.md` (the previous
-   audit handover) for context.
+2. Ask the maintainers for the latest session handover (the most recent state of the project) and the previous
+   audit handover, for context; both are in the maintainers' private notes.
 3. Start on **A1** (the recommended starter; see the table above).
    Open a feature branch named for the project (e.g.
    `student/voigt-vs-fast-residuals`) and put any new code under
@@ -160,7 +159,7 @@ right thing to know.
 
 **Difficulty.** Intermediate.  **Time.** 2–4 weeks.
 **Prereqs.** NB04, plus reading Cooke, Pettini & Steidel 2018
-(arXiv:1710.11129, MNRAS 476, 4271) §3 (or any paper on DLA Voigt
+(ApJ 855, 102; arXiv:1710.11129) §3 (or any paper on DLA Voigt
 fitting).
 
 The current Voigt fitter assumes a single component per absorber.
@@ -204,9 +203,10 @@ plotting and statistical comparisons against observations.
 
 For one sim, plot dN/dX(DLA), dN/dX(subDLA), dN/dX(LLS) as functions
 of redshift over all available snapshots.  Compare against the PRIYA
-suite paper (Bird et al. 2023, MNRAS 526, 3392, arXiv:2306.05471) and
-the DLA-bias predictions in Bird, Haehnelt, Neeleman et al. 2017
-(arXiv:1605.06151, MNRAS 466, 2111), plus BOSS/DESI dN/dX
+suite paper (Bird et al. 2023, JCAP 10, 037, arXiv:2306.05471), the
+DLA predictions of Bird et al. 2014 (MNRAS 445, 2313, arXiv:1405.3994)
+and the SDSS DR12 dN/dX of Bird, Garnett & Ho 2017 (MNRAS 466, 2111,
+arXiv:1610.01165), plus BOSS/DESI dN/dX
 compilations (Prochaska & Wolfe 2009, Noterdaeme+2012, Ho+2021).
 
 **Deliverable.**
@@ -222,7 +222,7 @@ compilations (Prochaska & Wolfe 2009, Noterdaeme+2012, Ho+2021).
   see notebook 02 §3 for the integration-over-NHI recipe.
 - `docs/cddf_model.md` — the analytic CDDF model in the package, which
   has its own dN/dX(z) prediction you can overplot.
-- `/home/mfho/DLA_data/` for observational compilations.
+- `$HCD_DLA_DATA_DIR/` (a local copy of the observational compilations) for observational data.
 
 **Extensions.** Repeat for all 60 LF sims and show the within-LHS
 scatter at fixed redshift.  Decide whether the scatter grows or shrinks
@@ -279,7 +279,7 @@ sources.
 
 - `scripts/plot_cddf_vs_ho21.py` — the existing 1-source script;
   extend rather than rewrite.
-- `/home/mfho/DLA_data/` — already has many of the data files.
+- `$HCD_DLA_DATA_DIR/` (your local copy of the observational compilations) holds many of the data files.
 
 ---
 
@@ -322,7 +322,8 @@ the parameter-dependence of the systematic itself.
 ### C2. Rogers α-template fits across the LHS
 
 **Difficulty.** Intermediate.  **Time.** 3–4 weeks.
-**Prereqs.** NB03, plus reading Rogers+2018.
+**Prereqs.** NB03, plus reading Rogers et al. 2018 (MNRAS 474, 3032;
+arXiv:1706.08532).
 
 For each (sim, snap), fit the Rogers α-template to the per-class
 P1D ratio `P_<class>_only / P_clean`.  Then study how each `α_class`
@@ -350,7 +351,7 @@ dependent template.
 
 ## D. Clustering  (advanced)
 
-These come straight out of `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER_2026_04_28.md` §4.
+These come straight out of the 2026-04-28 session handover (§4; in the maintainers' private notes).
 Read that file first.  These are open research problems, not exercises.
 
 ### D1. Tighten β_DLA via LF+HR + z-stacking
@@ -369,8 +370,11 @@ similar.
 
 - A combined-sample joint fit reporting `(b_DLA, β_DLA)` with
   Gaussian errors, plus a covariance ellipse plot.
-- A statement on whether the new σ(β_DLA) is competitive with
-  Pérez-Ràfols+2018 (BOSS DR12, ~30k DLAs, σ_β = 0.1).
+- A statement on the new σ(β_DLA). Pérez-Ràfols et al. 2018 (MNRAS 473,
+  3019; arXiv:1709.00889) did not measure β_DLA: they fixed
+  β_DLA b_DLA = f(Ω) and measured b_DLA = 1.99 ± 0.11 from 19,655 DLAs (their
+  sample C2).
+  Say what precision on β_DLA would test that assumption.
 
 **Pointers.**
 
@@ -512,7 +516,7 @@ To avoid duplicating work, here's what's already in the repo:
 
 - 60 LF + 4 HR simulations fully processed: catalog, CDDF, P1D, per-
   class P1D, P1D-with-PRIYA-mask, P1D ratios.  See
-  `hcd_priya_notes/docs/code-repo-archive/handovers/SESSION_HANDOVER.md` §1 for the production state.
+  the audit handover (§1; in the maintainers' private notes) for the production state.
 - Catalog validation against particle-based truth on the 4 HR sims.
   See `docs/dla_truth_validation.md` and
   `docs/dla_truth_unmatched_analysis.md`.

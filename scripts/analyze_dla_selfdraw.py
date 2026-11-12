@@ -25,10 +25,11 @@ AND d["survey"] identical across shards (F6b), smoke-suffixed pkls filtered out 
 truth contract (boosted alpha_dla == boost x clean, all other truth entries bit-identical).
 Pure numpy on purpose — safe on the login node (no JAX import).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya /home/mfho/.conda/envs/emu-jax/bin/python3 \
-     scripts/analyze_dla_selfdraw.py --shard-dir /scratch/cavestru_root/cavestru1/mfho/dla_selfdraw \
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> python \
+     scripts/analyze_dla_selfdraw.py --shard-dir $HCD_RUNS_DIR/dla_selfdraw \
      [--npz-out out.npz] [--fig-out fig.png]
 """
+
 import argparse
 import functools
 import glob
@@ -39,13 +40,14 @@ import numpy as np
 
 print = functools.partial(print, flush=True)
 
-GATE = 0.30                       # |mean Delta bias_z| + 2*SE pass threshold (sigma_post)
-PRIOR_SD_ALPHA_DLA = 0.00925      # deployed alpha_dla(z=3) prior sd (2026-07-17 handoff)
+GATE = 0.30  # |mean Delta bias_z| + 2*SE pass threshold (sigma_post)
+PRIOR_SD_ALPHA_DLA = 0.00925  # deployed alpha_dla(z=3) prior sd (2026-07-17 handoff)
 ALPHA = "alpha_dla"
 PAIRED_PARAMS = ("ns", "Ap", "tau0_amp", "dtau0")
 
 
 # ---------------------------------------------------------------- ingest
+
 
 def load_shards(shard_dir):
     """Load every dla_selfdraw shard pkl in `shard_dir`, ordered by shard index. Returns
@@ -64,46 +66,54 @@ def load_shards(shard_dir):
         sv = d.get("survey")
         if survey0 is None:
             survey0 = sv
-        assert sv == survey0, \
-            f"{p}: survey {sv!r} != {survey0!r} (mixed-survey campaign must not pool)"
+        assert (
+            sv == survey0
+        ), f"{p}: survey {sv!r} != {survey0!r} (mixed-survey campaign must not pool)"
         fwd = d["meta"]["forward"]
-        assert fwd.get("dla_cov_reduced") is True, \
-            f"{p}: dla_cov_reduced is not True (stale-cov pkl)"
+        assert (
+            fwd.get("dla_cov_reduced") is True
+        ), f"{p}: dla_cov_reduced is not True (stale-cov pkl)"
         sig = fwd.get("forward_signature")
         assert sig, f"{p}: forward_signature is missing/None (vacuous consistency check)"
         if sig0 is None:
             sig0, meta0 = sig, d["meta"]
-        assert sig == sig0, \
-            f"{p}: forward_signature {sig!r} != {sig0!r} (mixed-forward campaign)"
+        assert sig == sig0, f"{p}: forward_signature {sig!r} != {sig0!r} (mixed-forward campaign)"
         b = float(d["meta"]["boost"])
-        assert b == float(meta0["boost"]), \
-            f"{p}: boost {b} != {meta0['boost']} (mixed-boost campaign)"
-        assert len(d["clean_per_mock"]) == len(d["boost_per_mock"]), \
-            f"{p}: clean/boost per-mock lists differ in length (pairing broken)"
+        assert b == float(
+            meta0["boost"]
+        ), f"{p}: boost {b} != {meta0['boost']} (mixed-boost campaign)"
+        assert len(d["clean_per_mock"]) == len(
+            d["boost_per_mock"]
+        ), f"{p}: clean/boost per-mock lists differ in length (pairing broken)"
         idxs.extend(int(i) for i in d["idxs"])
         for rc, rb in zip(d["clean_per_mock"], d["boost_per_mock"]):
             j = list(rc["names"]).index(ALPHA)
             tc, tb = np.asarray(rc["truth_vec"]), np.asarray(rb["truth_vec"])
-            assert np.isclose(tb[j], b * tc[j], rtol=1e-12, atol=0), \
-                f"{p}: boosted alpha_dla truth {tb[j]} != boost {b} x clean {tc[j]}"
+            assert np.isclose(
+                tb[j], b * tc[j], rtol=1e-12, atol=0
+            ), f"{p}: boosted alpha_dla truth {tb[j]} != boost {b} x clean {tc[j]}"
             keep = np.ones(len(tc), dtype=bool)
             keep[j] = False
-            assert np.array_equal(tc[keep], tb[keep]), \
-                f"{p}: non-DLA truth entries differ between arms (pairing broken)"
+            assert np.array_equal(
+                tc[keep], tb[keep]
+            ), f"{p}: non-DLA truth entries differ between arms (pairing broken)"
             clean.append(rc)
             boost.append(rb)
     want = set(range(int(meta0["n_mocks"])))
-    assert len(idxs) == len(set(idxs)), \
-        (f"duplicate mock idxs {sorted(i for i in set(idxs) if idxs.count(i) > 1)}: a "
-         f"double-counted mock must not pool through the gate")
-    assert set(idxs) == want, \
-        (f"campaign incomplete: missing mock idxs {sorted(want - set(idxs))} "
-         f"(got {len(idxs)}/{len(want)}); a partial campaign must not gate silently")
+    assert len(idxs) == len(set(idxs)), (
+        f"duplicate mock idxs {sorted(i for i in set(idxs) if idxs.count(i) > 1)}: a "
+        f"double-counted mock must not pool through the gate"
+    )
+    assert set(idxs) == want, (
+        f"campaign incomplete: missing mock idxs {sorted(want - set(idxs))} "
+        f"(got {len(idxs)}/{len(want)}); a partial campaign must not gate silently"
+    )
     assert len(clean) == len(idxs) == int(meta0["n_mocks"]), (len(clean), len(idxs))
     return clean, boost, meta0
 
 
 # ---------------------------------------------------------------- per-record stats
+
 
 def _col_draws_truth(rec, name):
     """(draws_1d, truth) for a named site: a draws column for names[] sites, or the
@@ -156,6 +166,7 @@ def rank_stats(us):
 
 # ---------------------------------------------------------------- pooling + gate
 
+
 def paired_delta_named(rec_clean, rec_boost, name):
     """Per-mock paired Delta bias_z = bias_z(boost) - bias_z(clean); the shared noise draw and
     the A3 metal-floor baseline cancel. None if either sd is degenerate."""
@@ -172,6 +183,7 @@ def pool_deltas(deltas, weights=None):
     mean (secondary line for the unequal retained-draw counts L). A None delta (degenerate
     posterior sd) drops its OWN weight, keeping the alignment."""
     from scipy.stats import t as _t
+
     keep = [i for i, x in enumerate(deltas) if x is not None]
     d = np.asarray([deltas[i] for i in keep], dtype=float)
     n = d.size
@@ -198,6 +210,7 @@ def verdict(ub):
 
 # ---------------------------------------------------------------- alpha_dla response
 
+
 def response_slope(pairs):
     """Displaced-truth response slope: sum_m Delta post_mean(alpha_dla) / sum_m Delta truth,
     with a leave-one-out jackknife SE. 1 = full tracking, 0 = fully prior-pinned. NOTE: the
@@ -215,8 +228,7 @@ def response_slope(pairs):
     n = dmean.size
     slope = float(dmean.sum() / dtruth.sum())
     if n > 1:
-        loo = np.asarray([(dmean.sum() - dmean[i]) / (dtruth.sum() - dtruth[i])
-                          for i in range(n)])
+        loo = np.asarray([(dmean.sum() - dmean[i]) / (dtruth.sum() - dtruth[i]) for i in range(n)])
         se = float(np.sqrt((n - 1) / n * ((loo - loo.mean()) ** 2).sum()))
     else:
         se = float("nan")
@@ -229,6 +241,7 @@ def response_slope(pairs):
 
 
 # ---------------------------------------------------------------- contraction
+
 
 def contraction_stats(recs, prior_sd=PRIOR_SD_ALPHA_DLA):
     """alpha_dla posterior sd vs the prior sd, plus the empirical prior sd recomputed from the
@@ -248,6 +261,7 @@ def contraction_stats(recs, prior_sd=PRIOR_SD_ALPHA_DLA):
 
 # ---------------------------------------------------------------- diagnostics
 
+
 def _corr(rec, name_a, name_b):
     da, _ = _col_draws_truth(rec, name_a)
     db, _ = _col_draws_truth(rec, name_b)
@@ -266,29 +280,44 @@ def _railing_frac(rec, floor_frac=0.05, ref=0.004414):
 
 # ---------------------------------------------------------------- report
 
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--shard-dir", default="/scratch/cavestru_root/cavestru1/mfho/dla_selfdraw")
-    ap.add_argument("--prior-median", type=float, default=0.004414,
-                    help="deployed alpha_dla prior median (railing reference)")
+    ap.add_argument(
+        "--shard-dir",
+        default=os.path.join(
+            os.environ.get("HCD_RUNS_DIR", "<HCD_RUNS_DIR unset>"), "dla_selfdraw"
+        ),
+    )
+    ap.add_argument(
+        "--prior-median",
+        type=float,
+        default=0.004414,
+        help="deployed alpha_dla prior median (railing reference)",
+    )
     ap.add_argument("--npz-out", default=None)
     ap.add_argument("--fig-out", default=None)
     args = ap.parse_args()
 
     clean, boost, meta = load_shards(args.shard_dir)
     n = len(clean)
-    print(f"== DLA selfdraw analyzer: {n} paired mocks, boost {meta['boost']}, "
-          f"forward_signature {meta['forward']['forward_signature'][:16]}... ==")
+    print(
+        f"== DLA selfdraw analyzer: {n} paired mocks, boost {meta['boost']}, "
+        f"forward_signature {meta['forward']['forward_signature'][:16]}... =="
+    )
     Lc = np.asarray([r["L"] for r in clean])
     Lb = np.asarray([r["L"] for r in boost])
     div = sum(int(r["n_div"]) for r in clean + boost)
-    print(f"retained draws L: clean {Lc.min()}..{Lc.max()}, boost {Lb.min()}..{Lb.max()}; "
-          f"total divergences {div}")
+    print(
+        f"retained draws L: clean {Lc.min()}..{Lc.max()}, boost {Lb.min()}..{Lb.max()}; "
+        f"total divergences {div}"
+    )
 
     # -- alpha_dla recovery, both arms
     for arm, recs in (("clean", clean), ("boost", boost)):
-        bz = np.asarray([x for x in (bias_z_named(r, ALPHA) for r in recs)
-                         if x is not None], dtype=float)   # None-guard (closing-panel fix 8)
+        bz = np.asarray(
+            [x for x in (bias_z_named(r, ALPHA) for r in recs) if x is not None], dtype=float
+        )  # None-guard (closing-panel fix 8)
         us = [rank_u(r, ALPHA) for r in recs]
         cov = central_coverage(us)
         pm = np.asarray([float(_col_draws_truth(r, ALPHA)[0].mean()) for r in recs])
@@ -296,30 +325,40 @@ def main():
         rs = rank_stats(us)
         note = "" if arm == "clean" else "  (truth = displaced; coverage NOT an SBC statement)"
         print(f"\n-- alpha_dla [{arm}]{note}")
-        print(f"   bias_z mean {bz.mean():+.3f} +/- {bz.std(ddof=1)/np.sqrt(n):.3f} "
-              f"(median {np.median(bz):+.3f}); softplus-skew note: unpaired clean-arm MEAN "
-              f"pulls ~+0.65 are EXPECTED without miscalibration (mean-only argument)")
+        print(
+            f"   bias_z mean {bz.mean():+.3f} +/- {bz.std(ddof=1)/np.sqrt(n):.3f} "
+            f"(median {np.median(bz):+.3f}); softplus-skew note: unpaired clean-arm MEAN "
+            f"pulls ~+0.65 are EXPECTED without miscalibration (mean-only argument)"
+        )
         print(f"   post-mean vs truth: <mean> {pm.mean():.6f} vs <truth> {tr.mean():.6f}")
-        print(f"   coverage: {cov['in68']}/{cov['n']} in central-68, "
-              f"{cov['in95']}/{cov['n']} in central-95; mean rank u {rs['mean_u']:.3f} "
-              f"(z {rs['z']:+.2f} vs uniform — skew does NOT excuse rank non-uniformity)")
+        print(
+            f"   coverage: {cov['in68']}/{cov['n']} in central-68, "
+            f"{cov['in95']}/{cov['n']} in central-95; mean rank u {rs['mean_u']:.3f} "
+            f"(z {rs['z']:+.2f} vs uniform — skew does NOT excuse rank non-uniformity)"
+        )
         rail = np.asarray([_railing_frac(r, ref=args.prior_median) for r in recs])
         print(f"   railing (draws < 5% prior median): max frac {rail.max():.3f}")
 
     # -- displaced-truth response + contraction
     resp = response_slope(list(zip(clean, boost)))
     con = contraction_stats(clean)
-    print(f"\n-- displaced-truth response: slope {resp['slope']:.3f} +/- {resp['slope_se']:.3f} "
-          f"(jackknife; 1 = full tracking; the 1-D shrinkage heuristic 1-(post/prior)^2 "
-          f"= {1 - con['sd_ratio']**2:.2f} is a lower REFERENCE only — it does not bind in "
-          f"the multi-parameter posterior)")
-    print(f"-- contraction: post_sd {con['post_sd_mean']:.5f} / prior_sd {PRIOR_SD_ALPHA_DLA} "
-          f"= {con['sd_ratio']:.3f} (contraction {con['contraction']:.3f}); empirical prior sd "
-          f"from the {n} clean truths: {con['prior_sd_empirical']:.5f}")
+    print(
+        f"\n-- displaced-truth response: slope {resp['slope']:.3f} +/- {resp['slope_se']:.3f} "
+        f"(jackknife; 1 = full tracking; the 1-D shrinkage heuristic 1-(post/prior)^2 "
+        f"= {1 - con['sd_ratio']**2:.2f} is a lower REFERENCE only — it does not bind in "
+        f"the multi-parameter posterior)"
+    )
+    print(
+        f"-- contraction: post_sd {con['post_sd_mean']:.5f} / prior_sd {PRIOR_SD_ALPHA_DLA} "
+        f"= {con['sd_ratio']:.3f} (contraction {con['contraction']:.3f}); empirical prior sd "
+        f"from the {n} clean truths: {con['prior_sd_empirical']:.5f}"
+    )
 
     # -- paired cosmology/mean-flux deltas (the PI gate)
-    print(f"\n-- paired Delta bias_z (boost - clean), EQUIVALENCE gate |mean|+2SE < {GATE} "
-          f"sigma_post (a bounded-response gate, not a zero-test)")
+    print(
+        f"\n-- paired Delta bias_z (boost - clean), EQUIVALENCE gate |mean|+2SE < {GATE} "
+        f"sigma_post (a bounded-response gate, not a zero-test)"
+    )
     any_fail = False
     pooled_all = {}
     for p in PAIRED_PARAMS:
@@ -327,50 +366,69 @@ def main():
         pooled = pool_deltas(deltas, weights=np.minimum(Lc, Lb))
         pooled_all[p] = pooled
         v = verdict(pooled["ub"])
-        any_fail |= (v == "FAIL")
+        any_fail |= v == "FAIL"
         t = pooled["mean"] / pooled["se"]
-        print(f"   {p:>9}: mean {pooled['mean']:+.3f} +/- {pooled['se']:.3f} (t {t:+.2f}, "
-              f"median {pooled['median']:+.3f}, L-weighted {pooled['wmean']:+.3f}) "
-              f"ub {pooled['ub']:.3f} {v}")
+        print(
+            f"   {p:>9}: mean {pooled['mean']:+.3f} +/- {pooled['se']:.3f} (t {t:+.2f}, "
+            f"median {pooled['median']:+.3f}, L-weighted {pooled['wmean']:+.3f}) "
+            f"ub {pooled['ub']:.3f} {v}"
+        )
         if v == "PASS" and abs(t) > 2:
-            print(f"             ^ CAVEAT: nonzero at {abs(t):.1f} SE — a small real response "
-                  f"bounded within the gate; naive linear scaling to a ~{GATE/abs(pooled['mean']):.1f}x "
-                  f"larger truth error would approach the budget")
+            print(
+                f"             ^ CAVEAT: nonzero at {abs(t):.1f} SE — a small real response "
+                f"bounded within the gate; naive linear scaling to a ~{GATE/abs(pooled['mean']):.1f}x "
+                f"larger truth error would approach the budget"
+            )
 
     # -- degeneracy diagnostics
     print("\n-- corr(alpha_dla; .) pooled over clean-arm mocks")
     for p in ("tau0_amp", "Ap", "ns"):
         cs = np.asarray([_corr(r, ALPHA, p) for r in clean])
-        print(f"   {p:>9}: mean {np.nanmean(cs):+.3f} (range {np.nanmin(cs):+.3f}.."
-              f"{np.nanmax(cs):+.3f})")
+        print(
+            f"   {p:>9}: mean {np.nanmean(cs):+.3f} (range {np.nanmin(cs):+.3f}.."
+            f"{np.nanmax(cs):+.3f})"
+        )
 
-    print("\n== OVERALL:", "FAIL — a paired delta exceeds the confidence-bound gate; per the PI "
-          "disposition diagnose the tau0 channel first, do NOT add a residual template."
-          if any_fail else
-          "PASS — alpha_dla tracks the displaced truth and every paired delta is BOUNDED within "
-          "the 0.30 equivalence gate (see per-param t and any CAVEAT lines above — bounded, not "
-          "necessarily zero).")
+    print(
+        "\n== OVERALL:",
+        (
+            "FAIL — a paired delta exceeds the confidence-bound gate; per the PI "
+            "disposition diagnose the tau0 channel first, do NOT add a residual template."
+            if any_fail
+            else "PASS — alpha_dla tracks the displaced truth and every paired delta is BOUNDED within "
+            "the 0.30 equivalence gate (see per-param t and any CAVEAT lines above — bounded, not "
+            "necessarily zero)."
+        ),
+    )
 
     if args.npz_out:
         np.savez(
             args.npz_out,
-            L_clean=Lc, L_boost=Lb,
-            dmean=resp["dmean"], dtruth=resp["dtruth"], slope=resp["slope"],
+            L_clean=Lc,
+            L_boost=Lb,
+            dmean=resp["dmean"],
+            dtruth=resp["dtruth"],
+            slope=resp["slope"],
             post_sd=con["post_sd"],
             truth_clean=np.asarray([_col_draws_truth(r, ALPHA)[1] for r in clean]),
             truth_boost=np.asarray([_col_draws_truth(r, ALPHA)[1] for r in boost]),
             postmean_clean=np.asarray([float(_col_draws_truth(r, ALPHA)[0].mean()) for r in clean]),
             postmean_boost=np.asarray([float(_col_draws_truth(r, ALPHA)[0].mean()) for r in boost]),
-            **{f"delta_{p}": np.asarray([paired_delta_named(rc, rb, p)
-                                         for rc, rb in zip(clean, boost)], dtype=float)
-               for p in PAIRED_PARAMS},
+            **{
+                f"delta_{p}": np.asarray(
+                    [paired_delta_named(rc, rb, p) for rc, rb in zip(clean, boost)], dtype=float
+                )
+                for p in PAIRED_PARAMS
+            },
         )
         print(f"npz written: {args.npz_out}")
 
     if args.fig_out:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
         ax = axes[0]
         tc = np.asarray([_col_draws_truth(r, ALPHA)[1] for r in clean])
@@ -389,8 +447,9 @@ def main():
         ax.legend()
         ax = axes[1]
         for i, p in enumerate(PAIRED_PARAMS):
-            d = np.asarray([paired_delta_named(rc, rb, p) for rc, rb in zip(clean, boost)],
-                           dtype=float)
+            d = np.asarray(
+                [paired_delta_named(rc, rb, p) for rc, rb in zip(clean, boost)], dtype=float
+            )
             ax.scatter(np.full(d.size, i) + np.linspace(-0.15, 0.15, d.size), d, s=14, alpha=0.7)
             m = pooled_all[p]
             ax.errorbar([i], [m["mean"]], yerr=[2 * m["se"]], fmt="D", color="k", capsize=4)

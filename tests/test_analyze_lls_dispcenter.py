@@ -20,6 +20,7 @@ Contract under test:
   * the prior width is read LIVE from meta["prior"], not hardcoded, and must agree across shards
   * center_error_line normalizes the pooled paired delta by the stamped prior-sigma displacement
 """
+
 import pickle
 
 import numpy as np
@@ -67,8 +68,19 @@ def _rec(names, truth, mean, sd, L=100, seed=0, n_div=0, alpha_z=None):
     }
 
 
-def _pkl(path, shard, clean, boost, sig=SIG, cov_reduced=True, boost_val=BOOST, n_mocks=None,
-         survey="desi", sigma=SIGMA, disp=1.0):
+def _pkl(
+    path,
+    shard,
+    clean,
+    boost,
+    sig=SIG,
+    cov_reduced=True,
+    boost_val=BOOST,
+    n_mocks=None,
+    survey="desi",
+    sigma=SIGMA,
+    disp=1.0,
+):
     payload = {
         "arm": "lls_dispcenter",
         "survey": survey,
@@ -116,6 +128,7 @@ def _paired_records(alpha_clean=MU, seed=1, boost_val=BOOST, **kw):
 
 # ---------------------------------------------------------------- ingest
 
+
 def test_load_shards_reads_and_pairs(tmp_path):
     rc, rb = _paired_records()
     _pkl(tmp_path / "lls_dispcenter_desi_shard_000.pkl", 0, [rc], [rb])
@@ -144,8 +157,7 @@ def test_load_shards_rejects_signature_mismatch(tmp_path):
     rc, rb = _paired_records()
     _pkl(tmp_path / "lls_dispcenter_desi_shard_000.pkl", 0, [rc], [rb])
     rc2, rb2 = _paired_records(alpha_clean=0.19, seed=2)
-    _pkl(tmp_path / "lls_dispcenter_desi_shard_001.pkl", 1, [rc2], [rb2],
-         sig="deadbeef" + "0" * 56)
+    _pkl(tmp_path / "lls_dispcenter_desi_shard_001.pkl", 1, [rc2], [rb2], sig="deadbeef" + "0" * 56)
     with pytest.raises(AssertionError, match="forward_signature"):
         load_shards(str(tmp_path))
 
@@ -188,7 +200,7 @@ def test_load_shards_rejects_mixed_prior_width(tmp_path):
 
 def test_load_shards_rejects_broken_truth_pairing(tmp_path):
     rc, rb = _paired_records()
-    rb["truth_vec"][J_LLS] = rc["truth_vec"][J_LLS] * 1.4          # not the stamped boost
+    rb["truth_vec"][J_LLS] = rc["truth_vec"][J_LLS] * 1.4  # not the stamped boost
     _pkl(tmp_path / "lls_dispcenter_desi_shard_000.pkl", 0, [rc], [rb], n_mocks=1)
     with pytest.raises(AssertionError, match="boost"):
         load_shards(str(tmp_path))
@@ -196,7 +208,7 @@ def test_load_shards_rejects_broken_truth_pairing(tmp_path):
 
 def test_load_shards_rejects_nonlls_truth_drift(tmp_path):
     rc, rb = _paired_records()
-    rb["truth_vec"][0] += 1e-6                                     # cosmology truth must match
+    rb["truth_vec"][0] += 1e-6  # cosmology truth must match
     _pkl(tmp_path / "lls_dispcenter_desi_shard_000.pkl", 0, [rc], [rb], n_mocks=1)
     with pytest.raises(AssertionError, match="truth"):
         load_shards(str(tmp_path))
@@ -278,6 +290,7 @@ def test_allow_incomplete_still_rejects_duplicates(tmp_path):
 
 # ---------------------------------------------------------------- prior / displacement
 
+
 def test_prior_sigma_and_displacement_read_live_from_meta(tmp_path):
     rc, rb = _paired_records()
     _pkl(tmp_path / "lls_dispcenter_desi_shard_000.pkl", 0, [rc], [rb], n_mocks=1, disp=1.0)
@@ -289,13 +302,21 @@ def test_prior_sigma_and_displacement_read_live_from_meta(tmp_path):
 def test_displacement_sigma_uses_the_stamped_center_value(tmp_path):
     """A half-sigma arm (--boost 0.6435 say) must normalize by 0.5, not by 1."""
     rc, rb = _paired_records(boost_val=1.1435)
-    _pkl(tmp_path / "lls_dispcenter_desi_shard_000.pkl", 0, [rc], [rb], n_mocks=1,
-         boost_val=1.1435, disp=0.5)
+    _pkl(
+        tmp_path / "lls_dispcenter_desi_shard_000.pkl",
+        0,
+        [rc],
+        [rb],
+        n_mocks=1,
+        boost_val=1.1435,
+        disp=0.5,
+    )
     _, _, meta = load_shards(str(tmp_path))
     assert displacement_sigma(meta) == pytest.approx(0.5)
 
 
 # ---------------------------------------------------------------- the center-error line
+
 
 def test_center_error_line_normalizes_by_displacement():
     """The reported budget line is sigma_post of cosmology bias per ONE prior-sigma of LLS
@@ -352,15 +373,16 @@ def test_center_error_line_per_mock_disp_drops_none_in_step():
 
 # ---------------------------------------------------------------- delivered displacement
 
+
 def test_delivered_displacement_is_per_mock_not_the_stamped_nominal(tmp_path):
     """meta.prior.latent_sigma_disp_center is evaluated at the prior CENTRE. A mock whose truth
     sits below the centre receives a SMALLER absolute displacement, because boost multiplies
     that mock's own truth while the prior sd is a fixed absolute number:
         delivered = (boost - 1) * truth_clean / sigma_prior = truth_clean / mu   (at frac width)
     Quoting the nominal 1.000 for a mock that received 0.67 overstates the denominator."""
-    rc, rb = _paired_records(alpha_clean=MU)                    # exactly at the centre -> 1.000
+    rc, rb = _paired_records(alpha_clean=MU)  # exactly at the centre -> 1.000
     _pkl(tmp_path / "lls_dispcenter_desi_shard_000.pkl", 0, [rc], [rb], n_mocks=2)
-    rc2, rb2 = _paired_records(alpha_clean=0.5 * MU, seed=2)    # half the centre -> 0.500
+    rc2, rb2 = _paired_records(alpha_clean=0.5 * MU, seed=2)  # half the centre -> 0.500
     _pkl(tmp_path / "lls_dispcenter_desi_shard_001.pkl", 1, [rc2], [rb2], n_mocks=2)
     clean, boost, meta = load_shards(str(tmp_path))
     dd = delivered_displacement(clean, boost, prior_sigma(meta))
@@ -373,13 +395,14 @@ def test_delivered_displacement_is_per_mock_not_the_stamped_nominal(tmp_path):
 
 # ---------------------------------------------------------------- estimator robustness
 
+
 def test_paired_mean_shift_is_zero_when_the_posterior_does_not_move():
     """The response estimand is 'how far did the posterior move', normalized by its width.
     If the two arms have the SAME posterior mean, the answer is 0 -- even when the two arms
     have different posterior WIDTHS and the truth sits far from the mean."""
     truth = np.array([0.4, 0.8, 0.3, MU, 0.06, 0.004])
-    rc = _rec(NAMES, truth, truth + 0.5, 0.05, L=20000, seed=71)   # wide-ish arm
-    rb = _rec(NAMES, truth, truth + 0.5, 0.02, L=20000, seed=72)   # same mean, narrower
+    rc = _rec(NAMES, truth, truth + 0.5, 0.05, L=20000, seed=71)  # wide-ish arm
+    rb = _rec(NAMES, truth, truth + 0.5, 0.02, L=20000, seed=72)  # same mean, narrower
     assert paired_mean_shift(rc, rb, "ns") == pytest.approx(0.0, abs=0.02)
 
 
@@ -387,20 +410,22 @@ def test_paired_delta_bias_z_is_contaminated_by_unequal_arm_widths():
     """Regression pin for the defect this replaced. The DLA-arm convention
     Delta bias_z = (mu_b - T)/s_b - (mu_c - T)/s_c picks up a spurious -T*(1/s_b - 1/s_c) term
     when the arms' posterior widths differ, which they do here (ESS-thinned draw counts run
-    20..150). On the real campaign that pushed tau0_amp -- the site with the largest
-    truth/sigma ratio -- from +0.14 to +0.23. This test pins that the MEAN-SHIFT estimator does
-    not inherit the artifact; it is the reason the primary line is not Delta bias_z."""
+    20..150). The artifact is immaterial for n_s/A_p, whose truth/sigma ratios are modest, but not
+    for tau0_amp, whose truth/sigma ratio is large. This test pins that the MEAN-SHIFT estimator
+    does not inherit the artifact; it is the reason the primary line is not Delta bias_z."""
     from scripts.analyze_dla_selfdraw import paired_delta_named
+
     truth = np.array([0.4, 0.8, 0.3, MU, 0.06, 0.004])
     rc = _rec(NAMES, truth, truth + 0.5, 0.05, L=20000, seed=81)
     rb = _rec(NAMES, truth, truth + 0.5, 0.02, L=20000, seed=82)
     contaminated = paired_delta_named(rc, rb, "ns")
     clean_est = paired_mean_shift(rc, rb, "ns")
-    assert abs(contaminated) > 5.0          # the artifact is enormous here, not a rounding gap
+    assert abs(contaminated) > 5.0  # the artifact is enormous here, not a rounding gap
     assert abs(clean_est) < 0.02
 
 
 # ---------------------------------------------------------------- response + contraction
+
 
 def _tight_pair(alpha_clean, seed, track=0.0, boost_val=BOOST):
     truth_c = np.array([0.4, 0.8, 0.3, alpha_clean, 0.06, 0.004])
@@ -438,7 +463,7 @@ def test_contraction_stats_uses_the_live_prior_sd():
     assert c["post_sd_mean"] == pytest.approx(0.045, abs=0.003)
     assert c["sd_ratio"] == pytest.approx(0.045 / SIGMA, rel=0.1)
     assert c["contraction"] == pytest.approx(1.0 - c["sd_ratio"])
-    assert c["prior_sd_empirical"] == pytest.approx(0.0, abs=1e-12)   # identical truths
+    assert c["prior_sd_empirical"] == pytest.approx(0.0, abs=1e-12)  # identical truths
 
 
 def test_contraction_stats_reads_the_alpha_column_not_a_neighbour():
@@ -447,18 +472,20 @@ def test_contraction_stats_reads_the_alpha_column_not_a_neighbour():
     truth = np.array([0.4, 0.8, 0.3, MU, 0.06, 0.004])
     sds = np.array([0.001, 0.002, 0.003, 0.045, 0.005, 0.006])
     recs = [_rec(NAMES, truth, truth, sds, L=4000, seed=45 + i) for i in range(3)]
-    assert contraction_stats(recs, prior_sd=SIGMA, alpha="alpha_subdla")["post_sd_mean"] \
-        == pytest.approx(0.005, abs=0.001)
+    assert contraction_stats(recs, prior_sd=SIGMA, alpha="alpha_subdla")[
+        "post_sd_mean"
+    ] == pytest.approx(0.005, abs=0.001)
 
 
 # ---------------------------------------------------------------- sign / bound correctness
+
 
 def test_center_error_line_handles_a_negative_displacement_arm():
     """The docstring promises a minus-sigma arm (--boost 0.713) pools into the same units.
     Both the SE and the 95% bound are MAGNITUDES and must stay positive; only the point
     estimate carries a sign."""
     line = center_error_line([-0.2, -0.3, -0.25, -0.15], disp=-1.0)
-    assert line["per_prior_sigma"] == pytest.approx(0.225)     # double sign flip
+    assert line["per_prior_sigma"] == pytest.approx(0.225)  # double sign flip
     assert line["se_per_prior_sigma"] > 0
     assert line["ub95"] > 0
 
@@ -472,6 +499,7 @@ def test_center_error_line_ub95_uses_the_magnitude_of_the_mean():
 
 
 # ---------------------------------------------------------------- more ingest guards
+
 
 def test_load_shards_rejects_missing_truth_alpha_hcd_z(tmp_path):
     """The z-row contract must not silently no-op when the key is absent -- it is the only
@@ -520,10 +548,12 @@ def test_load_shards_rejects_mixed_prior_mu(tmp_path):
 
 # ---------------------------------------------------------------- report contract
 
+
 def test_main_stamps_reduced_N_on_every_quotable_line(tmp_path, capsys):
     """The reduced-N contract is only real if the lines a reader COPIES carry the stamp.
     main() was previously exercised by no test at all."""
     from scripts.analyze_lls_dispcenter import main
+
     rc, rb = _paired_records()
     _pkl(tmp_path / "lls_dispcenter_desi_shard_000.pkl", 0, [rc], [rb], n_mocks=4)
     for i, a in enumerate([0.16, 0.18], start=1):
@@ -531,9 +561,16 @@ def test_main_stamps_reduced_N_on_every_quotable_line(tmp_path, capsys):
         _pkl(tmp_path / f"lls_dispcenter_desi_shard_00{i}.pkl", i, [rci], [rbi], n_mocks=4)
     npz = tmp_path / "out.npz"
     import sys
+
     argv = sys.argv
-    sys.argv = ["analyze_lls_dispcenter.py", "--shard-dir", str(tmp_path),
-                "--allow-incomplete", "--npz-out", str(npz)]
+    sys.argv = [
+        "analyze_lls_dispcenter.py",
+        "--shard-dir",
+        str(tmp_path),
+        "--allow-incomplete",
+        "--npz-out",
+        str(npz),
+    ]
     try:
         main()
     finally:

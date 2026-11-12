@@ -17,6 +17,7 @@ Assumptions (confirmed by inspection):
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple
@@ -24,27 +25,30 @@ from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple
 import h5py
 import numpy as np
 
+_log = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Named return types
 # ---------------------------------------------------------------------------
 
+
 class SpectraHeader(NamedTuple):
     redshift: float
-    Hz: float          # H(z) in km/s/Mpc
-    box: float         # comoving box size in kpc/h
-    hubble: float      # dimensionless h
-    nbins: int         # pixels per skewer
+    Hz: float  # H(z) in km/s/Mpc
+    box: float  # comoving box size in kpc/h
+    hubble: float  # dimensionless h
+    nbins: int  # pixels per skewer
     omegam: float
     omegal: float
     omegab: float
-    n_skewers: int     # actual number of sightlines in file
+    n_skewers: int  # actual number of sightlines in file
 
 
 class SimInfo(NamedTuple):
-    name: str          # folder name (the unique sim identifier)
-    path: Path         # absolute path to sim root
-    params: Dict[str, float]   # parsed cosmological/astrophysical parameters
+    name: str  # folder name (the unique sim identifier)
+    path: Path  # absolute path to sim root
+    params: Dict[str, float]  # parsed cosmological/astrophysical parameters
 
 
 # ---------------------------------------------------------------------------
@@ -85,8 +89,23 @@ def discover_simulations(data_root: str | Path) -> List[SimInfo]:
     """
     Walk data_root and return all parseable simulation folders sorted by name.
     Folders that do not match the ns…bhfeedback… pattern are silently skipped.
+
+    An empty root is refused (``Path("")`` would walk the current directory), and so is one that is not a directory:
+    the error says where the root comes from (hcd_analysis.config: the config file or --set, else HCD_LF_RAW_DIR or
+    HCD_HR_RAW_DIR).
     """
+    if not str(data_root).strip():
+        raise ValueError(
+            "no simulation root is set: give data_root (hires_data_root for the HiRes suite) in the config "
+            "file or with --set, or set HCD_LF_RAW_DIR (HCD_HR_RAW_DIR); there is no built-in default"
+        )
     root = Path(data_root)
+    if not root.is_dir():
+        raise ValueError(
+            f"the simulation root {root} is not a directory: correct data_root (hires_data_root) in the "
+            "config file, or HCD_LF_RAW_DIR (HCD_HR_RAW_DIR)"
+        )
+    _log.info("simulation root: %s", root)
     sims = []
     for d in sorted(root.iterdir()):
         if not d.is_dir():
@@ -111,6 +130,7 @@ def filter_simulations(sims: List[SimInfo], name_fragments: List[str]) -> List[S
 # ---------------------------------------------------------------------------
 # SPECTRA file discovery
 # ---------------------------------------------------------------------------
+
 
 def spectra_files_for_sim(sim: SimInfo, prefer_grid: bool = True) -> Dict[int, Path]:
     """
@@ -152,6 +172,7 @@ def spectra_files_for_sim(sim: SimInfo, prefer_grid: bool = True) -> Dict[int, P
 # HDF5 reading
 # ---------------------------------------------------------------------------
 
+
 def read_header(path: Path) -> SpectraHeader:
     """Read Header attributes from a SPECTRA HDF5 file."""
     with h5py.File(path, "r") as f:
@@ -159,14 +180,14 @@ def read_header(path: Path) -> SpectraHeader:
         tau_ds = f["tau/H/1/1215"]
         n_skewers = tau_ds.shape[0]
         redshift = float(h["redshift"])
-        hubble   = float(h["hubble"])
-        omegam   = float(h["omegam"])
-        omegal   = float(h["omegal"])
+        hubble = float(h["hubble"])
+        omegam = float(h["omegam"])
+        omegal = float(h["omegal"])
         if "Hz" in h:
             Hz = float(h["Hz"])
         else:
             # Compute H(z) = 100·h·sqrt(Ωm(1+z)³ + Ωλ) [km/s/Mpc]
-            Hz = 100.0 * hubble * (omegam * (1 + redshift)**3 + omegal) ** 0.5
+            Hz = 100.0 * hubble * (omegam * (1 + redshift) ** 3 + omegal) ** 0.5
         return SpectraHeader(
             redshift=redshift,
             Hz=Hz,
@@ -246,6 +267,7 @@ def iter_tau_batches(
 # Snapshots.txt parsing
 # ---------------------------------------------------------------------------
 
+
 def read_snapshots_txt(sim: SimInfo) -> Dict[int, float]:
     """
     Parse output/Snapshots.txt → {snap_index: scale_factor a}.
@@ -287,7 +309,7 @@ def snap_to_z(a: float) -> float:
 _ICS_FIELDS = {
     # JSON key → output key (some sims may use slightly different keys)
     "npart": "npart",
-    "box": "ics_box",          # kpc/h (ICs file uses same box unit)
+    "box": "ics_box",  # kpc/h (ICs file uses same box unit)
     "omega0": "omega0",
     "omegab": "ics_omegab",
     "hubble": "ics_hubble",

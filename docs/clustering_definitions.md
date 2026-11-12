@@ -234,7 +234,7 @@ the full Kaiser model.
 `ξ_lin(r)` is the linear matter correlation function at the snap's
 redshift. We compute it from CAMB power spectra, which are saved per
 sim in
-`/nfs/turbo/umor-yueyingn/mfho/emu_full/<sim>/output/powerspectrum-<a>.txt`
+`$HCD_LF_RAW_DIR/<sim>/output/powerspectrum-<a>.txt`
 (see `_class_params.ini`).
 
 ## 7. Cross-validation: the auto–cross consistency check
@@ -290,7 +290,7 @@ science number is published. Pattern follows
 
 Tests 4, 5, 6, 7 are deterministic and run in CI. Tests 8, 9 are
 seeded-stochastic and must be reproducible. Test 10 runs against
-`/scratch/.../hcd_outputs` data and is not a CI gate but is required
+`$HCD_OUTPUTS_DIR` data and is not a CI gate but is required
 before the 60-sim production sweep.
 
 ## 9. Conventions and gotchas to remember
@@ -339,12 +339,12 @@ pass and tests 10 + 11 land within their literature windows.
 Concrete examples that connect the math above to real PRIYA outputs:
 
 * **`ξ_FF^(0)(r)` recovery, real data** — see
-  [`docs/clustering_test11_results.md`](clustering_test11_results.md)
+  `docs/clustering_test11_results.md` (a historical write-up, in the repository's Git history)
   with the test 11 fit figure inlined.  Shows both the failed P1D
   path and the successful ξ_FF path on the same z = 2.20 snap.
 
 * **`ξ_×(r, |μ|)` heatmap + monopole + quadrupole, real data** — see
-  [`docs/clustering_test10_results.md`](clustering_test10_results.md)
+  `docs/clustering_test10_results.md` (a historical write-up, in the repository's Git history)
   with both the legacy and the rmu joint-fit figures inlined.  The
   rmu heatmap is a direct visualisation of the cross-correlation
   field that the math in §4 describes.

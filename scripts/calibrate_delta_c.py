@@ -17,11 +17,13 @@ STD as the w_c prior width -- the residual is the irreducible cosmology dependen
 fixed z (a z-only polynomial cannot remove it; carried as a prior width per the
 2026-05-29 w_c<->dN/dX coupling note).
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/calibrate_delta_c.py [--shards GLOB] [--deg 2]
-Outputs: docs/superpowers/2026-06-01-delta_c-coeffs.md  and  .../delta_c-coeffs.npz
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> \
+     python scripts/calibrate_delta_c.py [--shards GLOB] [--deg 2]
+Outputs: 2026-06-01-delta_c-coeffs.md and .npz, in $HCD_OUT_DIR (default: the current directory)
 """
+
 from __future__ import annotations
+import os
 import argparse
 import glob
 import numpy as np
@@ -31,7 +33,11 @@ from hcd_analysis.emulator.data import load_cache
 from hcd_analysis.emulator.dndx_wc import w_c_from_mu, mu_from_dndx
 from hcd_analysis.emulator import CLASS_NAMES
 
-_DEFAULT_GLOB = "/scratch/cavestru_root/cavestru0/mfho/tau0_shards/observables_tau0_lf.shard*.h5"
+_DEFAULT_GLOB = os.path.join(
+    os.environ.get("HCD_RUNS_DIR", "<HCD_RUNS_DIR unset>"),
+    "tau0_shards",
+    "observables_tau0_lf.shard*.h5",
+)
 
 
 def collect(shard_glob):
@@ -44,16 +50,18 @@ def collect(shard_glob):
         d = load_cache(sh)
         g = d["snap_group_idx"]
         for gi in np.unique(g):
-            r = int(np.where(g == gi)[0][0])          # counts are tau0-invariant -> one rep row
+            r = int(np.where(g == gi)[0][0])  # counts are tau0-invariant -> one rep row
             cc = d["coarse_counts"][r].astype(float)  # (4,) clean,LLS,subDLA,DLA
             n_sl = cc.sum()
             if n_sl <= 0:
                 continue
             w_counted = cc / n_sl
-            dndx = d["snap_dNdX"][gi]                  # (3,) LLS,subDLA,DLA
+            dndx = d["snap_dNdX"][gi]  # (3,) LLS,subDLA,DLA
             xbar = d["snap_total_path_dX"][gi] / n_sl
             w_m0 = np.asarray(w_c_from_mu(mu_from_dndx(jnp.asarray(dndx), jnp.asarray(xbar))))
-            z.append(float(d["z_grid"][r])); wc.append(w_counted); wm.append(w_m0)
+            z.append(float(d["z_grid"][r]))
+            wc.append(w_counted)
+            wm.append(w_m0)
             sims.append(d["sim_name"][r])
     return (np.array(z), np.array(wc), np.array(wm), np.array(sims, dtype=object), len(shards))
 
@@ -61,7 +69,7 @@ def collect(shard_glob):
 def fit(z, wc, wm, deg=2):
     """Return coeffs[4, deg+1] (np.polyfit order) and per-class residual std (prior width)."""
     with np.errstate(divide="ignore", invalid="ignore"):
-        delta = np.where(wm > 0, wc / wm - 1.0, 0.0)   # (N,4)
+        delta = np.where(wm > 0, wc / wm - 1.0, 0.0)  # (N,4)
     coeffs = np.zeros((4, deg + 1))
     resid_std = np.zeros(4)
     resid_max = np.zeros(4)
@@ -84,15 +92,26 @@ def main():
     coeffs, delta, resid_std, resid_max = fit(z, wc, wm, deg=args.deg)
     n_sims = len(set(map(str, sims)))
 
-    print(f"calibrated delta_c(z) from {n_sh} shards, {len(z)} snap-blocks, {n_sims} sims, "
-          f"z {z.min():.1f}-{z.max():.1f}, deg={args.deg}")
+    print(
+        f"calibrated delta_c(z) from {n_sh} shards, {len(z)} snap-blocks, {n_sims} sims, "
+        f"z {z.min():.1f}-{z.max():.1f}, deg={args.deg}"
+    )
     print(f"{'class':8s} {'mean δ':>9s} {'fit-resid std':>14s} {'resid max':>11s}")
     for ci, name in enumerate(CLASS_NAMES):
         print(f"{name:8s} {delta[:,ci].mean():+9.4f} {resid_std[ci]:14.4f} {resid_max[ci]:11.4f}")
 
-    out_npz = "docs/superpowers/2026-06-01-delta_c-coeffs.npz"
-    np.savez(out_npz, coeffs=coeffs, resid_std=resid_std, resid_max=resid_max,
-             class_names=np.array(CLASS_NAMES), deg=args.deg, n_blocks=len(z), n_sims=n_sims)
+    out_dir = os.environ.get("HCD_OUT_DIR", ".")
+    out_npz = os.path.join(out_dir, "2026-06-01-delta_c-coeffs.npz")
+    np.savez(
+        out_npz,
+        coeffs=coeffs,
+        resid_std=resid_std,
+        resid_max=resid_max,
+        class_names=np.array(CLASS_NAMES),
+        deg=args.deg,
+        n_blocks=len(z),
+        n_sims=n_sims,
+    )
 
     # Markdown record (the frozen coeffs to paste into dndx_wc._DELTA_C_COEFFS).
     lines = [
@@ -101,27 +120,33 @@ def main():
         f"Measured from {n_sh} LF shards ({len(z)} snap-blocks, {n_sims} sims, "
         f"z={z.min():.1f}-{z.max():.1f}) by `scripts/calibrate_delta_c.py`. NOT invented.",
         "",
-        "`delta_c(z)` = deg-%d polynomial; w_c_corrected = w_M0*(1+delta_c) renormalised." % args.deg,
+        "`delta_c(z)` = deg-%d polynomial; w_c_corrected = w_M0*(1+delta_c) renormalised."
+        % args.deg,
         "The fit removes the mean z-trend; the residual **std** is the irreducible",
         "cosmology dependence at fixed z, carried as the per-class w_c **prior width**.",
         "",
-        "Coeffs are np.polyval order (highest power first), class order "
-        f"{list(CLASS_NAMES)}:",
+        "Coeffs are np.polyval order (highest power first), class order " f"{list(CLASS_NAMES)}:",
         "",
         "```python",
         "_DELTA_C_COEFFS = [  # (clean, LLS, subDLA, DLA) x (deg+1); np.polyval order",
     ]
     for ci, name in enumerate(CLASS_NAMES):
         lines.append(f"    {[float(x) for x in coeffs[ci]]},  # {name}")
-    lines += ["]", "```", "",
-              "| class | mean δ_c | fit-residual std (prior width) | residual max |",
-              "|---|---|---|---|"]
+    lines += [
+        "]",
+        "```",
+        "",
+        "| class | mean δ_c | fit-residual std (prior width) | residual max |",
+        "|---|---|---|---|",
+    ]
     for ci, name in enumerate(CLASS_NAMES):
-        lines.append(f"| {name} | {delta[:,ci].mean():+.4f} | {resid_std[ci]:.4f} | {resid_max[ci]:.4f} |")
+        lines.append(
+            f"| {name} | {delta[:,ci].mean():+.4f} | {resid_std[ci]:.4f} | {resid_max[ci]:.4f} |"
+        )
     lines.append("")
-    with open("docs/superpowers/2026-06-01-delta_c-coeffs.md", "w") as f:
+    with open(os.path.join(out_dir, "2026-06-01-delta_c-coeffs.md"), "w") as f:
         f.write("\n".join(lines))
-    print(f"wrote docs/superpowers/2026-06-01-delta_c-coeffs.md and {out_npz}")
+    print(f"wrote {os.path.join(out_dir, '2026-06-01-delta_c-coeffs.md')} and {out_npz}")
 
 
 if __name__ == "__main__":

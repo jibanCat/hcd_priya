@@ -67,25 +67,59 @@ logger = logging.getLogger(__name__)
 # Default k bins matching the emulator's kf grid (s/km), extended to k_Nyquist≈0.05
 # Original emulator grid: 35 bins up to ~0.0195 s/km
 # Extension: 15 additional log-spaced bins from 0.020 to 0.050 s/km
-_EMULATOR_K_BINS = np.array([
-    0.001084, 0.001626, 0.002168, 0.00271,  0.003252, 0.003794,
-    0.004336, 0.004878, 0.00542,  0.005962, 0.006504, 0.007046,
-    0.007588, 0.00813,  0.008672, 0.009214, 0.009756, 0.010298,
-    0.01084,  0.011382, 0.011924, 0.012466, 0.013008, 0.01355,
-    0.014092, 0.014634, 0.015176, 0.015718, 0.01626,  0.016802,
-    0.017344, 0.017886, 0.018428, 0.01897,  0.019512,
-])
+_EMULATOR_K_BINS = np.array(
+    [
+        0.001084,
+        0.001626,
+        0.002168,
+        0.00271,
+        0.003252,
+        0.003794,
+        0.004336,
+        0.004878,
+        0.00542,
+        0.005962,
+        0.006504,
+        0.007046,
+        0.007588,
+        0.00813,
+        0.008672,
+        0.009214,
+        0.009756,
+        0.010298,
+        0.01084,
+        0.011382,
+        0.011924,
+        0.012466,
+        0.013008,
+        0.01355,
+        0.014092,
+        0.014634,
+        0.015176,
+        0.015718,
+        0.01626,
+        0.016802,
+        0.017344,
+        0.017886,
+        0.018428,
+        0.01897,
+        0.019512,
+    ]
+)
 # Extended to Nyquist (dv≈10 km/s → k_Nyq≈0.05 s/km)
-_EXTENDED_K_BINS = np.concatenate([
-    _EMULATOR_K_BINS,
-    np.logspace(np.log10(0.020), np.log10(0.050), 15),
-])
+_EXTENDED_K_BINS = np.concatenate(
+    [
+        _EMULATOR_K_BINS,
+        np.logspace(np.log10(0.020), np.log10(0.050), 15),
+    ]
+)
 _DEFAULT_K_BINS = _EXTENDED_K_BINS
 
 
 # ---------------------------------------------------------------------------
 # Core P1D accumulator (streaming, memory-efficient)
 # ---------------------------------------------------------------------------
+
 
 class P1DAccumulator:
     """
@@ -103,7 +137,7 @@ class P1DAccumulator:
         self.dv_kms = dv_kms
         self._power_sum = np.zeros(nbins // 2 + 1, dtype=np.float64)
         self._n_skewers = 0
-        self._flux_sum = 0.0   # sum of F values, for mean flux
+        self._flux_sum = 0.0  # sum of F values, for mean flux
         self._flux_n = 0
 
     def _k_native(self) -> np.ndarray:
@@ -139,7 +173,7 @@ class P1DAccumulator:
         ft = np.fft.rfft(delta_F * self.dv_kms, axis=1)  # units: km/s
 
         # Power per mode
-        power = np.abs(ft)**2 / (self.nbins * self.dv_kms)  # units: km/s
+        power = np.abs(ft) ** 2 / (self.nbins * self.dv_kms)  # units: km/s
 
         # Sum over skewers in this batch
         self._power_sum += power.sum(axis=0)
@@ -214,6 +248,7 @@ def _bin_power(k: np.ndarray, power: np.ndarray, edges: np.ndarray) -> np.ndarra
 # Two-pass mean-flux normalisation
 # ---------------------------------------------------------------------------
 
+
 def compute_mean_flux(hdf5_path, batch_size: int = 4096, n_skewers=None) -> float:
     """
     First pass: compute global mean F = <exp(-tau)> over all skewers.
@@ -242,6 +277,7 @@ def compute_mean_flux_from_masked_iter(tau_iter) -> float:
 # ---------------------------------------------------------------------------
 # High-level: compute P1D for a single (hdf5_path, catalog, mask_classes) triplet
 # ---------------------------------------------------------------------------
+
 
 def compute_p1d_single(
     hdf5_path,
@@ -290,19 +326,28 @@ def compute_p1d_single(
     def _make_iter():
         if not needs_masking:
             return iter_tau_batches(
-                hdf5_path, batch_size=batch_size, n_skewers=n_skewers,
+                hdf5_path,
+                batch_size=batch_size,
+                n_skewers=n_skewers,
             )
         if mask_scheme == "tauspace":
             return iter_tauspace_masked_batches(
-                hdf5_path, catalog, mask_classes, tau_eff,
-                batch_size=batch_size, n_skewers=n_skewers,
+                hdf5_path,
+                catalog,
+                mask_classes,
+                tau_eff,
+                batch_size=batch_size,
+                n_skewers=n_skewers,
                 wing_threshold_by_class=wing_threshold_by_class,
                 fill_strategy=fill_strategy,
             )
         if mask_scheme == "pixrange":
             return iter_masked_batches(
-                hdf5_path, catalog, mask_classes,
-                batch_size=batch_size, n_skewers=n_skewers,
+                hdf5_path,
+                catalog,
+                mask_classes,
+                batch_size=batch_size,
+                n_skewers=n_skewers,
                 strategy=fill_strategy,
             )
         raise ValueError(f"Unknown mask_scheme: {mask_scheme!r}")
@@ -347,7 +392,10 @@ ALL_VARIANTS = ["all", "no_DLA_priya"]
 # artefacts above k ≈ 0.02 s/km (cyclic) and over-mask forest power at low k
 # when they touch LLS/subDLA.  See docs/bugs_found.md §#6.
 DIAGNOSTIC_VARIANTS = [
-    "no_LLS", "no_subDLA", "no_DLA", "no_HCD",
+    "no_LLS",
+    "no_subDLA",
+    "no_DLA",
+    "no_HCD",
 ]
 
 _MASK_CLASSES: Dict[str, List[str]] = {
@@ -356,20 +404,21 @@ _MASK_CLASSES: Dict[str, List[str]] = {
     "no_subDLA": ["subDLA"],
     "no_DLA": ["DLA"],
     "no_HCD": ["LLS", "subDLA", "DLA"],
-    "only_LLS": ["subDLA", "DLA"],      # keep only LLS: mask everything else
+    "only_LLS": ["subDLA", "DLA"],  # keep only LLS: mask everything else
     "only_subDLA": ["LLS", "DLA"],
     "only_DLA": ["LLS", "subDLA"],
     # "no_DLA_priya" is handled separately — uses tau-based detection/mask
 }
 
 # PRIYA DLA mask parameters (arXiv:2306.05471)
-_PRIYA_DLA_DETECT_TAU = 1e6    # max(tau) threshold to flag a sightline as DLA
-_PRIYA_DLA_MASK_SCALE = 0.25   # mask where tau > 0.25 + tau_eff
+_PRIYA_DLA_DETECT_TAU = 1e6  # max(tau) threshold to flag a sightline as DLA
+_PRIYA_DLA_MASK_SCALE = 0.25  # mask where tau > 0.25 + tau_eff
 
 
 # ---------------------------------------------------------------------------
 # Per-class subset-based P1D (Rogers-style templates)
 # ---------------------------------------------------------------------------
+
 
 def compute_p1d_per_class(
     hdf5_path,
@@ -500,6 +549,7 @@ def save_p1d_per_class_hdf5(
     reveals all metadata without loading the numeric data.
     """
     import h5py
+
     with h5py.File(str(path), "w") as f:
         f.attrs["sim_name"] = sim_name
         f.attrs["snap"] = int(snap)
@@ -534,20 +584,21 @@ def save_p1d_per_class_hdf5(
 
         # Per-class scalars (mean_F, n_sightlines)
         for key, desc, unit in [
-            ("mean_F_clean",  "<F> over clean sightlines", "dimensionless"),
-            ("mean_F_LLS",    "<F> over LLS sightlines",   "dimensionless"),
-            ("mean_F_subDLA", "<F> over subDLA sightlines","dimensionless"),
-            ("mean_F_DLA",    "<F> over DLA sightlines",   "dimensionless"),
-            ("n_sightlines_clean",  "count of clean sightlines", ""),
-            ("n_sightlines_LLS",    "count of LLS sightlines",   ""),
-            ("n_sightlines_subDLA", "count of subDLA sightlines",""),
-            ("n_sightlines_DLA",    "count of DLA sightlines",   ""),
-            ("n_total",             "total sightlines in the file or subsample", ""),
+            ("mean_F_clean", "<F> over clean sightlines", "dimensionless"),
+            ("mean_F_LLS", "<F> over LLS sightlines", "dimensionless"),
+            ("mean_F_subDLA", "<F> over subDLA sightlines", "dimensionless"),
+            ("mean_F_DLA", "<F> over DLA sightlines", "dimensionless"),
+            ("n_sightlines_clean", "count of clean sightlines", ""),
+            ("n_sightlines_LLS", "count of LLS sightlines", ""),
+            ("n_sightlines_subDLA", "count of subDLA sightlines", ""),
+            ("n_sightlines_DLA", "count of DLA sightlines", ""),
+            ("n_total", "total sightlines in the file or subsample", ""),
         ]:
             if key in per_class:
                 d = f.create_dataset(key, data=per_class[key])
                 d.attrs["description"] = desc
-                if unit: d.attrs["units"] = unit
+                if unit:
+                    d.attrs["units"] = unit
 
 
 # ---------------------------------------------------------------------------
@@ -579,9 +630,7 @@ def compute_p1d_priya_masked(
 
     # Pass 1: compute tau_eff from ALL sightlines (unmasked)
     F_sum, F_n = 0.0, 0
-    for _, _, tau_batch in iter_tau_batches(
-        hdf5_path, batch_size=batch_size, n_skewers=n_skewers
-    ):
+    for _, _, tau_batch in iter_tau_batches(hdf5_path, batch_size=batch_size, n_skewers=n_skewers):
         F_sum += np.exp(-tau_batch.astype(np.float64)).sum()
         F_n += tau_batch.size
     mean_F_all = F_sum / F_n if F_n > 0 else 1.0
@@ -590,9 +639,12 @@ def compute_p1d_priya_masked(
     # Pass 2: apply PRIYA mask and compute P1D
     acc = P1DAccumulator(nbins, dv_kms)
     for _, _, tau_batch in iter_priya_masked_batches(
-        hdf5_path, tau_eff,
-        batch_size=batch_size, n_skewers=n_skewers,
-        tau_dla_detect=tau_dla_detect, tau_mask_scale=tau_mask_scale,
+        hdf5_path,
+        tau_eff,
+        batch_size=batch_size,
+        n_skewers=n_skewers,
+        tau_dla_detect=tau_dla_detect,
+        tau_mask_scale=tau_mask_scale,
     ):
         acc.add_batch(tau_batch, mean_F_global=mean_F_all)
 
@@ -627,10 +679,15 @@ def compute_all_p1d_variants(
     shared_tau_eff: Optional[float] = None
     if "all" in variants:
         k0, p0, mf0 = compute_p1d_single(
-            hdf5_path, nbins, dv_kms,
-            catalog=None, mask_classes=None,
-            batch_size=batch_size, n_skewers=n_skewers,
-            fill_strategy=fill_strategy, k_bins=k_bins,
+            hdf5_path,
+            nbins,
+            dv_kms,
+            catalog=None,
+            mask_classes=None,
+            batch_size=batch_size,
+            n_skewers=n_skewers,
+            fill_strategy=fill_strategy,
+            k_bins=k_bins,
         )
         results["all"] = (k0, p0, mf0)
         shared_tau_eff = -np.log(max(mf0, 1e-30))
@@ -641,8 +698,12 @@ def compute_all_p1d_variants(
             continue
         if var == "no_DLA_priya":
             k, p1d, mf = compute_p1d_priya_masked(
-                hdf5_path, nbins, dv_kms,
-                batch_size=batch_size, n_skewers=n_skewers, k_bins=k_bins,
+                hdf5_path,
+                nbins,
+                dv_kms,
+                batch_size=batch_size,
+                n_skewers=n_skewers,
+                k_bins=k_bins,
             )
             results[var] = (k, p1d, mf)
             logger.debug("P1D variant 'no_DLA_priya' done (tau-based), mean_F=%.4f", mf)
@@ -653,7 +714,9 @@ def compute_all_p1d_variants(
             logger.warning("No catalog provided; skipping masked variant '%s'", var)
             continue
         k, p1d, mf = compute_p1d_single(
-            hdf5_path, nbins, dv_kms,
+            hdf5_path,
+            nbins,
+            dv_kms,
             catalog=catalog if mask_cls else None,
             mask_classes=mask_cls if mask_cls else None,
             batch_size=batch_size,
@@ -673,6 +736,7 @@ def compute_all_p1d_variants(
 # ---------------------------------------------------------------------------
 # P1D ratios
 # ---------------------------------------------------------------------------
+
 
 def compute_p1d_ratios(
     p1d_variants: Dict[str, Tuple[np.ndarray, np.ndarray, float]],
@@ -696,7 +760,7 @@ def compute_p1d_ratios(
     k_ref, p1d_all, _ = p1d_variants["all"]
 
     pairs = [
-        ("ratio_noDLA_priya_all", "no_DLA_priya"),   # primary production ratio
+        ("ratio_noDLA_priya_all", "no_DLA_priya"),  # primary production ratio
         # Legacy catalog-based variants (now diagnostic-only; emit only if present)
         ("ratio_noDLA_all", "no_DLA"),
         ("ratio_nosubDLA_all", "no_subDLA"),
@@ -721,6 +785,7 @@ def compute_p1d_ratios(
 # ---------------------------------------------------------------------------
 # Sightline exclusion P1D (continuous NHI threshold sweep)
 # ---------------------------------------------------------------------------
+
 
 def compute_p1d_excl_nhi(
     hdf5_path,
@@ -800,7 +865,9 @@ def compute_p1d_excl_nhi(
     F_sums = np.zeros(n_cuts)
     F_ns = np.zeros(n_cuts, dtype=np.int64)
 
-    for start, end, tau_batch in iter_tau_batches(hdf5_path, batch_size=batch_size, n_skewers=n_skewers):
+    for start, end, tau_batch in iter_tau_batches(
+        hdf5_path, batch_size=batch_size, n_skewers=n_skewers
+    ):
         row_indices = np.arange(start, end)
         F_batch = np.exp(-tau_batch.astype(np.float64))
         for ci, excl in enumerate(excluded_sets):
@@ -814,7 +881,9 @@ def compute_p1d_excl_nhi(
     # Pass 2: accumulate P1D for each cut
     accumulators = [P1DAccumulator(nbins, dv_kms) for _ in range(n_cuts)]
 
-    for start, end, tau_batch in iter_tau_batches(hdf5_path, batch_size=batch_size, n_skewers=n_skewers):
+    for start, end, tau_batch in iter_tau_batches(
+        hdf5_path, batch_size=batch_size, n_skewers=n_skewers
+    ):
         row_indices = np.arange(start, end)
         for ci, (excl, acc) in enumerate(zip(excluded_sets, accumulators)):
             keep = np.array([i not in excl for i in row_indices], dtype=bool)

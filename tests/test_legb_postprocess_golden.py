@@ -14,9 +14,10 @@ the softplus α_DLA link, or the HCD z-slope ``alpha_pivot · g(z)``) that is NO
 coverage run — surfacing as a coverage/recovery ANOMALY, never a crash. This guard turns that
 into a hard test failure at the seam.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_postprocess_golden.py -q
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+     python -m pytest tests/test_legb_postprocess_golden.py -q
 """
+
 import os
 import numpy as np
 import pytest
@@ -25,14 +26,16 @@ import hcd_analysis.emulator  # x64 BEFORE jax
 import jax
 
 from hcd_analysis.emulator import closure_legb as C
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-_DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
+_DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 
 # The 3 numpyro.deterministic sites of _legb_model that the host-side reconstruction must match.
 _DET_SITES = ("tau0_vec", "alpha_dla", "alpha_hcd_z")
 
 
 @pytest.mark.skipif(not os.path.exists(_DESI_NPZ), reason="DESI data not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_fast_postprocess_matches_replay_golden():
     """fast_postprocess reconstructs tau0_vec/alpha_dla/alpha_hcd_z byte-identically to the
     legacy in-model deterministic replay on a fixed seed (rtol=0, atol=0)."""
@@ -55,17 +58,23 @@ def test_fast_postprocess_matches_replay_golden():
     # The raw latent sites must already match (same kernel, same seed) — sanity.
     for site in ("theta_unit", "tau0_amp", "dtau0", "alpha_lls", "alpha_subdla", "alpha_dla_raw"):
         np.testing.assert_array_equal(
-            np.asarray(s_fast[site]), np.asarray(s_slow[site]),
-            err_msg=f"latent site {site!r} differs across postprocess paths (seed mismatch?)")
+            np.asarray(s_fast[site]),
+            np.asarray(s_slow[site]),
+            err_msg=f"latent site {site!r} differs across postprocess paths (seed mismatch?)",
+        )
 
     # The headline guard: the reconstructed deterministics are BYTE-IDENTICAL.
     for site in _DET_SITES:
-        a = np.asarray(s_fast[site]); b = np.asarray(s_slow[site])
+        a = np.asarray(s_fast[site])
+        b = np.asarray(s_slow[site])
         assert a.shape == b.shape, f"{site!r} shape {a.shape} != replay {b.shape}"
         np.testing.assert_array_equal(
-            a, b, err_msg=f"deterministic site {site!r}: host-side reconstruction (fast_postprocess) "
-                          f"!= numpyro in-model replay — the τ₀/α reconstruction has drifted from the "
-                          f"model. Re-sync _legb_reconstruct_deterministics with _legb_model.")
+            a,
+            b,
+            err_msg=f"deterministic site {site!r}: host-side reconstruction (fast_postprocess) "
+            f"!= numpyro in-model replay — the τ₀/α reconstruction has drifted from the "
+            f"model. Re-sync _legb_reconstruct_deterministics with _legb_model.",
+        )
 
 
 if __name__ == "__main__":

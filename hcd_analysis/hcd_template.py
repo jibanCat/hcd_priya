@@ -38,6 +38,7 @@ angular grid (`kf *= 2π·npix/vmax`), so pass cache kfkms DIRECTLY (no /2π).
 Use `template_factor_from_cyclic_k(k_cyc, ...)` only if your k is a raw cyclic
 `rfftfreq`-style k (e.g. our `p1d.P1DAccumulator`, NOT the angular emulator cache).
 """
+
 from __future__ import annotations
 
 from typing import Dict, Tuple
@@ -70,8 +71,8 @@ def _az_bz(z: float) -> Tuple[np.ndarray, np.ndarray]:
     (LLS, Sub-DLA, Small-DLA, Large-DLA).
     """
     zfac = (1.0 + z) / (1.0 + _Z_PIVOT)
-    a_z = _A0 * zfac ** _A1
-    b_z = _B0 * zfac ** _B1
+    a_z = _A0 * zfac**_A1
+    b_z = _B0 * zfac**_B1
     return a_z, b_z
 
 
@@ -100,7 +101,7 @@ def template_contributions(
     k = np.asarray(k_angular, dtype=np.float64)
     a_z, b_z = _az_bz(z)
     zfac = (1.0 + z) / (1.0 + _Z_PIVOT)
-    z_weight = zfac ** _Z_SCALING_INDEX
+    z_weight = zfac**_Z_SCALING_INDEX
 
     contribs = {}
     for i, name in enumerate(_CLASS_LABELS):
@@ -122,7 +123,7 @@ def template_factor(
     c = template_contributions(k_angular, z, alpha)
     factor = np.ones_like(np.asarray(k_angular, dtype=np.float64))
     for name in _CLASS_LABELS:
-        factor += (c[name] - 1.0)
+        factor += c[name] - 1.0
     return factor
 
 
@@ -143,8 +144,8 @@ def class_ratio(k_angular: np.ndarray, z: float) -> Dict[str, np.ndarray]:
     k = np.asarray(k_angular, dtype=np.float64)
     a_z, b_z = _az_bz(z)
     zfac = (1.0 + z) / (1.0 + _Z_PIVOT)
-    z_weight = zfac ** _Z_SCALING_INDEX
-    c_z = _C0 * zfac ** _C1
+    z_weight = zfac**_Z_SCALING_INDEX
+    c_z = _C0 * zfac**_C1
     out = {}
     for i, name in enumerate(_CLASS_LABELS):
         g = (a_z[i] * np.exp(b_z[i] * k) - 1.0) ** -2
@@ -164,6 +165,7 @@ def template_factor_from_cyclic_k(
 # ---------------------------------------------------------------------------
 # α fitting
 # ---------------------------------------------------------------------------
+
 
 def fit_alpha(
     k_angular: np.ndarray,
@@ -214,7 +216,8 @@ def fit_alpha(
     else:
         alpha0 = np.asarray(alpha0, dtype=np.float64).copy()
     if bounds is None:
-        lo = np.zeros(4); hi = np.full(4, 10.0)
+        lo = np.zeros(4)
+        hi = np.full(4, 10.0)
     else:
         lo, hi = np.asarray(bounds[0]), np.asarray(bounds[1])
 
@@ -236,8 +239,10 @@ def fit_alpha(
         alpha_best[free_i] = res.x
         alpha_best[fixed_mask] = 0.0
     else:
+
         def residual(alpha):
             return weights * (template_factor(k, z, alpha) - r_obs)
+
         res = least_squares(residual, alpha0, bounds=(lo, hi))
         alpha_best = res.x
 
@@ -248,7 +253,7 @@ def fit_alpha(
     try:
         J = res.jac
         dof = max(1, len(r_obs) - len(res.x))
-        sigma2 = (np.sum(residual_arr ** 2) / dof)
+        sigma2 = np.sum(residual_arr**2) / dof
         cov = sigma2 * np.linalg.inv(J.T @ J)
         alpha_err = np.sqrt(np.abs(np.diag(cov)))
         # pad to length 4 if only_dlas
@@ -273,6 +278,7 @@ def fit_alpha(
 # ---------------------------------------------------------------------------
 # Apply the correction (template subtraction)
 # ---------------------------------------------------------------------------
+
 
 def correct_p1d(
     k_angular: np.ndarray,

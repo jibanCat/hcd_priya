@@ -61,10 +61,15 @@ object exists in the deployed mapped prior (its widths are the dN/dX-space KS_DN
 Blind status: BLIND-SAFE. Prior geometry only -- no data, no posterior, no cosmology.
 
 Run (login node):
-  cd /home/mfho/hcd_priya && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/export_deployed_centre_dndx.py
+  cd <repo> && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu \
+    python scripts/export_deployed_centre_dndx.py
 """
+
 from __future__ import annotations
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+import os
+
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import argparse, hashlib, json, platform, subprocess, sys
 from pathlib import Path
 
@@ -80,6 +85,7 @@ import jax.numpy as jnp
 from hcd_analysis.emulator.closure_legb import HCD_INCIDENCE_SLOPE, _ks_dndx_reference
 from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact, w_c_corrected
 from hcd_analysis.emulator.sampler_numpyro import _dla_raw_mu
+
 # KS_DNDX_* floats (and the parameterization table) are read as MODULE ATTRIBUTES of
 # `inference` -- NEVER from-imported (the from-import rebinding trap, JAX-specialist review
 # 2026-07-22: the sampled sites and the freeze signature read inference's namespace, so a
@@ -96,11 +102,15 @@ from hcd_analysis.emulator.inference import (
 )
 
 CLS = ("LLS", "subDLA", "DLA")
-FROZEN = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/dndx_repin_2026-07-20")
-DEFAULT_OUT = Path("/home/mfho/hcd_priya_notes/artifacts/paper_exports/deployed_centre_2026-07-22_v4")
+FROZEN = Path(
+    os.environ.get("HCD_FROZEN_DNDX_EXPORT", "<HCD_FROZEN_DNDX_EXPORT unset>")
+)  # the frozen 2026-07-20 export
+DEFAULT_OUT = Path(os.environ.get("HCD_EXPORT_OUT", "<HCD_EXPORT_OUT unset>"))
 SURVEYS = ("eBOSS", "KS", "DESI")
-RUN_CMD = ("cd /home/mfho/hcd_priya && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu "
-           "/home/mfho/.conda/envs/emu-jax/bin/python3 scripts/export_deployed_centre_dndx.py")
+RUN_CMD = (
+    f"cd {_REPO_ROOT} && PYTHONNOUSERSITE=1 PYTHONPATH=. JAX_PLATFORMS=cpu "
+    "python scripts/export_deployed_centre_dndx.py"
+)
 
 # The W2-pinned MAPPED KS alpha-space LLS pivot centre (the z=3 LLS occupancy weight of the
 # dN/dX-premap 2.5x lit-law reference through the exact occupancy map; sites at 0). The legacy
@@ -118,7 +128,9 @@ def sha256(p):
 
 
 def git(*a):
-    return subprocess.run(["git", "-C", str(ROOT), *a], capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", "-C", str(ROOT), *a], capture_output=True, text=True
+    ).stdout.strip()
 
 
 def band_curve(alpha_pivot_vec, zgrid, Xb, zp, slope):
@@ -126,8 +138,10 @@ def band_curve(alpha_pivot_vec, zgrid, Xb, zp, slope):
     dN/dX, through the EXACT inverse (v3; the frozen F3 layer used the approximate
     `alpha_to_dndx`). mode="raise": an out-of-simplex centre/edge refuses loudly instead of
     silently saturating. NOT used for the mapped KS survey (v4): its centre is native dN/dX."""
-    az = (np.asarray(alpha_pivot_vec)[None, :]
-          * ((1.0 + np.asarray(zgrid, float))[:, None] / (1.0 + zp)) ** np.asarray(slope)[None, :])
+    az = (
+        np.asarray(alpha_pivot_vec)[None, :]
+        * ((1.0 + np.asarray(zgrid, float))[:, None] / (1.0 + zp)) ** np.asarray(slope)[None, :]
+    )
     return np.asarray(alpha_to_dndx_exact(az, np.asarray(Xb, float), np.asarray(zgrid, float)))
 
 
@@ -142,14 +156,20 @@ def band_curve(alpha_pivot_vec, zgrid, Xb, zp, slope):
 # --------------------------------------------------------------------------------------------- #
 #  name -> why it is ambiguous in THIS file, and what to use instead.
 AMBIGUOUS_KEYS = {
-    "zslope": ("closure (2.465) vs deployed (2.127) LLS z-slope -- ship zslope_closure AND "
-               "zslope_deployed"),
+    "zslope": (
+        "closure (2.465) vs deployed (2.127) LLS z-slope -- ship zslope_closure AND "
+        "zslope_deployed"
+    ),
     "boost": "per-SURVEY length-3 vector, indistinguishable from a per-CLASS one -- boost_by_survey",
     "lls_frac_sigma": "per-SURVEY length-3 vector -- lls_frac_sigma_by_survey",
-    "alpha_pivot_mu": ("collides with the frozen f3_layers key of the same name (= CLOSURE) -- "
-                       "closure_alpha_pivot_mu / deployed_alpha_pivot_mu_<survey>"),
-    "alpha_pivot_sigma": ("collides with the frozen f3_layers key of the same name (= CLOSURE) -- "
-                          "closure_alpha_pivot_sigma / deployed_alpha_pivot_sigma_<survey>"),
+    "alpha_pivot_mu": (
+        "collides with the frozen f3_layers key of the same name (= CLOSURE) -- "
+        "closure_alpha_pivot_mu / deployed_alpha_pivot_mu_<survey>"
+    ),
+    "alpha_pivot_sigma": (
+        "collides with the frozen f3_layers key of the same name (= CLOSURE) -- "
+        "closure_alpha_pivot_sigma / deployed_alpha_pivot_sigma_<survey>"
+    ),
 }
 
 
@@ -165,7 +185,8 @@ def verify_npz_payload(payload, surveys=SURVEYS):
     for bad, why in AMBIGUOUS_KEYS.items():
         assert bad not in keys, (
             f"ambiguous key {bad!r} in the deployed-centre export: {why}. Refusing to ship a key "
-            f"whose closure-vs-deployed meaning a reader has to guess.")
+            f"whose closure-vs-deployed meaning a reader has to guess."
+        )
     for k in ("zslope_closure", "zslope_deployed"):
         assert k in keys, f"missing required key {k!r} (have: {sorted(keys)})"
     clo = np.asarray(payload["zslope_closure"], float)
@@ -173,11 +194,13 @@ def verify_npz_payload(payload, surveys=SURVEYS):
     np.testing.assert_array_equal(clo, np.asarray(HCD_INCIDENCE_SLOPE, float))
     assert float(dep[0]) == float(HCD_LLS_REALFIT_ZSLOPE), (
         f"zslope_deployed[LLS] = {dep[0]!r}, expected the deployed real-fit LLS forward z-slope "
-        f"HCD_LLS_REALFIT_ZSLOPE = {float(HCD_LLS_REALFIT_ZSLOPE)!r}")
+        f"HCD_LLS_REALFIT_ZSLOPE = {float(HCD_LLS_REALFIT_ZSLOPE)!r}"
+    )
     assert not np.array_equal(clo, dep), (
         "zslope_closure and zslope_deployed are the SAME array -- the deployed LLS curve differs "
-        "from the closure one in z-SHAPE (2.127 vs 2.465), not only in normalisation.")
-    np.testing.assert_array_equal(dep[1:], clo[1:])          # subDLA/DLA are survey-agnostic
+        "from the closure one in z-SHAPE (2.127 vs 2.465), not only in normalisation."
+    )
+    np.testing.assert_array_equal(dep[1:], clo[1:])  # subDLA/DLA are survey-agnostic
     # ARRAY-vs-LABEL POSTCONDITION (adversarial-panel blocker 4, 2026-07-21; extended to the
     # parameterization axis in v4). Everything above checks NAMES and scalar slope values. A
     # mutant with perfect key names, perfect slope values, and deployed curves rebuilt from the
@@ -192,7 +215,8 @@ def verify_npz_payload(payload, surveys=SURVEYS):
         svs = [str(s) for s in np.asarray(payload["survey_order"])]
         assert "parameterization_by_survey" in keys, (
             "missing parameterization_by_survey (v4 schema): every deployed survey must name how "
-            "its prior is parameterized (alpha_pivot_powerlaw_v1 vs dndx_mapped_v2)")
+            "its prior is parameterized (alpha_pivot_powerlaw_v1 vs dndx_mapped_v2)"
+        )
         par = [str(s) for s in np.asarray(payload["parameterization_by_survey"])]
         assert len(par) == len(svs), "parameterization_by_survey misaligned with survey_order"
         boosts = np.asarray(payload["boost_by_survey"], float)
@@ -202,7 +226,8 @@ def verify_npz_payload(payload, surveys=SURVEYS):
                 f"parameterization_by_survey[{sv}] = {par[i]!r} but the deployed "
                 f"inference.HCD_ALPHA_PARAMETERIZATION[{sv!r}] = "
                 f"{INF.HCD_ALPHA_PARAMETERIZATION[sv]!r} -- the artifact and the deployed prior "
-                f"disagree about what is being shipped")
+                f"disagree about what is being shipped"
+            )
             got = np.asarray(payload[f"deployed_center_dndx_{sv}"], float)
             if par[i] == "alpha_pivot_powerlaw_v1":
                 mu_sv = np.asarray(payload[f"deployed_alpha_pivot_mu_{sv}"], float)
@@ -211,69 +236,92 @@ def verify_npz_payload(payload, surveys=SURVEYS):
                     f"deployed_center_dndx_{sv}[:, LLS] does NOT reproduce from the labelled "
                     f"zslope_deployed + deployed_alpha_pivot_mu_{sv}. The arrays and the labels "
                     f"disagree: max|diff| = {np.max(np.abs(got[:, 0] - want)):.6e}. Refusing to "
-                    f"ship a file whose keys describe a curve it does not contain.")
+                    f"ship a file whose keys describe a curve it does not contain."
+                )
             elif par[i] == "dndx_mapped_v2":
                 assert sv == "KS", (
                     f"survey {sv!r} claims dndx_mapped_v2 but the ks_* key block is KS-specific; "
-                    f"extend the key schema before shipping another mapped survey")
+                    f"extend the key schema before shipping another mapped survey"
+                )
                 # (1) NATIVE dN/dX centre: the LLS column IS the boosted lit law (bit-equal).
-                for k in ("ks_lit_dndx_law_lls", "ks_dndx_ref_pivot", "ks_xbar_pivot",
-                          "ks_sigma_eps", "ks_sigma_kappa", "ks_sigma_msub", "ks_dla_raw_mu0"):
+                for k in (
+                    "ks_lit_dndx_law_lls",
+                    "ks_dndx_ref_pivot",
+                    "ks_xbar_pivot",
+                    "ks_sigma_eps",
+                    "ks_sigma_kappa",
+                    "ks_sigma_msub",
+                    "ks_dla_raw_mu0",
+                ):
                     assert k in keys, f"mapped KS survey requires key {k!r} (have: {sorted(keys)})"
                 A, g = [float(v) for v in np.asarray(payload["ks_lit_dndx_law_lls"], float)]
                 want_lls = boosts[i] * A * (1.0 + zg) ** g
                 assert np.array_equal(got[:, 0], want_lls), (
                     f"deployed_center_dndx_{sv}[:, LLS] is NOT the boosted literature dN/dX law "
                     f"({boosts[i]:g} x {A!r} x (1+z)^{g!r}) the mapped KS prior is centred on: "
-                    f"max|diff| = {np.max(np.abs(got[:, 0] - want_lls)):.6e}")
+                    f"max|diff| = {np.max(np.abs(got[:, 0] - want_lls)):.6e}"
+                )
                 # (2) hi1/lo1 LLS band semantics: exp(+-sigma_eps) x centre (z-independent
                 #     log-amplitude shift; the kappa tilt width is NOT in this band).
                 eps = float(np.asarray(payload["ks_sigma_eps"]))
                 hi1 = np.asarray(payload[f"deployed_hi1_dndx_{sv}"], float)
                 lo1 = np.asarray(payload[f"deployed_lo1_dndx_{sv}"], float)
-                assert np.array_equal(hi1[:, 0], np.exp(+eps) * got[:, 0]), (
-                    f"deployed_hi1_dndx_{sv}[:, LLS] != exp(+ks_sigma_eps) x centre")
-                assert np.array_equal(lo1[:, 0], np.exp(-eps) * got[:, 0]), (
-                    f"deployed_lo1_dndx_{sv}[:, LLS] != exp(-ks_sigma_eps) x centre")
+                assert np.array_equal(
+                    hi1[:, 0], np.exp(+eps) * got[:, 0]
+                ), f"deployed_hi1_dndx_{sv}[:, LLS] != exp(+ks_sigma_eps) x centre"
+                assert np.array_equal(
+                    lo1[:, 0], np.exp(-eps) * got[:, 0]
+                ), f"deployed_lo1_dndx_{sv}[:, LLS] != exp(-ks_sigma_eps) x centre"
                 # (3) the labelled alpha-space MAPPED pivot must reproduce from the shipped
                 #     reference through the forward occupancy map, and pin the W2 value.
                 ref_piv = np.asarray(payload["ks_dndx_ref_pivot"], float)
                 xb_piv = float(np.asarray(payload["ks_xbar_pivot"]))
-                a_piv = np.asarray(w_c_corrected(jnp.asarray(ref_piv), jnp.asarray(xb_piv),
-                                                 jnp.asarray(zpv)))[..., 1:]
+                a_piv = np.asarray(
+                    w_c_corrected(jnp.asarray(ref_piv), jnp.asarray(xb_piv), jnp.asarray(zpv))
+                )[..., 1:]
                 got_mu = np.asarray(payload[f"deployed_alpha_pivot_mu_{sv}"], float)
                 assert np.max(np.abs(a_piv - got_mu)) < 1e-12, (
                     f"deployed_alpha_pivot_mu_{sv} does NOT reproduce from the shipped "
                     f"ks_dndx_ref_pivot through w_c_corrected: max|diff| = "
-                    f"{np.max(np.abs(a_piv - got_mu)):.3e}")
+                    f"{np.max(np.abs(a_piv - got_mu)):.3e}"
+                )
                 assert abs(float(got_mu[0]) - KS_MAPPED_PIVOT_TARGET) < KS_MAPPED_PIVOT_TOL, (
                     f"mapped KS LLS pivot centre {float(got_mu[0])!r} != the W2-pinned "
-                    f"{KS_MAPPED_PIVOT_TARGET} +- {KS_MAPPED_PIVOT_TOL}")
+                    f"{KS_MAPPED_PIVOT_TARGET} +- {KS_MAPPED_PIVOT_TOL}"
+                )
                 # (4) NO alpha-space Gaussian width may ship for the mapped survey: the deployed
                 #     mapped prior has none (widths are dN/dX-space KS_DNDX_SIGMA_*), and the
                 #     legacy alpha-space DLA softplus quantiles are equally a different object.
-                for bad in (f"deployed_alpha_pivot_sigma_{sv}",
-                            f"deployed_dla_softplus_quantiles_{sv}"):
+                for bad in (
+                    f"deployed_alpha_pivot_sigma_{sv}",
+                    f"deployed_dla_softplus_quantiles_{sv}",
+                ):
                     assert bad not in keys, (
                         f"{bad!r} shipped for the dndx_mapped_v2 survey {sv}: the mapped prior "
                         f"has NO alpha-space Gaussian width / softplus alpha quantiles -- its "
                         f"widths live in dN/dX space (ks_sigma_eps/ks_sigma_kappa/ks_sigma_msub/"
                         f"ks_dla_amp_quantiles). Shipping this key re-creates the legacy-surface "
-                        f"misread the v4 migration retired.")
+                        f"misread the v4 migration retired."
+                    )
             else:
                 raise AssertionError(f"unknown parameterization {par[i]!r} for survey {sv}")
     if "survey_order" in keys:
-        par = ([str(s) for s in np.asarray(payload["parameterization_by_survey"])]
-               if "parameterization_by_survey" in keys else None)
+        par = (
+            [str(s) for s in np.asarray(payload["parameterization_by_survey"])]
+            if "parameterization_by_survey" in keys
+            else None
+        )
         for i, sv in enumerate([str(s) for s in np.asarray(payload["survey_order"])]):
             for stem in ("alpha_pivot_mu", "alpha_pivot_sigma"):
                 assert f"{stem}_{sv}" not in keys, (
                     f"{stem}_{sv!r} does not say whether it is the closure or the deployed pivot; "
-                    f"use deployed_{stem}_{sv}")
+                    f"use deployed_{stem}_{sv}"
+                )
             assert f"deployed_alpha_pivot_mu_{sv}" in keys, f"missing deployed_alpha_pivot_mu_{sv}"
             if par is not None and par[i] == "alpha_pivot_powerlaw_v1":
-                assert f"deployed_alpha_pivot_sigma_{sv}" in keys, \
-                    f"missing deployed_alpha_pivot_sigma_{sv}"
+                assert (
+                    f"deployed_alpha_pivot_sigma_{sv}" in keys
+                ), f"missing deployed_alpha_pivot_sigma_{sv}"
             for stem in ("center", "lo1", "hi1"):
                 assert f"deployed_{stem}_dndx_{sv}" in keys, f"missing deployed_{stem}_dndx_{sv}"
     return True
@@ -302,11 +350,20 @@ NOTE = (
     "through the SAME exact map is included as closure_center_dndx for a like-for-like overlay. "
     "The export zgrid starts at 2.2 while the KS survey band starts at z=2.4: the z<2.4 rows are "
     "prior geometry shipped for overlay continuity, exactly as previous exports did. Prior "
-    "geometry only: no data, no posterior, no cosmology.")
+    "geometry only: no data, no posterior, no cosmology."
+)
 
 
-def build_npz_payload(zgrid, xbar_grid, mu_closure, sd_closure, z_pivot, closure_center_dndx,
-                      surveys=SURVEYS, xbar_cf=None):
+def build_npz_payload(
+    zgrid,
+    xbar_grid,
+    mu_closure,
+    sd_closure,
+    z_pivot,
+    closure_center_dndx,
+    surveys=SURVEYS,
+    xbar_cf=None,
+):
     """Assemble (npz payload dict, PROVENANCE prior_geometry_table) for the deployed layer.
 
     ALPHA-parameterized surveys (DESI, eBOSS -- inference.HCD_ALPHA_PARAMETERIZATION
@@ -347,8 +404,9 @@ def build_npz_payload(zgrid, xbar_grid, mu_closure, sd_closure, z_pivot, closure
     sd0 = np.asarray(sd_closure, float)
     zp = float(z_pivot)
     slope_closure = np.asarray(HCD_INCIDENCE_SLOPE, float)
-    slope_deployed = np.array([float(HCD_LLS_REALFIT_ZSLOPE),
-                               float(slope_closure[1]), float(slope_closure[2])], float)
+    slope_deployed = np.array(
+        [float(HCD_LLS_REALFIT_ZSLOPE), float(slope_closure[1]), float(slope_closure[2])], float
+    )
     Xb3 = float(np.interp(zp, zgrid, Xb))
     if xbar_cf is None:
         xbar_cf = np.polyfit(zgrid, Xb, 2)
@@ -357,7 +415,8 @@ def build_npz_payload(zgrid, xbar_grid, mu_closure, sd_closure, z_pivot, closure
     assert _rel_cf < 1e-9, (
         f"xbar_grid is not the deg-2 polynomial xbar_cf claims (max rel diff {_rel_cf:.3e}); "
         f"the mapped KS reference consumes the POLYNOMIAL, so a mismatched grid would ship a "
-        f"KS layer on different Xbar geometry than the DESI/eBOSS columns")
+        f"KS layer on different Xbar geometry than the DESI/eBOSS columns"
+    )
 
     rows, table = {}, {}
     par_by_survey = []
@@ -371,29 +430,39 @@ def build_npz_payload(zgrid, xbar_grid, mu_closure, sd_closure, z_pivot, closure
             # ---- KS NATIVE dN/dX (v4): the centre IS the sampled reference ------------------
             assert zp == float(HCD_Z_PIVOT), (
                 f"z_pivot {zp} != HCD_Z_PIVOT {float(HCD_Z_PIVOT)}: _ks_dndx_reference pins its "
-                f"pivot internally, so a different export pivot would mislabel the KS layer")
+                f"pivot internally, so a different export pivot would mislabel the KS layer"
+            )
             ref, xbar_chk, ref_piv, xbar_piv = _ks_dndx_reference(mu0, xbar_cf, zgrid)
             centre = np.asarray(ref, float)
-            np.testing.assert_allclose(np.asarray(xbar_chk, float), Xb, rtol=1e-9, atol=0,
-                                       err_msg="_ks_dndx_reference Xbar(z) != the export "
-                                               "xbar_grid -- inconsistent geometry")
+            np.testing.assert_allclose(
+                np.asarray(xbar_chk, float),
+                Xb,
+                rtol=1e-9,
+                atol=0,
+                err_msg="_ks_dndx_reference Xbar(z) != the export "
+                "xbar_grid -- inconsistent geometry",
+            )
             # SELF-CHECK (KS): FORWARD round trip at machine precision. The sampled quantity is
             # the paper number; the exact inverse is the CHECK here, not the readout.
-            alpha_z = np.asarray(w_c_corrected(jnp.asarray(centre), jnp.asarray(Xb),
-                                               jnp.asarray(zgrid)))[..., 1:]
+            alpha_z = np.asarray(
+                w_c_corrected(jnp.asarray(centre), jnp.asarray(Xb), jnp.asarray(zgrid))
+            )[..., 1:]
             back = np.asarray(alpha_to_dndx_exact(alpha_z, Xb, zgrid))
             rt = float(np.max(np.abs(back / centre - 1.0)))
             assert rt < 1e-12, (
                 f"KS SELF-CHECK FAILED: native-dN/dX centre does not round-trip through "
                 f"w_c_corrected -> alpha_to_dndx_exact at machine precision (max rel {rt:.3e}). "
-                f"Refusing to ship a KS layer the forward model would not reproduce.")
+                f"Refusing to ship a KS layer the forward model would not reproduce."
+            )
             # MAPPED alpha-space pivot (derived): guard band + the W2 value pin.
-            a_piv = np.asarray(w_c_corrected(jnp.asarray(ref_piv), jnp.asarray(float(xbar_piv)),
-                                             jnp.asarray(zp)))[..., 1:]
+            a_piv = np.asarray(
+                w_c_corrected(jnp.asarray(ref_piv), jnp.asarray(float(xbar_piv)), jnp.asarray(zp))
+            )[..., 1:]
             INF.assert_ks_mapped_pivot(float(a_piv[0]), f"deployed-centre export v4 {sv}")
             assert abs(float(a_piv[0]) - KS_MAPPED_PIVOT_TARGET) < KS_MAPPED_PIVOT_TOL, (
                 f"mapped KS LLS pivot centre {float(a_piv[0])!r} != the W2-pinned "
-                f"{KS_MAPPED_PIVOT_TARGET} +- {KS_MAPPED_PIVOT_TOL} (legacy was 0.4302804)")
+                f"{KS_MAPPED_PIVOT_TARGET} +- {KS_MAPPED_PIVOT_TOL} (legacy was 0.4302804)"
+            )
             # Pivot-AMPLITUDE +-1 sigma edges (the tilt widths kappa/t_sub/t_dla add z-dependent
             # spread NOT shown -- mirroring the legacy pivot-amplitude-band-only convention).
             eps = float(INF.KS_DNDX_SIGMA_EPS)
@@ -418,35 +487,38 @@ def build_npz_payload(zgrid, xbar_grid, mu_closure, sd_closure, z_pivot, closure
             rows["ks_sigma_msub"] = np.float64(msub)
             rows["ks_dla_raw_mu0"] = np.float64(raw0)
             rows["ks_dla_amp_quantiles"] = np.array(
-                [amp_q[-2.0], amp_q[-1.0], amp_q[1.0], amp_q[2.0]], float)
-            table[sv] = {"boost": boost, "parameterization": param,
-                         "boost_space": str(INF.HCD_LLS_BOOST_SPACE[sv]),
-                         # 0.40 is the alpha-space SOURCE of sigma_eps (= 0.40/g_LLS), NOT the
-                         # deployed width; kept for the lls_frac_sigma_by_survey cross-read.
-                         "lls_frac_sigma_alpha_space_source": frac,
-                         "dndx_sigma_eps": eps,
-                         "dndx_sigma_kappa": float(INF.KS_DNDX_SIGMA_KAPPA),
-                         "dndx_sigma_msub": msub,
-                         "alpha_pivot_mu_deployed_mapped": np.asarray(a_piv, float).tolist(),
-                         "alpha_pivot_mu_closure": mu0.tolist(),
-                         "alpha_pivot_sigma_closure": sd0.tolist(),
-                         "dndx_ref_pivot": np.asarray(ref_piv, float).tolist(),
-                         "xbar_pivot": float(xbar_piv),
-                         "lit_dndx_law_lls": [A_lls, g_lls],
-                         # the slopes below describe the REFERENCE construction: sub/DLA
-                         # components invert the boost-1.0 alpha triple at these slopes; the
-                         # LLS dN/dX slope is the lit gamma 2.127 = zslope_deployed[0].
-                         "zslope_deployed": slope_deployed.tolist(),
-                         "zslope_closure": slope_closure.tolist(),
-                         "dndx_lls_center_z3_deployed": float(
-                             np.interp(3.0, zgrid, centre[:, 0]))}
+                [amp_q[-2.0], amp_q[-1.0], amp_q[1.0], amp_q[2.0]], float
+            )
+            table[sv] = {
+                "boost": boost,
+                "parameterization": param,
+                "boost_space": str(INF.HCD_LLS_BOOST_SPACE[sv]),
+                # 0.40 is the alpha-space SOURCE of sigma_eps (= 0.40/g_LLS), NOT the
+                # deployed width; kept for the lls_frac_sigma_by_survey cross-read.
+                "lls_frac_sigma_alpha_space_source": frac,
+                "dndx_sigma_eps": eps,
+                "dndx_sigma_kappa": float(INF.KS_DNDX_SIGMA_KAPPA),
+                "dndx_sigma_msub": msub,
+                "alpha_pivot_mu_deployed_mapped": np.asarray(a_piv, float).tolist(),
+                "alpha_pivot_mu_closure": mu0.tolist(),
+                "alpha_pivot_sigma_closure": sd0.tolist(),
+                "dndx_ref_pivot": np.asarray(ref_piv, float).tolist(),
+                "xbar_pivot": float(xbar_piv),
+                "lit_dndx_law_lls": [A_lls, g_lls],
+                # the slopes below describe the REFERENCE construction: sub/DLA
+                # components invert the boost-1.0 alpha triple at these slopes; the
+                # LLS dN/dX slope is the lit gamma 2.127 = zslope_deployed[0].
+                "zslope_deployed": slope_deployed.tolist(),
+                "zslope_closure": slope_closure.tolist(),
+                "dndx_lls_center_z3_deployed": float(np.interp(3.0, zgrid, centre[:, 0])),
+            }
             continue
 
         # ---- ALPHA-parameterized surveys (DESI, eBOSS): unchanged v3 construction ------------
         mu = mu0.copy()
         mu[0] = float(hcd_lls_realfit_alpha_center(Xb3, z=zp, boost=boost))
         sd = sd0.copy()
-        sd[0] = mu[0] * frac                        # width rule: sigma/mu held at the new centre
+        sd[0] = mu[0] * frac  # width rule: sigma/mu held at the new centre
         assert_hcd_pivot_z3(float(mu[0]), z=zp, where=f"deployed-centre export {sv}", boost=boost)
         try:
             rows[f"deployed_center_dndx_{sv}"] = band_curve(mu, zgrid, Xb, zp, slope_deployed)
@@ -475,34 +547,45 @@ def build_npz_payload(zgrid, xbar_grid, mu_closure, sd_closure, z_pivot, closure
                 f"{zgrid.max():g}]). Under v4 this is UNEXPECTED for every shipped survey "
                 f"(DESI/eBOSS are in-domain everywhere at boost 1.0; the mapped KS centre does "
                 f"not route through the inverse) -- the prior geometry has drifted; refusing to "
-                f"ship. Underlying domain violation: {e}") from e
+                f"ship. Underlying domain violation: {e}"
+            ) from e
         rows[f"deployed_lo1_dndx_{sv}"] = lo1
         rows[f"deployed_hi1_dndx_{sv}"] = hi1
         rows[f"deployed_dla_softplus_quantiles_{sv}"] = np.array(
-            [float(jax.nn.softplus(raw_mu + n)) for n in (-2.0, -1.0, 1.0, 2.0)], float)
+            [float(jax.nn.softplus(raw_mu + n)) for n in (-2.0, -1.0, 1.0, 2.0)], float
+        )
         rows[f"deployed_alpha_pivot_mu_{sv}"] = mu
         rows[f"deployed_alpha_pivot_sigma_{sv}"] = sd
-        table[sv] = {"boost": boost, "lls_frac_sigma": frac,
-                     "parameterization": param,
-                     "alpha_pivot_mu_deployed": mu.tolist(),
-                     "alpha_pivot_sigma_deployed": sd.tolist(),
-                     "alpha_pivot_mu_closure": mu0.tolist(),
-                     "alpha_pivot_sigma_closure": sd0.tolist(),
-                     "zslope_deployed": slope_deployed.tolist(),
-                     "zslope_closure": slope_closure.tolist(),
-                     "dndx_lls_center_z3_deployed": float(
-                         np.interp(3.0, zgrid, rows[f"deployed_center_dndx_{sv}"][:, 0]))}
+        table[sv] = {
+            "boost": boost,
+            "lls_frac_sigma": frac,
+            "parameterization": param,
+            "alpha_pivot_mu_deployed": mu.tolist(),
+            "alpha_pivot_sigma_deployed": sd.tolist(),
+            "alpha_pivot_mu_closure": mu0.tolist(),
+            "alpha_pivot_sigma_closure": sd0.tolist(),
+            "zslope_deployed": slope_deployed.tolist(),
+            "zslope_closure": slope_closure.tolist(),
+            "dndx_lls_center_z3_deployed": float(
+                np.interp(3.0, zgrid, rows[f"deployed_center_dndx_{sv}"][:, 0])
+            ),
+        }
 
     payload = dict(
-        class_order=np.array(CLS), survey_order=np.array(tuple(surveys)),
+        class_order=np.array(CLS),
+        survey_order=np.array(tuple(surveys)),
         parameterization_by_survey=np.array(par_by_survey),
-        zgrid=zgrid, xbar_grid=Xb, z_pivot=np.float64(zp),
+        zgrid=zgrid,
+        xbar_grid=Xb,
+        z_pivot=np.float64(zp),
         # BOTH slopes, each naming its layer. NEVER a bare `zslope` here (see AMBIGUOUS_KEYS).
-        zslope_closure=slope_closure, zslope_deployed=slope_deployed,
+        zslope_closure=slope_closure,
+        zslope_deployed=slope_deployed,
         boost_by_survey=np.array([HCD_LLS_SURVEY_BOOST[s] for s in surveys], float),
         lls_frac_sigma_by_survey=np.array([HCD_LLS_SURVEY_FRAC_SIGMA[s] for s in surveys], float),
         closure_center_dndx=np.asarray(closure_center_dndx),
-        closure_alpha_pivot_mu=mu0, closure_alpha_pivot_sigma=sd0,
+        closure_alpha_pivot_mu=mu0,
+        closure_alpha_pivot_sigma=sd0,
         note=np.str_(NOTE),
         **rows,
     )
@@ -529,7 +612,8 @@ def main():
     xbar_cf = np.asarray(f3["xbar_poly_deg2_coeffs"], float)
     assert np.array_equal(np.polyval(xbar_cf, zgrid), Xb), (
         "frozen xbar_grid != polyval(xbar_poly_deg2_coeffs, zgrid) -- the f3 artifact is "
-        "internally inconsistent; refusing to build the KS reference on ambiguous Xbar geometry")
+        "internally inconsistent; refusing to build the KS reference on ambiguous Xbar geometry"
+    )
 
     # --- w_c_z3 fiducial: recovered from the frozen pivot mu so no cache rebuild is needed.
     # hcd_incidence_prior(w_c, survey=S) scales the LLS entry by the survey boost and swaps the
@@ -550,21 +634,26 @@ def main():
     chk_c = band_curve(mu0, zgrid, Xb, zp, slope)
     chk_lo = band_curve(np.clip(mu0 - sd0, 1e-8, None), zgrid, Xb, zp, slope)
     chk_hi = band_curve(mu0 + sd0, zgrid, Xb, zp, slope)
-    for name, got, piv in (("closure centre", chk_c, mu0),
-                           ("closure lo1", chk_lo, np.clip(mu0 - sd0, 1e-8, None)),
-                           ("closure hi1", chk_hi, mu0 + sd0)):
+    for name, got, piv in (
+        ("closure centre", chk_c, mu0),
+        ("closure lo1", chk_lo, np.clip(mu0 - sd0, 1e-8, None)),
+        ("closure hi1", chk_hi, mu0 + sd0),
+    ):
         az = piv[None, :] * ((1.0 + zgrid)[:, None] / (1.0 + zp)) ** slope[None, :]
         want = np.asarray(alpha_to_dndx_exact(az, Xb, zgrid))
         d = np.max(np.abs(np.asarray(got) - want))
         assert d < 1e-12, (
             f"SELF-CHECK FAILED: band_curve({name}) differs from the direct exact-inverse "
             f"evaluation by {d:.3e}; the deployed curves below would be built by a different "
-            f"map. Refusing to write an overlay the paper would draw on the wrong values.")
+            f"map. Refusing to write an overlay the paper would draw on the wrong values."
+        )
     rel_frozen = float(np.max(np.abs(chk_c / np.asarray(f3["prior_center_dndx"]) - 1.0)))
     print("[self-check] band_curve == direct alpha_to_dndx_exact to <1e-12  OK")
-    print(f"[self-check] exact vs FROZEN (pre-v3, approximate-inverse) closure centre: "
-          f"max rel diff {rel_frozen:.3e} (expected renorm-level; NOT asserted -- the frozen "
-          f"f3_layers.npz was built with the approximate alpha_to_dndx)")
+    print(
+        f"[self-check] exact vs FROZEN (pre-v3, approximate-inverse) closure centre: "
+        f"max rel diff {rel_frozen:.3e} (expected renorm-level; NOT asserted -- the frozen "
+        f"f3_layers.npz was built with the approximate alpha_to_dndx)"
+    )
 
     # --- deployed-survey geometry, per survey (construction + the closure-vs-deployed key
     # discipline live in build_npz_payload; see its docstring). The KS survey is NATIVE dN/dX
@@ -575,32 +664,43 @@ def main():
 
     # KS self-check readout for the record (the asserts live in build_npz_payload).
     ks_centre = np.asarray(payload["deployed_center_dndx_KS"], float)
-    ks_alpha_z = np.asarray(w_c_corrected(jnp.asarray(ks_centre), jnp.asarray(Xb),
-                                          jnp.asarray(zgrid)))[..., 1:]
-    ks_rt = float(np.max(np.abs(np.asarray(alpha_to_dndx_exact(ks_alpha_z, Xb, zgrid))
-                                / ks_centre - 1.0)))
-    print(f"[self-check] KS native-dN/dX centre forward round trip "
-          f"(w_c_corrected -> alpha_to_dndx_exact): max rel {ks_rt:.3e}  (<1e-12 asserted)")
-    print(f"[self-check] KS mapped alpha-space pivot = "
-          f"{float(payload['deployed_alpha_pivot_mu_KS'][0]):.9f} "
-          f"(W2 pin {KS_MAPPED_PIVOT_TARGET} +- {KS_MAPPED_PIVOT_TOL}; legacy postmap was "
-          f"0.430280402)")
+    ks_alpha_z = np.asarray(
+        w_c_corrected(jnp.asarray(ks_centre), jnp.asarray(Xb), jnp.asarray(zgrid))
+    )[..., 1:]
+    ks_rt = float(
+        np.max(np.abs(np.asarray(alpha_to_dndx_exact(ks_alpha_z, Xb, zgrid)) / ks_centre - 1.0))
+    )
+    print(
+        f"[self-check] KS native-dN/dX centre forward round trip "
+        f"(w_c_corrected -> alpha_to_dndx_exact): max rel {ks_rt:.3e}  (<1e-12 asserted)"
+    )
+    print(
+        f"[self-check] KS mapped alpha-space pivot = "
+        f"{float(payload['deployed_alpha_pivot_mu_KS'][0]):.9f} "
+        f"(W2 pin {KS_MAPPED_PIVOT_TARGET} +- {KS_MAPPED_PIVOT_TOL}; legacy postmap was "
+        f"0.430280402)"
+    )
 
     # Acceptance targets: eBOSS/DESI from the frozen prior_geometry_table (unchanged, 1e-12);
     # KS = the W2-pinned MAPPED pivot (v4 -- the legacy 0.4302804 target is retired with the
     # alpha-postmap parameterization).
-    TARGET = {"eBOSS": (0.17211216067355312, 1e-12),
-              "DESI": (0.17211216067355312, 1e-12),
-              "KS": (KS_MAPPED_PIVOT_TARGET, KS_MAPPED_PIVOT_TOL)}
+    TARGET = {
+        "eBOSS": (0.17211216067355312, 1e-12),
+        "DESI": (0.17211216067355312, 1e-12),
+        "KS": (KS_MAPPED_PIVOT_TARGET, KS_MAPPED_PIVOT_TOL),
+    }
     for sv in SURVEYS:
         got = float(np.asarray(payload[f"deployed_alpha_pivot_mu_{sv}"], float)[0])
         want, tol = TARGET[sv]
         assert abs(got - want) < tol, (
             f"deployed LLS pivot for {sv} is {got!r}, expected {want!r} +- {tol:g}. "
-            f"Refusing to ship a curve at the wrong centre.")
-        print(f"  {sv:6s} param {table[sv]['parameterization']:24s} boost {table[sv]['boost']:.2f}"
-              f"  alpha_LLS_pivot {got:.9f}  dN/dX_LLS(z=3) "
-              f"{table[sv]['dndx_lls_center_z3_deployed']:.4f}")
+            f"Refusing to ship a curve at the wrong centre."
+        )
+        print(
+            f"  {sv:6s} param {table[sv]['parameterization']:24s} boost {table[sv]['boost']:.2f}"
+            f"  alpha_LLS_pivot {got:.9f}  dN/dX_LLS(z=3) "
+            f"{table[sv]['dndx_lls_center_z3_deployed']:.4f}"
+        )
     # subDLA/DLA centres: survey-agnostic at the source. Under the EXACT inverse their dN/dX
     # columns are NOT bit-identical to the closure layer (the renorm undo couples every class
     # to the LLS alpha; ~3e-4 relative, asserted <1e-2 -- a genuine centre/slope mislabel is a
@@ -614,18 +714,30 @@ def main():
             assert rel < 1e-2, (
                 f"{sv} {cname} centre differs from the closure layer by {rel:.3e} relative -- "
                 f"far above the exact-inverse renorm coupling (~3e-4); a centre/slope mislabel, "
-                f"not the expected class coupling")
+                f"not the expected class coupling"
+            )
     for sv in ("KS", "DESI"):
-        d_x = float(np.max(np.abs(payload[f"deployed_center_dndx_{sv}"][:, 1:]
-                                  - payload["deployed_center_dndx_eBOSS"][:, 1:])))
+        d_x = float(
+            np.max(
+                np.abs(
+                    payload[f"deployed_center_dndx_{sv}"][:, 1:]
+                    - payload["deployed_center_dndx_eBOSS"][:, 1:]
+                )
+            )
+        )
         assert d_x < 1e-12, (
             f"deployed sub/DLA columns differ between {sv} and eBOSS by {d_x:.3e} -- they invert "
-            f"the identical boost-1.0 triple and must agree bit-exactly")
-    print(f"[check] deployed subDLA/DLA centres within the renorm coupling (<1e-2 rel) of the "
-          f"closure layer for {list(SURVEYS)}; cross-survey sub/DLA identity (incl. the KS "
-          f"reference) to <1e-12  OK")
-    print(f"[check] zslope_closure={payload['zslope_closure'].tolist()}  "
-          f"zslope_deployed={payload['zslope_deployed'].tolist()}  (both shipped, no bare 'zslope')")
+            f"the identical boost-1.0 triple and must agree bit-exactly"
+        )
+    print(
+        f"[check] deployed subDLA/DLA centres within the renorm coupling (<1e-2 rel) of the "
+        f"closure layer for {list(SURVEYS)}; cross-survey sub/DLA identity (incl. the KS "
+        f"reference) to <1e-12  OK"
+    )
+    print(
+        f"[check] zslope_closure={payload['zslope_closure'].tolist()}  "
+        f"zslope_deployed={payload['zslope_deployed'].tolist()}  (both shipped, no bare 'zslope')"
+    )
 
     # IMMUTABLE-DIR REFUSE GUARD (adversarial-panel blocker 2, 2026-07-21). Every sidecar in this
     # series says "regenerate to a NEW dated directory, never edit in place", while the code would
@@ -635,37 +747,43 @@ def main():
         raise SystemExit(
             f"REFUSING to write into {out}: it already contains a PROVENANCE.json, i.e. it is a "
             f"delivered immutable artifact that a downstream consumer may pin by sha256. "
-            f"Regenerate to a NEW dated directory (--out-dir) instead of editing in place.")
+            f"Regenerate to a NEW dated directory (--out-dir) instead of editing in place."
+        )
     out.mkdir(parents=True, exist_ok=True)
     npz = out / "deployed_centre_layers.npz"
     np.savez(npz, **payload)
-    verify_npz_payload(dict(np.load(npz, allow_pickle=True)))   # re-read what was actually written
+    verify_npz_payload(dict(np.load(npz, allow_pickle=True)))  # re-read what was actually written
     from hcd_analysis.emulator import inference as _INF_SIG
+
     sidecar = {
         "schema": "deployed_centre_v4",
         # prior-geometry pin (2026-07-23, paper-agent Q4): proves which prior era produced this
         # export, independently of the commit. Module-attribute read (rebinding-trap safe).
         "hcd_prior_signature": _INF_SIG.hcd_prior_signature(),
-        "purpose": ("deployed-survey prior centre in dN/dX for paper F3 (PI 2026-07-21); "
-                    "alpha->dN/dX mapped here because the paper side may not reconstruct it; "
-                    "v4 = the ONE-TIME re-issue under the corrected model (exact inverse for "
-                    "DESI/eBOSS + the native-dN/dX mapped KS prior)"),
+        "purpose": (
+            "deployed-survey prior centre in dN/dX for paper F3 (PI 2026-07-21); "
+            "alpha->dN/dX mapped here because the paper side may not reconstruct it; "
+            "v4 = the ONE-TIME re-issue under the corrected model (exact inverse for "
+            "DESI/eBOSS + the native-dN/dX mapped KS prior)"
+        ),
         "supersedes": [
             "deployed_centre_2026-07-21 (v1: approximate inverse; bare 'zslope' defect)",
             "deployed_centre_2026-07-22 (v2: approximate inverse -- the KS LLS column silently "
             "SATURATED at 27.631021/Xbar (up to ~33x the lit law at z>=4.5); superseded, do not "
             "read its KS column)",
         ],
-        "inverse_map": ("DESI/eBOSS: alpha_to_dndx_exact (EXACT inverse of the w_c_corrected "
-                        "forward incl. the 4-class renormalisation; no clip floor; fail-loud "
-                        "outside the occupancy simplex). KS (v4): NO inverse map -- the centre "
-                        "IS the native dN/dX reference of the deployed mapped prior "
-                        "(dndx_mapped_v2); the exact inverse appears only in the KS SELF-CHECK "
-                        "round trip. Pre-v3 layers -- including the frozen "
-                        "dndx_repin_2026-07-20/f3_layers.npz this export reads its grid from -- "
-                        "were built with the APPROXIMATE alpha_to_dndx (renorm ignored, median "
-                        "rel err ~2e-3, silent saturation at 27.631021/Xbar outside its domain) "
-                        "and differ from v3+ arrays at the renorm level."),
+        "inverse_map": (
+            "DESI/eBOSS: alpha_to_dndx_exact (EXACT inverse of the w_c_corrected "
+            "forward incl. the 4-class renormalisation; no clip floor; fail-loud "
+            "outside the occupancy simplex). KS (v4): NO inverse map -- the centre "
+            "IS the native dN/dX reference of the deployed mapped prior "
+            "(dndx_mapped_v2); the exact inverse appears only in the KS SELF-CHECK "
+            "round trip. Pre-v3 layers -- including the frozen "
+            "dndx_repin_2026-07-20/f3_layers.npz this export reads its grid from -- "
+            "were built with the APPROXIMATE alpha_to_dndx (renorm ignored, median "
+            "rel err ~2e-3, silent saturation at 27.631021/Xbar outside its domain) "
+            "and differ from v3+ arrays at the renorm level."
+        ),
         "answers_request": "request_to_code_agent_2026-07-21_deployed_centre.md",
         "commit": git("rev-parse", "HEAD"),
         "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
@@ -680,99 +798,143 @@ def main():
         "dirty_tracked_files": bool(git("status", "--porcelain", "--untracked-files=no")),
         "producer": str(Path(__file__).relative_to(ROOT)),
         "producer_present_at_commit": subprocess.run(
-            ["git", "-C", str(ROOT), "cat-file", "-e",
-             f"HEAD:{Path(__file__).relative_to(ROOT)}"]).returncode == 0,
+            ["git", "-C", str(ROOT), "cat-file", "-e", f"HEAD:{Path(__file__).relative_to(ROOT)}"]
+        ).returncode
+        == 0,
         "producer_unmodified_vs_commit": subprocess.run(
-            ["git", "-C", str(ROOT), "diff", "--quiet", "HEAD", "--",
-             str(Path(__file__).relative_to(ROOT))]).returncode == 0,
+            [
+                "git",
+                "-C",
+                str(ROOT),
+                "diff",
+                "--quiet",
+                "HEAD",
+                "--",
+                str(Path(__file__).relative_to(ROOT)),
+            ]
+        ).returncode
+        == 0,
         "code_sha256": {
             str(Path(__file__).relative_to(ROOT)): sha256(Path(__file__)),
-            **{f"hcd_analysis/emulator/{m}.py": sha256(ROOT / "hcd_analysis" / "emulator" / f"{m}.py")
-               for m in ("inference", "dndx_wc", "closure_legb", "sampler_numpyro")},
+            **{
+                f"hcd_analysis/emulator/{m}.py": sha256(
+                    ROOT / "hcd_analysis" / "emulator" / f"{m}.py"
+                )
+                for m in ("inference", "dndx_wc", "closure_legb", "sampler_numpyro")
+            },
         },
         "run_command": RUN_CMD,
         "inputs_sha256": {str(f3p): sha256(f3p)},
         "outputs_sha256": {npz.name: sha256(npz)},
-        "environment": {"python": platform.python_version(), "numpy": np.__version__,
-                        "host": platform.node()},
+        "environment": {
+            "python": platform.python_version(),
+            "numpy": np.__version__,
+            "host": platform.node(),
+        },
         "prior_geometry_table": table,
         "key_semantics": {
-            "parameterization_by_survey": ("ordered by survey_order; how each survey's deployed "
-                                           "HCD prior is parameterized (inference."
-                                           "HCD_ALPHA_PARAMETERIZATION): DESI/eBOSS "
-                                           "alpha_pivot_powerlaw_v1, KS dndx_mapped_v2"),
-            "zslope_closure": ("sim incidence slope closure_legb.HCD_INCIDENCE_SLOPE = "
-                               "(2.465, 2.758, 2.366); the slope the CLOSURE band (survey=None) "
-                               "in the frozen f3_layers.npz is drawn with"),
-            "zslope_deployed": ("deployed real-fit LLS forward z-slope "
-                                "inference.HCD_LLS_REALFIT_ZSLOPE = 2.127 in the LLS slot "
-                                "(survey-INDEPENDENT, the litWLS slope); subDLA/DLA keep the sim "
-                                "slope. The slope the deployed DESI/eBOSS curves use, AND the "
-                                "slope triple the KS mapped reference is built from (sub/DLA "
-                                "components invert the boost-1.0 alpha triple at these slopes; "
-                                "the KS LLS dN/dX slope is the lit gamma 2.127 directly)"),
-            "closure_center_dndx": ("survey=None closure centre RE-DERIVED through the v3 exact "
-                                    "inverse from the frozen f3_layers pivot/zgrid/Xbar inputs, "
-                                    "for a like-for-like overlay. NOT byte-identical to the "
-                                    "frozen prior_center_dndx (pre-v3, approximate inverse; "
-                                    "renorm-level difference, printed at export)"),
+            "parameterization_by_survey": (
+                "ordered by survey_order; how each survey's deployed "
+                "HCD prior is parameterized (inference."
+                "HCD_ALPHA_PARAMETERIZATION): DESI/eBOSS "
+                "alpha_pivot_powerlaw_v1, KS dndx_mapped_v2"
+            ),
+            "zslope_closure": (
+                "sim incidence slope closure_legb.HCD_INCIDENCE_SLOPE = "
+                "(2.465, 2.758, 2.366); the slope the CLOSURE band (survey=None) "
+                "in the frozen f3_layers.npz is drawn with"
+            ),
+            "zslope_deployed": (
+                "deployed real-fit LLS forward z-slope "
+                "inference.HCD_LLS_REALFIT_ZSLOPE = 2.127 in the LLS slot "
+                "(survey-INDEPENDENT, the litWLS slope); subDLA/DLA keep the sim "
+                "slope. The slope the deployed DESI/eBOSS curves use, AND the "
+                "slope triple the KS mapped reference is built from (sub/DLA "
+                "components invert the boost-1.0 alpha triple at these slopes; "
+                "the KS LLS dN/dX slope is the lit gamma 2.127 directly)"
+            ),
+            "closure_center_dndx": (
+                "survey=None closure centre RE-DERIVED through the v3 exact "
+                "inverse from the frozen f3_layers pivot/zgrid/Xbar inputs, "
+                "for a like-for-like overlay. NOT byte-identical to the "
+                "frozen prior_center_dndx (pre-v3, approximate inverse; "
+                "renorm-level difference, printed at export)"
+            ),
             "closure_alpha_pivot_mu": "frozen f3_layers alpha_pivot_mu (survey=None), (LLS,subDLA,DLA)",
-            "deployed_center_dndx_KS": ("v4 NATIVE dN/dX: the deterministic reference "
-                                        "closure_legb._ks_dndx_reference the deployed KS mapped "
-                                        "prior samples around -- the sampled quantity IS this "
-                                        "curve; no inverse map, no saturation possible, no "
-                                        "ks_valid truncation needed (the paper may keep its "
-                                        "z<=3.70 display choice as presentation). LLS column = "
-                                        "2.5 x lit law A=0.01840092, gamma=2.127 (dndx_premap "
-                                        "boost); sub/DLA columns = exact inverse of the "
-                                        "boost-1.0 deployed centre triple (bit-identical to the "
-                                        "DESI/eBOSS sub/DLA columns)"),
-            "deployed_hi1_dndx_KS": ("pivot-AMPLITUDE +1 sigma edge: exp(+KS_DNDX_SIGMA_EPS="
-                                     "0.5310) x centre on LLS (z-independent log-amplitude "
-                                     "shift), exp(+KS_DNDX_SIGMA_MSUB=0.4130) on subDLA, "
-                                     "softplus amplitude ratio on DLA. The tilt widths "
-                                     "(sigma_kappa=0.6681 LLS exponent, t_sub, t_dla) add "
-                                     "z-DEPENDENT spread NOT shown in this band -- mirroring "
-                                     "how the legacy export showed the pivot-amplitude band "
-                                     "only. lo1 = the same with exp(-.)"),
-            "deployed_alpha_pivot_mu_KS": ("the MAPPED alpha-space pivot triple (z=3 occupancy "
-                                           "weights of the reference through w_c_corrected; a "
-                                           "DERIVED deterministic, not a sampled Gaussian "
-                                           "centre). LLS = 0.393235 -- MOVED from the legacy "
-                                           "alpha-postmap 0.430280 (v1/v2 artifacts). There is "
-                                           "NO deployed_alpha_pivot_sigma_KS: the mapped prior "
-                                           "has no alpha-space Gaussian width (widths are "
-                                           "ks_sigma_eps/ks_sigma_kappa/ks_sigma_msub + the "
-                                           "DLA softplus latent)"),
-            "deployed_alpha_pivot_mu_<survey>": ("DESI/eBOSS: deployed pivot centre; LLS = the "
-                                                 "K1a-corrected lit dN/dX law 0.172112 x boost, "
-                                                 "NOT the closure 0.188119 x boost. subDLA/DLA "
-                                                 "= closure values"),
-            "ks_dndx_ref_pivot": ("the reference dN/dX triple at z=HCD_Z_PIVOT=3 (the mapped "
-                                  "sites multiply this at the pivot); ks_xbar_pivot = Xbar(3)"),
+            "deployed_center_dndx_KS": (
+                "v4 NATIVE dN/dX: the deterministic reference "
+                "closure_legb._ks_dndx_reference the deployed KS mapped "
+                "prior samples around -- the sampled quantity IS this "
+                "curve; no inverse map, no saturation possible, no "
+                "ks_valid truncation needed (the paper may keep its "
+                "z<=3.70 display choice as presentation). LLS column = "
+                "2.5 x lit law A=0.01840092, gamma=2.127 (dndx_premap "
+                "boost); sub/DLA columns = exact inverse of the "
+                "boost-1.0 deployed centre triple (bit-identical to the "
+                "DESI/eBOSS sub/DLA columns)"
+            ),
+            "deployed_hi1_dndx_KS": (
+                "pivot-AMPLITUDE +1 sigma edge: exp(+KS_DNDX_SIGMA_EPS="
+                "0.5310) x centre on LLS (z-independent log-amplitude "
+                "shift), exp(+KS_DNDX_SIGMA_MSUB=0.4130) on subDLA, "
+                "softplus amplitude ratio on DLA. The tilt widths "
+                "(sigma_kappa=0.6681 LLS exponent, t_sub, t_dla) add "
+                "z-DEPENDENT spread NOT shown in this band -- mirroring "
+                "how the legacy export showed the pivot-amplitude band "
+                "only. lo1 = the same with exp(-.)"
+            ),
+            "deployed_alpha_pivot_mu_KS": (
+                "the MAPPED alpha-space pivot triple (z=3 occupancy "
+                "weights of the reference through w_c_corrected; a "
+                "DERIVED deterministic, not a sampled Gaussian "
+                "centre). LLS = 0.393235 -- MOVED from the legacy "
+                "alpha-postmap 0.430280 (v1/v2 artifacts). There is "
+                "NO deployed_alpha_pivot_sigma_KS: the mapped prior "
+                "has no alpha-space Gaussian width (widths are "
+                "ks_sigma_eps/ks_sigma_kappa/ks_sigma_msub + the "
+                "DLA softplus latent)"
+            ),
+            "deployed_alpha_pivot_mu_<survey>": (
+                "DESI/eBOSS: deployed pivot centre; LLS = the "
+                "K1a-corrected lit dN/dX law 0.172112 x boost, "
+                "NOT the closure 0.188119 x boost. subDLA/DLA "
+                "= closure values"
+            ),
+            "ks_dndx_ref_pivot": (
+                "the reference dN/dX triple at z=HCD_Z_PIVOT=3 (the mapped "
+                "sites multiply this at the pivot); ks_xbar_pivot = Xbar(3)"
+            ),
             "ks_lit_dndx_law_lls": "(A, gamma) of the corrected lit LLS law the KS centre deploys",
-            "ks_dla_amp_quantiles": ("KS DLA AMPLITUDE quantiles softplus(raw0+n)/softplus(raw0) "
-                                     "for n=(-2,-1,+1,+2) -- multiplicative on the reference DLA "
-                                     "column (NOT alpha-space softplus values; the legacy "
-                                     "deployed_dla_softplus_quantiles_KS key is retired)"),
-            "boost_by_survey": ("ordered by survey_order (NOT class_order). NOTE the KS 2.5x "
-                                "acts in dN/dX space PRE-map (HCD_LLS_BOOST_SPACE), multiplying "
-                                "the lit law, NOT the alpha centre"),
-            "lls_frac_sigma_by_survey": ("ordered by survey_order (NOT class_order). For KS "
-                                         "(0.40) this alpha-space fractional width is the "
-                                         "SOURCE of the mapped log-amplitude width (sigma_eps "
-                                         "= 0.40/g_LLS = 0.5310), NOT the deployed width "
-                                         "itself"),
-            "subDLA_DLA_identity": ("deployed_center_dndx_<survey>[:, 1:] agrees ACROSS surveys "
-                                    "bit-exactly (all three invert the same boost-1.0 triple; "
-                                    "asserted <1e-12 at export) and agrees with "
-                                    "closure_center_dndx[:, 1:] to <1e-2 relative (measured "
-                                    "~3e-4; asserted) but is NOT bit-identical to closure under "
-                                    "the v3 exact inverse: the renorm undo couples every class "
-                                    "to the LLS alpha, which is the only re-centred/re-sloped "
-                                    "class. The DLA lo1/hi1 EDGES are not comparable to the "
-                                    "frozen prior_lo1/hi1 DLA column, which the frozen builder "
-                                    "makes from softplus quantiles rather than mu-/+sd"),
+            "ks_dla_amp_quantiles": (
+                "KS DLA AMPLITUDE quantiles softplus(raw0+n)/softplus(raw0) "
+                "for n=(-2,-1,+1,+2) -- multiplicative on the reference DLA "
+                "column (NOT alpha-space softplus values; the legacy "
+                "deployed_dla_softplus_quantiles_KS key is retired)"
+            ),
+            "boost_by_survey": (
+                "ordered by survey_order (NOT class_order). NOTE the KS 2.5x "
+                "acts in dN/dX space PRE-map (HCD_LLS_BOOST_SPACE), multiplying "
+                "the lit law, NOT the alpha centre"
+            ),
+            "lls_frac_sigma_by_survey": (
+                "ordered by survey_order (NOT class_order). For KS "
+                "(0.40) this alpha-space fractional width is the "
+                "SOURCE of the mapped log-amplitude width (sigma_eps "
+                "= 0.40/g_LLS = 0.5310), NOT the deployed width "
+                "itself"
+            ),
+            "subDLA_DLA_identity": (
+                "deployed_center_dndx_<survey>[:, 1:] agrees ACROSS surveys "
+                "bit-exactly (all three invert the same boost-1.0 triple; "
+                "asserted <1e-12 at export) and agrees with "
+                "closure_center_dndx[:, 1:] to <1e-2 relative (measured "
+                "~3e-4; asserted) but is NOT bit-identical to closure under "
+                "the v3 exact inverse: the renorm undo couples every class "
+                "to the LLS alpha, which is the only re-centred/re-sloped "
+                "class. The DLA lo1/hi1 EDGES are not comparable to the "
+                "frozen prior_lo1/hi1 DLA column, which the frozen builder "
+                "makes from softplus quantiles rather than mu-/+sd"
+            ),
         },
         "schema_changes_vs_v3": [
             "KS IS NATIVE dN/dX (parameterization dndx_mapped_v2, W2 2026-07-22): "
@@ -818,29 +980,35 @@ def main():
             "'alpha_pivot_{mu,sigma}' -> '..._deployed' (+ '..._closure'), "
             "'dndx_center_z3' -> 'dndx_lls_center_z3_deployed'",
         ],
-        "self_check": ("(a) derived the survey=None closure layer through band_curve (the code "
-                       "path the alpha-parameterized deployed curves use) AND directly through "
-                       "alpha_to_dndx_exact on the explicitly-constructed z-resolved alpha, "
-                       "asserted agreement to <1e-12 before writing (exact-vs-exact; the pre-v3 "
-                       "byte-reproduction of the frozen approximate-inverse f3 arrays is "
-                       "intentionally retired, the renorm-level difference is printed); "
-                       "(b) round-tripped the KS native-dN/dX centre through the FORWARD map "
-                       "(w_c_corrected -> alpha -> alpha_to_dndx_exact -> back) and asserted "
-                       "machine precision (<1e-12 relative); (c) pinned the MAPPED KS "
-                       "alpha-space pivot to the W2 value 0.393235480 +- 1e-6 "
-                       "(assert_ks_mapped_pivot band + the exact pin); (d) asserted the "
-                       "deployed subDLA/DLA dN/dX centres agree with the closure ones to <1e-2 "
-                       "relative AND across surveys to <1e-12 (the KS reference inverts the "
-                       "identical boost-1.0 triple); (e) re-read the written npz and re-audited "
-                       "its key set with verify_npz_payload (no closure-vs-deployed ambiguous "
-                       "key, no alpha-space width for the mapped survey, every deployed LLS "
-                       "column re-derived from its OWN parameterization's labelled parameters). "
-                       "Test-pinned by tests/test_export_deployed_centre.py"),
+        "self_check": (
+            "(a) derived the survey=None closure layer through band_curve (the code "
+            "path the alpha-parameterized deployed curves use) AND directly through "
+            "alpha_to_dndx_exact on the explicitly-constructed z-resolved alpha, "
+            "asserted agreement to <1e-12 before writing (exact-vs-exact; the pre-v3 "
+            "byte-reproduction of the frozen approximate-inverse f3 arrays is "
+            "intentionally retired, the renorm-level difference is printed); "
+            "(b) round-tripped the KS native-dN/dX centre through the FORWARD map "
+            "(w_c_corrected -> alpha -> alpha_to_dndx_exact -> back) and asserted "
+            "machine precision (<1e-12 relative); (c) pinned the MAPPED KS "
+            "alpha-space pivot to the W2 value 0.393235480 +- 1e-6 "
+            "(assert_ks_mapped_pivot band + the exact pin); (d) asserted the "
+            "deployed subDLA/DLA dN/dX centres agree with the closure ones to <1e-2 "
+            "relative AND across surveys to <1e-12 (the KS reference inverts the "
+            "identical boost-1.0 triple); (e) re-read the written npz and re-audited "
+            "its key set with verify_npz_payload (no closure-vs-deployed ambiguous "
+            "key, no alpha-space width for the mapped survey, every deployed LLS "
+            "column re-derived from its OWN parameterization's labelled parameters). "
+            "Test-pinned by tests/test_export_deployed_centre.py"
+        ),
         "artifact_of_record_untouched": str(FROZEN),
-        "blind_status": ("BLIND-SAFE: prior geometry only; no data, no posterior, no real-data "
-                         "n_s/A_p in any array or field"),
-        "chain_of_record_status": ("presentation-layer derived artifact; not a chain. Immutable: "
-                                   "regenerate to a NEW dated directory, never edit in place."),
+        "blind_status": (
+            "BLIND-SAFE: prior geometry only; no data, no posterior, no real-data "
+            "n_s/A_p in any array or field"
+        ),
+        "chain_of_record_status": (
+            "presentation-layer derived artifact; not a chain. Immutable: "
+            "regenerate to a NEW dated directory, never edit in place."
+        ),
     }
     (out / "PROVENANCE.json").write_text(json.dumps(sidecar, indent=2, sort_keys=True))
     print(f"\n[export] wrote {out}")

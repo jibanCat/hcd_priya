@@ -20,6 +20,7 @@ Modrak+2023  (Bayesian Analysis; arXiv:2211.02383)  "Simulation-based calibratio
    checking ... the joint log-likelihood rank is a near-sufficient 1-D summary";
    ranking log_lik(θ_true) among log_lik(θ_s) is the single most powerful SBC quantity.
 """
+
 from __future__ import annotations
 import numpy as np
 from scipy import stats
@@ -39,6 +40,7 @@ def seed_tie_break(seed):
 # ============================================================================
 # ITEM 1a — SBC rank statistic + thinning to ESS
 # ============================================================================
+
 
 def autocorr_ess(x):
     """Effective sample size of a 1-D MCMC chain via the initial-monotone-sequence
@@ -61,7 +63,7 @@ def autocorr_ess(x):
     rho = acov / acov[0]
     # Geyer initial monotone sequence: pair sums Γ_k = ρ_{2k} + ρ_{2k+1}, keep while >0
     # and enforce monotone non-increasing.
-    gamma = rho[1:2 * (n // 2 - 1):2] + rho[2:2 * (n // 2 - 1) + 1:2]
+    gamma = rho[1 : 2 * (n // 2 - 1) : 2] + rho[2 : 2 * (n // 2 - 1) + 1 : 2]
     # truncate at first non-positive
     neg = np.where(gamma <= 0)[0]
     cut = neg[0] if neg.size else gamma.size
@@ -125,8 +127,9 @@ def sbc_ranks_multiparam(theta_true_vec, draws):
     """Vectorized sbc_rank over D params for one mock. Returns (D,) int ranks."""
     theta_true_vec = np.asarray(theta_true_vec, dtype=float)
     draws = np.asarray(draws, dtype=float)
-    return np.array([sbc_rank(theta_true_vec[d], draws[:, d])
-                     for d in range(draws.shape[1])], dtype=int)
+    return np.array(
+        [sbc_rank(theta_true_vec[d], draws[:, d]) for d in range(draws.shape[1])], dtype=int
+    )
 
 
 def rank_histogram_bins(L, n_mocks, target_per_bin=20):
@@ -149,6 +152,7 @@ def rank_histogram_bins(L, n_mocks, target_per_bin=20):
 # ============================================================================
 # ITEM 1b — ECDF simultaneous confidence bands (Säilynoja+2022), STANDALONE
 # ============================================================================
+
 
 def _ecdf_band_gamma(n_draws, K, n_sim=4000, prob=0.95, rng=None):
     """Find the per-point coverage γ such that the SIMULTANEOUS coverage over the K
@@ -211,7 +215,7 @@ def ecdf_pit_bands(ranks, n_draws, prob=0.95, n_grid=100, n_sim=2000, rng=None):
     # the field-standard fractional-rank PIT is (rank + U)/(L+1) but for the band
     # test we use the discrete ECDF of rank/(L+1)... we instead build the ECDF of the
     # *fractional ranks* and compare to a Uniform null via the simultaneous binomial band.
-    pit = (ranks + 0.5) / (L + 1.0)          # continuity-corrected, in (0,1)
+    pit = (ranks + 0.5) / (L + 1.0)  # continuity-corrected, in (0,1)
     pit_sorted = np.sort(pit)
 
     grid = np.linspace(0.0, 1.0, n_grid + 1)
@@ -241,6 +245,7 @@ def ecdf_pit_bands(ranks, n_draws, prob=0.95, n_grid=100, n_sim=2000, rng=None):
 # ============================================================================
 # ITEM 2 — log-likelihood rank as the PRIMARY joint SBC statistic (Modrak+2023)
 # ============================================================================
+
 
 def loglik_rank(loglik_true, loglik_draws):
     """SBC rank of the joint log-lik at the TRUTH among the posterior-draw log-liks.
@@ -273,6 +278,7 @@ def loglik_rank(loglik_true, loglik_draws):
 # ============================================================================
 # ITEM 3 — fixed Fisher-eigenvector projection rank (τ₀–θ and cross-z τ₀)
 # ============================================================================
+
 
 def joint_fisher(J, C, jitter=1e-10):
     """Joint Fisher information F = JᵀC⁻¹J at a fiducial point.
@@ -316,15 +322,16 @@ def correlation_eigvec(F, idx_a, idx_b):
     idx = np.concatenate([np.asarray(idx_a), np.asarray(idx_b)])
     S = Sigma[np.ix_(idx, idx)]
     d = np.sqrt(np.diag(S))
-    R = S / np.outer(d, d)                 # correlation matrix of the A∪B block
+    R = S / np.outer(d, d)  # correlation matrix of the A∪B block
     na = len(idx_a)
     # Eigendecompose the block correlation and pick the mode with the largest
     # cross-block L2 weight: the eigenvector whose mass is shared between A and B is
     # the τ₀–θ (or τ₀_z1–τ₀_z2) degeneracy direction. (A within-block-only eigenvector
     # would have zero weight in the other block and would not probe the coupling.)
     w, V = np.linalg.eigh(R)
-    cross_weight = np.array([np.linalg.norm(V[:na, j]) * np.linalg.norm(V[na:, j])
-                             for j in range(V.shape[1])])
+    cross_weight = np.array(
+        [np.linalg.norm(V[:na, j]) * np.linalg.norm(V[na:, j]) for j in range(V.shape[1])]
+    )
     v_block = V[:, np.argmax(cross_weight)]
     v = np.zeros(P)
     v[idx] = v_block / np.linalg.norm(v_block)
@@ -358,6 +365,7 @@ def project_eigvec_rank(theta_true, draws, v):
 # ITEM 4 — Leg-B coverage + cemu_inflate calibration
 # ============================================================================
 
+
 def central_interval(draws, q):
     """Central equal-tailed q-credible interval (the [ (1-q)/2, (1+q)/2 ] quantiles)."""
     draws = np.asarray(draws, dtype=float)
@@ -377,7 +385,7 @@ def hpd_interval(draws, q):
     m = int(np.floor(q * n))
     if m < 1:
         return draws[0], draws[-1]
-    widths = draws[m:] - draws[:n - m]
+    widths = draws[m:] - draws[: n - m]
     j = int(np.argmin(widths))
     return draws[j], draws[j + m]
 
@@ -405,8 +413,9 @@ def empirical_coverage(truths, intervals):
     return dict(coverage=cov, n=N, k=k, ci_low=centre - half, ci_high=centre + half)
 
 
-def coverage_at_inflate(truths_per_mock, draws_per_mock, inflate, q, sigma_scale_fn,
-                        interval="central"):
+def coverage_at_inflate(
+    truths_per_mock, draws_per_mock, inflate, q, sigma_scale_fn, interval="central"
+):
     """Empirical coverage of param-block when each mock's posterior σ is rescaled by an
     inflation that comes from scaling C_emu by `inflate`.
 
@@ -440,8 +449,9 @@ def coverage_at_inflate(truths_per_mock, draws_per_mock, inflate, q, sigma_scale
     return empirical_coverage(truths_per_mock, np.array(ints))["coverage"]
 
 
-def calibrate_cemu_inflate(truths_per_mock, draws_per_mock, sigma_scale_fn,
-                           q=0.95, lo=1.0, hi=10.0, tol=1e-3, max_iter=60):
+def calibrate_cemu_inflate(
+    truths_per_mock, draws_per_mock, sigma_scale_fn, q=0.95, lo=1.0, hi=10.0, tol=1e-3, max_iter=60
+):
     """1-D bisection root-find for the C_emu inflation that restores `q` coverage.
 
     Monotone-increasing coverage(inflate) ⇒ bracket [lo,hi] and bisect on
@@ -452,6 +462,7 @@ def calibrate_cemu_inflate(truths_per_mock, draws_per_mock, sigma_scale_fn,
     Per-(class,z) calibration: call this once per (HCD class, z) sub-block whose draws/truths
     you pass in; the design only inflates where the under-coverage localizes (plan §2).
     """
+
     def cov(infl):
         return coverage_at_inflate(truths_per_mock, draws_per_mock, infl, q, sigma_scale_fn)
 
@@ -460,8 +471,12 @@ def calibrate_cemu_inflate(truths_per_mock, draws_per_mock, sigma_scale_fn,
         return dict(inflate=lo, coverage=c_lo, converged=True, note="no inflation needed")
     c_hi = cov(hi)
     if c_hi < q:
-        return dict(inflate=hi, coverage=c_hi, converged=False,
-                    note="hi bound still under-covers; widen `hi`")
+        return dict(
+            inflate=hi,
+            coverage=c_hi,
+            converged=False,
+            note="hi bound still under-covers; widen `hi`",
+        )
     a, b = lo, hi
     for _ in range(max_iter):
         m = 0.5 * (a + b)
@@ -480,6 +495,7 @@ def calibrate_cemu_inflate(truths_per_mock, draws_per_mock, sigma_scale_fn,
 # ITEM 5 — C_emu whitening test (emulator-agent M3)
 # ============================================================================
 
+
 def whiten_residual(r, C, jitter=1e-10):
     """r_white = L⁻¹ r with L = cholesky(C) lower-triangular (matches gaussian_loglik).
 
@@ -492,7 +508,7 @@ def whiten_residual(r, C, jitter=1e-10):
     C = C + jitter * np.mean(np.diag(C)) * np.eye(K)
     L = np.linalg.cholesky(C)
     # forward-substitution: solve L z = r
-    z = np.linalg.solve(L, r)   # exact for triangular L; (use solve_triangular for speed)
+    z = np.linalg.solve(L, r)  # exact for triangular L; (use solve_triangular for speed)
     return z
 
 
@@ -531,14 +547,24 @@ def whitening_test(residuals, covs, jitter=1e-10):
     # KS vs standard normal
     ks_stat, ks_p = stats.kstest(flat, "norm")
     chi2_over_dof = float(np.sum(flat**2) / n)
-    return dict(mean=mean, var=var, mean_z=mean_z, mean_p=mean_p,
-                var_chi2_p=var_p, ks_stat=float(ks_stat), ks_p=float(ks_p),
-                chi2_over_dof=chi2_over_dof, whitened=W, n=n)
+    return dict(
+        mean=mean,
+        var=var,
+        mean_z=mean_z,
+        mean_p=mean_p,
+        var_chi2_p=var_p,
+        ks_stat=float(ks_stat),
+        ks_p=float(ks_p),
+        chi2_over_dof=chi2_over_dof,
+        whitened=W,
+        n=n,
+    )
 
 
 # ============================================================================
 # ITEM 6 — power calculation for N
 # ============================================================================
+
 
 def sbc_power_N(bias_sigma=0.2, prob=0.95, power=0.80):
     """N needed for the SBC ECDF/rank test to DETECT a posterior-mean bias of `bias_sigma`.
@@ -558,12 +584,15 @@ def sbc_power_N(bias_sigma=0.2, prob=0.95, power=0.80):
     # truth ~ N(0,σ), draws ~ N(bias, σ): rank statistic ≈ Φ( -b/√2 ); displacement from 0.5:
     disp = abs(stats.norm.cdf(bias_sigma / np.sqrt(2.0)) - 0.5)
     z_pow = stats.norm.ppf(power)
-    z_band = stats.norm.ppf(0.5 + prob / 2.0)   # ~1.96 for 95%
+    z_band = stats.norm.ppf(0.5 + prob / 2.0)  # ~1.96 for 95%
     # detection: disp ≥ (z_pow + z_band) * sqrt(0.25 / N)  (Bernoulli sd at p=0.5)
-    N = ((z_pow + z_band)**2 * 0.25) / disp**2
-    return dict(N=int(np.ceil(N)), displacement=disp,
-                note=f"to detect a {bias_sigma}σ mean bias at {int(prob*100)}% bands, "
-                     f"{int(power*100)}% power")
+    N = ((z_pow + z_band) ** 2 * 0.25) / disp**2
+    return dict(
+        N=int(np.ceil(N)),
+        displacement=disp,
+        note=f"to detect a {bias_sigma}σ mean bias at {int(prob*100)}% bands, "
+        f"{int(power*100)}% power",
+    )
 
 
 def sbc_power_mc(N, bias_sigma=0.2, n_draws=99, prob=0.95, n_rep=400, rng=None):
@@ -579,5 +608,5 @@ def sbc_power_mc(N, bias_sigma=0.2, n_draws=99, prob=0.95, n_rep=400, rng=None):
             draws = (truths[i] + bias_sigma) + rng.standard_normal(n_draws)
             ranks[i] = int(np.sum(draws < truths[i]))
         _, _, _, passed, _ = ecdf_pit_bands(ranks, n_draws, prob=prob, n_sim=600, rng=rng)
-        rej += (not passed)
+        rej += not passed
     return rej / n_rep

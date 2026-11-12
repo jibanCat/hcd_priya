@@ -1,6 +1,6 @@
 # Data Layout
 
-**Root:** `/nfs/turbo/umor-yueyingn/mfho/emu_full/`
+**Root:** `$HCD_LF_RAW_DIR/` (the LF simulation outputs; see the README's runtime data inputs)
 
 ## Simulation Folders (60 total)
 
@@ -135,9 +135,9 @@ appear inline in the docs are version-controlled.
 
 | Where | What |
 |---|---|
-| `/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/` | Production pipeline output (per-sim `catalog.npz`, `p1d.npz`, `p1d_per_class.h5`, …). |
-| `/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/_hcd_analysis_data/` | HCD summary tables produced by analysis scripts (`hcd_summary_lf.h5`, `hcd_summary_hr.h5`, MF coefficient CSVs, bootstrap tables).  Reached via the `data_dir()` helper in `scripts/common.py`. |
-| `/nfs/turbo/umor-yueyingn/mfho/` | Long-term persistent storage (Turbo filesystem).  **TODO**: migrate `_hcd_analysis_data/` here once results are stable. |
+| `$HCD_OUTPUTS_DIR/` | Production pipeline output (per-sim `catalog.npz`, `p1d.npz`, `p1d_per_class.h5`, …). |
+| `$HCD_OUTPUTS_DIR/_hcd_analysis_data/` | HCD summary tables produced by analysis scripts (`hcd_summary_lf.h5`, `hcd_summary_hr.h5`, MF coefficient CSVs, bootstrap tables).  Reached via the `data_dir()` helper in `scripts/common.py`. |
+| long-term storage | Persistent storage on the cluster.  **TODO**: migrate `_hcd_analysis_data/` there once results are stable. |
 
 ### How to override
 
@@ -152,7 +152,7 @@ By default this returns the scratch path above.  To redirect (e.g. to
 Turbo), export the env var:
 
 ```bash
-export HCD_DATA_DIR=/nfs/turbo/umor-yueyingn/mfho/hcd_analysis_data
+export HCD_DATA_DIR=<your long-term data directory>/hcd_analysis_data
 ```
 
 The helper creates the directory if it doesn't exist, so relocating is
@@ -175,7 +175,6 @@ depend on these two HDF5s being present.
 The following paths are intentionally not tracked:
 
 ```
-.claude/                        # local Claude Code state
 logs/                           # SLURM / pipeline logs
 figures/intermediate/           # pre-audit stale figures
 figures/analysis/data/          # generated artefacts (use scratch instead)

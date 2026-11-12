@@ -1,5 +1,10 @@
 # Why is τ-vs-colden completeness only 86 %?
 
+> **Historical (2026-04-27): this analysis ran on catalogues made before the bug-8 fix (`docs/bugs_found.md`,
+> bug 8). Its purity at the 300 km/s tolerance (95.8 %) does not match the 0.947 (8064/8512) that
+> `docs/dla_truth_validation.md` reports for the same tolerance; the two were not reconciled at the time, and
+> neither has been rerun on the corrected catalogues.**
+
 Follow-up analysis on PR #6 (`docs/dla_truth_validation.md`).  Goal: identify
 the failure modes of the τ-peak-finder vs particle-based-colden truth
 comparison, and decide whether the 86 % completeness / 85 % purity numbers

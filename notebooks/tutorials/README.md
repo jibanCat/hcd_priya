@@ -7,16 +7,17 @@ HCD outputs from the ground up.  Read them in order:
 
 1. **Install the package.**  Follow the install instructions in the
    [top-level `README.md`](../../README.md#installation) — either run
-   `bash scripts/install_greatlakes.sh` on Great Lakes, or do the generic
-   `pip install -r requirements.txt && pip install -e .` path on a
-   laptop / other cluster.  The tutorial notebooks need `pandas`,
-   `jupyter`, and `nbformat` in addition to the runtime stack; all are
-   pulled in by `requirements.txt`.
+   `bash scripts/install_greatlakes.sh` on Great Lakes, or the generic
+   `pip install -c tools/ci/constraints-devenv.txt ".[tutorials]"` from the
+   repository root on a laptop / other cluster.  The tutorial notebooks need
+   `jupyter` and `nbformat` in addition to the runtime stack; the
+   `tutorials` extra installs them.
 
 2. **Confirm data access.**  All five notebooks read from two paths:
 
-   - Raw spectra (Turbo): `/nfs/turbo/umor-yueyingn/mfho/emu_full`
-   - Processed outputs (scratch): `/scratch/cavestru_root/cavestru0/mfho/hcd_outputs`
+   - Raw spectra: `$HCD_LF_RAW_DIR` (the LF simulation outputs)
+   - Processed outputs: `$HCD_OUTPUTS_DIR` (the per-(sim, snap) HCD outputs)
+   - For notebook 02's comparison with Ho+21: `$HCD_DLA_DATA_DIR/ho21/` (a local copy of those tables)
 
    On Great Lakes both are mounted on every login / compute node; from
    anywhere else you'll need a tunnel or a local copy of one (sim, snap).
@@ -144,7 +145,7 @@ look at the background reading below.
    normalisation?
 2. The corrected CDDF differs from the original by a factor of
    `(1+z)·h`.  At z = 2.2 with h = 0.67, what is that factor numerically?
-   Why is this the difference between a 0.3 dex offset vs Prochaska+05
+   Why is this the difference between a 0.3 dex offset vs Prochaska+2014
    and a 0.0 dex one?
 3. dN/dX(DLA) at z = 2.0 is ~0.032 in the example sim, vs ~0.05 in
    the observations (Prochaska & Wolfe 2009, Noterdaeme+12, Ho+21).
@@ -204,7 +205,7 @@ programming, here are some starting points by topic.
   ([arXiv:astro-ph/9708018](https://arxiv.org/abs/astro-ph/9708018)).
   The original Lyα-cosmology paper; reading just §1–§3 gives you the
   conceptual basis for everything else.
-- **McDonald, Miralda-Escudé et al. 2000, 2006** — definitive P1D
+- **McDonald, Miralda-Escudé et al. 2000; McDonald, Seljak et al. 2006** — definitive P1D
   papers from the SDSS era
   ([2000: arXiv:astro-ph/9911196](https://arxiv.org/abs/astro-ph/9911196);
   [2006: arXiv:astro-ph/0405013](https://arxiv.org/abs/astro-ph/0405013)).
@@ -216,25 +217,25 @@ programming, here are some starting points by topic.
 - **Bird, Fernandez, Ho et al. 2023** (JCAP 10, 037;
   [arXiv:2306.05471](https://arxiv.org/abs/2306.05471)) — the PRIYA
   simulation suite paper.  This is the suite our 60 LF + 4 HR sims came
-  from.  Read §2 for the LHS parameter scheme that names every folder
+  from.  Read §2.8 (Experimental Design) for the LHS parameter scheme that names every folder
   under `HCD_OUT_ROOT`.
 
 ### High column-density absorbers (HCDs)
 
 - **Wolfe, Gawiser, Prochaska 2005** (ARA&A 43, 861;
   [arXiv:astro-ph/0509481](https://arxiv.org/abs/astro-ph/0509481)) —
-  the canonical DLA review.  Sections 1–3 cover the LLS / subDLA / DLA
-  classification and the physics of damping wings.
+  the canonical DLA review.  Section 1 covers the LLS / subDLA / DLA
+  classification and the physics of damping wings; section 2 the
+  column-density distribution f(N, X) and dN/dX.
 - **Prochaska, Herbert-Fort, Wolfe 2005** (ApJ 635, 123;
   [arXiv:astro-ph/0508361](https://arxiv.org/abs/astro-ph/0508361)) —
-  the SDSS DLA CDDF that notebook 02 compares against.
+  the SDSS DR3 DLA survey and its CDDF (notebook 02 overlays Ho+21 instead).
 - **Bird, Vogelsberger, Haehnelt et al. 2014** ("Damped Lyman α
   absorbers as a probe of stellar feedback", MNRAS 445, 2313;
   [arXiv:1405.3994](https://arxiv.org/abs/1405.3994)) —
   hydrodynamic prediction of DLA bias and the f(N_HI) shape.
-  Section 5 is what feeds the scale-dependent-bias TODO tracked in the project
-  handoffs (archived in the private notes repo,
-  `hcd_priya_notes/docs/code-repo-archive/handovers/`).
+  Sections 2.5 and 4.3 (DLA bias) are what feed the scale-dependent-bias TODO tracked in the project
+  handoffs (in the maintainers' private notes).
 - **Font-Ribera, Miralda-Escudé et al. 2012** (JCAP 11, 059;
   [arXiv:1209.4596](https://arxiv.org/abs/1209.4596)) — the BOSS DLA-Lyα
   cross correlation that the project's clustering pipeline mirrors.
@@ -243,8 +244,8 @@ programming, here are some starting points by topic.
   measurement.  This is the observation our `b_DLA` estimate is being
   compared against.
 - **Ho, Bird, Garnett 2021** (MNRAS 507, 704;
-  [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) — modern neural
-  DLA finder; we use their CDDF tables for the observation overlay in
+  [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) — a Gaussian-process
+  DLA finder applied to SDSS DR16Q; we use their CDDF tables for the observation overlay in
   NB 02.
 
 ### Voigt profile and line-transfer
@@ -265,7 +266,8 @@ programming, here are some starting points by topic.
 - **Numerical Recipes** (Press, Teukolsky, Vetterling, Flannery, 3rd
   ed. 2007, Cambridge Univ. Press, ISBN 978-0-521-88068-8;
   [numerical.recipes](https://numerical.recipes) — a textbook, no
-  arXiv) — Ch. 13 (FFT) is the right reference for the P1D estimator.
+  arXiv) — Ch. 12 (the FFT) and §13.4 (power spectrum estimation with the
+  FFT) are the right references for the P1D estimator.
 - **Hamilton 1992** — multipole expansion of the correlation function
   (ApJ 385, L5;
   [ADS:1992ApJ...385L...5H](https://ui.adsabs.harvard.edu/abs/1992ApJ...385L...5H/abstract);
@@ -298,14 +300,14 @@ programming, here are some starting points by topic.
 
 | Topic | File |
 |---|---|
-| Project state, current TODOs | private notes repo: `hcd_priya_notes/docs/superpowers/` (latest session handoff) |
-| Older audit context (CDDF / fast-mode / per-class templates) | archived: `hcd_priya_notes/docs/code-repo-archive/handovers/` |
+| Project state, current TODOs | the maintainers' private notes (latest session handoff) |
+| Older audit context (CDDF / fast-mode / per-class templates) | the maintainers' private notes (archived handovers) |
 | Bug history (the seven bugs the audit caught) | `docs/bugs_found.md` |
 | Why fast-mode NHI estimation works | `docs/fast_mode_physics.md` |
 | Mask choice rationale | `docs/masking_strategy.md` |
 | Clustering definitions and conventions | `docs/clustering_definitions.md` |
 | Catalog truth-validation against particle data | `docs/dla_truth_validation.md` |
-| Figure index for the analysis figures | `docs/analysis_index.md` |
+| Figure index for the analysis figures | `docs/analysis_index.md` (historical, in the repository's Git history) |
 
 ## Running them yourself
 
@@ -353,7 +355,6 @@ The four observables you've now learned to read — `catalog`,
 the HCD emulator under construction.  The next milestone is **phase 1
 of the emulator work**: building a single in-repo HDF5 cache that stacks
 the per-(sim, snap) observables across all 1076 outputs onto a shared
-k-grid and NHI-grid.  See the project handoffs in the private notes repo
-(`hcd_priya_notes/docs/code-repo-archive/handovers/`) for the
+k-grid and NHI-grid.  See the project handoffs in the maintainers' private notes for the
 overall project state and the next planning thread for the emulator
 design.

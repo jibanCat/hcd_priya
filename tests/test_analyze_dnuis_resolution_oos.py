@@ -7,6 +7,7 @@ PR#14 panel FIX 2: the FLAG band is n_s-ONLY (2026-07-07-gate-b-consolidated-rev
 A_p must HARD-gate at 0.30 even for lls_excess / resolution_oos-adversarial cells -- a breach there
 needs a PI-signed waiver, not an auto-FLAG. ``_dnuis_verdict`` takes a ``param`` argument; every
 call below is updated to pass it explicitly."""
+
 import os
 import pickle
 
@@ -69,8 +70,12 @@ def test_dnuis_verdict_other_arms_unchanged():
     assert _dnuis_verdict("metal_misspec", None, 0.10, "ns") == "PASS"
     assert _dnuis_verdict("metal_misspec", None, 0.40, "ns") == "FAIL"
     assert _dnuis_verdict("resolution", None, 0.10, "ns") == "PASS"
-    assert _dnuis_verdict("resolution", None, 0.40, "ns") == "FAIL"           # in-span resolution stays HARD-gated
-    assert _dnuis_verdict("lls_excess", None, 0.40, "ns").startswith("FLAG")  # pre-existing FLAG band, unaffected
+    assert (
+        _dnuis_verdict("resolution", None, 0.40, "ns") == "FAIL"
+    )  # in-span resolution stays HARD-gated
+    assert _dnuis_verdict("lls_excess", None, 0.40, "ns").startswith(
+        "FLAG"
+    )  # pre-existing FLAG band, unaffected
     assert _dnuis_verdict("lls_excess", None, 0.60, "ns") == "FAIL"
     assert _dnuis_verdict("metal_matched", None, 0.10, "ns") == "PASS"
 
@@ -78,18 +83,36 @@ def test_dnuis_verdict_other_arms_unchanged():
 def _write_fake_shard(path, *, arm, survey, treatment, oos_member, n_records=1):
     rec = {"n_div": 0}
     with open(path, "wb") as f:
-        pickle.dump(dict(arm=arm, treatment=treatment, survey=survey,
-                         clean_per_mock=[rec] * n_records, inj_per_mock=[rec] * n_records,
-                         meta=dict(b_res_oos_member=oos_member)), f)
+        pickle.dump(
+            dict(
+                arm=arm,
+                treatment=treatment,
+                survey=survey,
+                clean_per_mock=[rec] * n_records,
+                inj_per_mock=[rec] * n_records,
+                meta=dict(b_res_oos_member=oos_member),
+            ),
+            f,
+        )
 
 
 def test_load_shards_exposes_oos_member_from_meta(tmp_path):
     """load_shards must surface meta['b_res_oos_member'] per (arm,treatment,survey) group so the
     analyzer can pick the FLAG vs hard-gate disposition without re-reading pkls."""
-    _write_fake_shard(tmp_path / "resolution_oos_b_desi_shard_000.pkl",
-                      arm="resolution_oos", survey="desi", treatment="b", oos_member="bstar")
-    _write_fake_shard(tmp_path / "resolution_b_desi_shard_000.pkl",
-                      arm="resolution", survey="desi", treatment="b", oos_member=None)
+    _write_fake_shard(
+        tmp_path / "resolution_oos_b_desi_shard_000.pkl",
+        arm="resolution_oos",
+        survey="desi",
+        treatment="b",
+        oos_member="bstar",
+    )
+    _write_fake_shard(
+        tmp_path / "resolution_b_desi_shard_000.pkl",
+        arm="resolution",
+        survey="desi",
+        treatment="b",
+        oos_member=None,
+    )
     groups = load_shards(str(tmp_path))
     assert set(groups) == {("resolution_oos", "b", "desi"), ("resolution", "b", "desi")}
     _cl, _inj, _nd, om = groups[("resolution_oos", "b", "desi")]

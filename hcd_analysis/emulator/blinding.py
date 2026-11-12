@@ -27,6 +27,7 @@ fixed, reproducible, well-defined transform.
 This module is PURE / dependency-light (numpy + hashlib + json) so it is trivially unit-testable
 and carries no JAX import cost.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -113,8 +114,10 @@ def _shift(samples, offset, columns, sign):
     col_idx = _resolve_cols(columns)
     missing = [p for p in BLIND_PARAMS if p not in col_idx]
     if missing:
-        raise ValueError(f"blinded params {missing} absent from columns {columns} — refusing "
-                         f"to write a partially-blind artifact")
+        raise ValueError(
+            f"blinded params {missing} absent from columns {columns} — refusing "
+            f"to write a partially-blind artifact"
+        )
     for p, j in col_idx.items():
         out[:, j] = out[:, j] + sign * offset[p]
     return out
@@ -136,33 +139,41 @@ def unblind(samples, offset, columns=PARAM_NAMES):
 # --------------------------------------------------------------------------------------------- #
 #  blind.lock  —  the committed SEED (project-string + git-commit). The OFFSET is NOT stored.
 # --------------------------------------------------------------------------------------------- #
-def git_commit(repo="/home/mfho/hcd_priya"):
+def git_commit(repo=None):
     """The current git commit (short SHA) — part of the blind seed string so the offset is
-    pinned to a frozen analysis state. Falls back to ``"nogit"`` if git is unavailable."""
+    pinned to a frozen analysis state. Falls back to ``"nogit"`` if git is unavailable.
+    ``repo=None`` is this checkout's root (emulator-debug 2026-10; formerly an absolute literal)."""
+    if repo is None:
+        from ..paths import REPO_ROOT_STR as repo
     try:
-        return subprocess.check_output(
-            ["git", "-C", repo, "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "-C", repo, "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL
+            )
+            .decode()
+            .strip()
+        )
     except Exception:
         return "nogit"
 
 
-def make_seed_str(project_string, commit=None, repo="/home/mfho/hcd_priya"):
+def make_seed_str(project_string, commit=None, repo=None):
     """The canonical blind seed string = ``"{project_string}@{git-commit}"``. ``commit=None``
     resolves the live HEAD; pass an explicit commit to reproduce a past blind."""
     c = commit if commit is not None else git_commit(repo)
     return f"{project_string}@{c}"
 
 
-def write_blind_lock(path, project_string, commit=None, repo="/home/mfho/hcd_priya",
-                     extra=None):
+def write_blind_lock(path, project_string, commit=None, repo=None, extra=None):
     """Write ``blind.lock`` (JSON): the project string + git commit + the derived SEED STRING,
     plus metadata. The OFFSET VALUES are DELIBERATELY NOT WRITTEN (the lock is committable; the
     offset is recomputed at unblind time from the seed). Refuses to overwrite an existing lock
     (a re-write would silently change the blind — the seed must be frozen)."""
     if os.path.exists(path):
-        raise FileExistsError(f"{path} already exists — the blind seed is frozen; refusing to "
-                              f"overwrite (delete it manually only if you intend to re-blind)")
+        raise FileExistsError(
+            f"{path} already exists — the blind seed is frozen; refusing to "
+            f"overwrite (delete it manually only if you intend to re-blind)"
+        )
     seed_str = make_seed_str(project_string, commit=commit, repo=repo)
     rec = dict(
         project_string=project_string,
@@ -172,8 +183,10 @@ def write_blind_lock(path, project_string, commit=None, repo="/home/mfho/hcd_pri
         offset_sigma_multiple=OFFSET_SIGMA_MULTIPLE,
         prior_sigma={p: prior_sigma(p) for p in BLIND_PARAMS},
         created_utc=datetime.now(timezone.utc).isoformat(),
-        note=("BLIND SEED ONLY. The offset is derived from seed_str at view time and is NOT "
-              "stored here. Do not record the offset anywhere committable until UNBLINDING."),
+        note=(
+            "BLIND SEED ONLY. The offset is derived from seed_str at view time and is NOT "
+            "stored here. Do not record the offset anywhere committable until UNBLINDING."
+        ),
     )
     if extra:
         rec.update(extra)

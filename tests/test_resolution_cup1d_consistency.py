@@ -19,9 +19,10 @@ Two permanent guards documenting "our DESI implementation is numerically identic
      asserts the in-band fractional gap is <= 1% at b_res=0.02 (after the half-Nyquist
      k < 0.5 pi/R_z cut), and that our R_z proxy equals cup1d's get_Rz_Naim exactly.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_resolution_cup1d_consistency.py -q
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+     python -m pytest tests/test_resolution_cup1d_consistency.py -q
 """
+
 import os
 
 import hcd_analysis.emulator  # noqa: F401  enables jax_enable_x64 before jax arrays
@@ -29,8 +30,9 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import data_likelihood as DL
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
+DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 _have_desi = os.path.exists(DESI_NPZ)
 
 # cup1d compute_cov (QMLE) systematic labels + the 'fid' correlated/uncorrelated split, mapped
@@ -38,16 +40,28 @@ _have_desi = os.path.exists(DESI_NPZ)
 _LAB2KEY = {
     "E_DLA_COMPLETENESS": "syst_e_dla_completeness",
     "E_BAL_COMPLETENESS": "syst_e_bal_completeness",
-    "E_RESOLUTION":       "syst_e_resolution",
-    "E_CONTINUUM":        "syst_e_continuum",
-    "E_CONTINUUM_ADD":    "syst_e_continuum_add",
-    "E_NOISE_SCALE":      "syst_e_noise_scale",
-    "E_NOISE_ADD":        "syst_e_noise_add",
+    "E_RESOLUTION": "syst_e_resolution",
+    "E_CONTINUUM": "syst_e_continuum",
+    "E_CONTINUUM_ADD": "syst_e_continuum_add",
+    "E_NOISE_SCALE": "syst_e_noise_scale",
+    "E_NOISE_ADD": "syst_e_noise_add",
 }
-_SYS_LABELS = ["E_DLA_COMPLETENESS", "E_BAL_COMPLETENESS", "E_RESOLUTION",
-               "E_CONTINUUM", "E_CONTINUUM_ADD", "E_NOISE_SCALE", "E_NOISE_ADD"]
-_CORR_FID = ["E_DLA_COMPLETENESS", "E_BAL_COMPLETENESS", "E_RESOLUTION",
-             "E_CONTINUUM", "E_NOISE_SCALE"]
+_SYS_LABELS = [
+    "E_DLA_COMPLETENESS",
+    "E_BAL_COMPLETENESS",
+    "E_RESOLUTION",
+    "E_CONTINUUM",
+    "E_CONTINUUM_ADD",
+    "E_NOISE_SCALE",
+    "E_NOISE_ADD",
+]
+_CORR_FID = [
+    "E_DLA_COMPLETENESS",
+    "E_BAL_COMPLETENESS",
+    "E_RESOLUTION",
+    "E_CONTINUUM",
+    "E_NOISE_SCALE",
+]
 _UCORR_FID = ["E_NOISE_ADD", "E_CONTINUUM_ADD"]
 
 
@@ -64,7 +78,7 @@ def _compute_cov_cup1d(z_col, syst_vecs, corr_labels, ucorr_labels):
     for lab in _SYS_LABELS:
         v = syst_vecs[lab]
         if lab in ucorr_labels:
-            C[diag] += v ** 2
+            C[diag] += v**2
         elif lab in corr_labels:
             for z in zz_unique:
                 ind = np.argwhere(z_col == z)[:, 0]
@@ -87,7 +101,7 @@ def test_desi_resolution_R_matches_cup1d_get_Rz_Naim():
     np.testing.assert_allclose(np.asarray(DL.desi_resolution_R(z)), _get_Rz_Naim(z), rtol=1e-12)
 
 
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_npz_fid_split_reproduces_shipped_cov_syst():
     """cup1d's 'fid' correlated/uncorrelated split, rebuilt from the syst vectors, reproduces
     the shipped cov_syst (and cov == cov_stat + cov_syst). Pins that the split we subtract
@@ -106,7 +120,7 @@ def test_npz_fid_split_reproduces_shipped_cov_syst():
     np.testing.assert_allclose(cov_syst_fid, cov_syst_shipped, rtol=1e-12, atol=1e-18)
 
 
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_cov_b_equals_cup1d_additive_build_without_resolution():
     """PERMANENT GUARD: our subtractive DESI cov_b == cup1d's additive build-without-resolution
     to rtol 1e-10 on the same post-cut grid; both SPD. (add_cov_diag_inflation=False for an
@@ -126,16 +140,20 @@ def test_cov_b_equals_cup1d_additive_build_without_resolution():
     # 2026-07-17 the DESI default ALSO removes syst_e_dla_completeness (DESI_DLA_COV_REDUCE, the
     # cup1d "red" convention); that full reduced build is pinned in tests/test_dla_cov_reduce.py
     # (test_reduced_equals_cup1d_red_build + the opt-out back-compat pin).
-    leg_b = DL.load_desi_leg(resolution_float=True, add_cov_diag_inflation=False,
-                             dla_cov_reduce=False)
+    leg_b = DL.load_desi_leg(
+        resolution_float=True, add_cov_diag_inflation=False, dla_cov_reduce=False
+    )
     our_cov_b = np.asarray(leg_b.C_data, float)
-    assert leg_b.resolution_on is True, "resolution_float must flip resolution_on True (float f_res)"
+    assert (
+        leg_b.resolution_on is True
+    ), "resolution_float must flip resolution_on True (float f_res)"
 
     # recompute the SAME keep mask load_desi_leg uses, to sub-select cup1d's full-grid build.
     R_row = DL.desi_resolution_R(z_all)
     k_hi_row = 0.5 * np.pi / R_row
-    keep = ((z_all >= 2.2 - 1e-6) & (z_all <= 4.2 + 1e-6)
-            & (k_all > DL.DESI_KMIN) & (k_all < k_hi_row))
+    keep = (
+        (z_all >= 2.2 - 1e-6) & (z_all <= 4.2 + 1e-6) & (k_all > DL.DESI_KMIN) & (k_all < k_hi_row)
+    )
     idx = np.where(keep)[0]
     cup1d_cov_b = cup1d_full[np.ix_(idx, idx)]
 
@@ -150,7 +168,7 @@ def test_cov_b_equals_cup1d_additive_build_without_resolution():
     assert np.linalg.eigvalsh(our_cov_b).min() > 0.0
 
 
-@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present")
+@pytest.mark.skipif(not _have_desi, reason="real DESI npz not present (set HCD_P1D_DATA_DIR)")
 def test_forward_factor_exp_vs_linear_inband_gap_leq_1pct():
     """PERMANENT GUARD: our exp resolution factor vs cup1d's linear one differ <= 1% in-band
     at b_res=0.02 (after the half-Nyquist cut). Both use the same R_z, and our
@@ -159,17 +177,23 @@ def test_forward_factor_exp_vs_linear_inband_gap_leq_1pct():
     z_all = np.asarray(d["z"], float)
     k_all = np.asarray(d["k"], float)
     R_row = DL.desi_resolution_R(z_all)
-    keep = ((z_all >= 2.2 - 1e-6) & (z_all <= 4.2 + 1e-6)
-            & (k_all > DL.DESI_KMIN) & (k_all < 0.5 * np.pi / R_row))
+    keep = (
+        (z_all >= 2.2 - 1e-6)
+        & (z_all <= 4.2 + 1e-6)
+        & (k_all > DL.DESI_KMIN)
+        & (k_all < 0.5 * np.pi / R_row)
+    )
     k = k_all[keep]
     Rz = DL.desi_resolution_R(z_all[keep])
 
     b = 0.02
-    x = 2.0 * b * k ** 2 * Rz ** 2
-    ours = np.exp(x)                      # our template
-    cup1d = 1.0 + x                       # cup1d get_contamination (linear)
+    x = 2.0 * b * k**2 * Rz**2
+    ours = np.exp(x)  # our template
+    cup1d = 1.0 + x  # cup1d get_contamination (linear)
     frac = np.abs(ours - cup1d) / np.abs(cup1d)
-    assert frac.max() <= 0.01, f"exp-vs-linear in-band gap {frac.max()*100:.3f}% exceeds 1% at b=0.02"
+    assert (
+        frac.max() <= 0.01
+    ), f"exp-vs-linear in-band gap {frac.max()*100:.3f}% exceeds 1% at b=0.02"
 
     # our _resolution_factor is exactly the exp form (differentiable knob) -> matches `ours`.
     ours_fn = np.asarray(DL._resolution_factor(k, Rz, b_res=b))

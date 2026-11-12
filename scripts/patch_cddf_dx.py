@@ -16,7 +16,7 @@ where ``total_path = n_sightlines · dX_per_sightline``, so the buggy
 
 The fix in commit ``c210990`` updated the in-code formula but did not
 re-write the artefacts that had already been saved on
-``/scratch/cavestru_root/cavestru0/mfho/hcd_outputs/``.  Plotting
+``$HCD_OUTPUTS_DIR/``.  Plotting
 scripts recompute dX on the fly so figures from that commit are
 correct, but anyone consuming the ``.npz`` files directly still sees
 inflated values.
@@ -51,6 +51,7 @@ Usage
     python3 scripts/patch_cddf_dx.py               # write corrected siblings
     python3 scripts/patch_cddf_dx.py --in-place YES_OVERWRITE   # destructive
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,7 +66,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+DEFAULT_OUTPUT_ROOT = Path(os.environ.get("HCD_OUTPUTS_DIR", "<HCD_OUTPUTS_DIR unset>"))
 
 logging.basicConfig(format="%(message)s", level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -80,6 +81,7 @@ EXCLUDED_PATH_TOKENS = ("_bak_", "pre_audit_bak", "_hcd_analysis_data")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _is_excluded(path: Path) -> bool:
     s = str(path)
@@ -122,6 +124,7 @@ def _bin_keys(d_keys) -> List[str]:
 # Per-snap patch
 # ---------------------------------------------------------------------------
 
+
 def patch_snap_cddf(npz_path: Path, hubble: float) -> Dict:
     """
     Read a per-snap cddf.npz and return a dict with the fix applied.
@@ -159,6 +162,7 @@ def patch_snap_cddf(npz_path: Path, hubble: float) -> Dict:
 # ---------------------------------------------------------------------------
 # Per-sim stacked patch
 # ---------------------------------------------------------------------------
+
 
 def _gather_buggy_paths(sim_dir: Path, z_snapshots: np.ndarray) -> np.ndarray:
     """
@@ -262,7 +266,7 @@ def patch_stacked_cddf(npz_path: Path, hubble: float) -> Dict:
         # Recompute stacked f_nhi
         log_nhi_edges = np.asarray(d[f"{label}__log_nhi_edges"], dtype=np.float64)
         n_abs = np.asarray(d[f"{label}__n_absorbers"], dtype=np.float64)
-        dN = 10.0**log_nhi_edges[1:] - 10.0**log_nhi_edges[:-1]
+        dN = 10.0 ** log_nhi_edges[1:] - 10.0 ** log_nhi_edges[:-1]
         with np.errstate(divide="ignore", invalid="ignore"):
             f_corr = np.where(dN > 0, n_abs / (dN * total_path_corr), 0.0)
         out[f"{label}__f_nhi"] = f_corr
@@ -281,14 +285,11 @@ def patch_stacked_cddf(npz_path: Path, hubble: float) -> Dict:
 # Walk + write
 # ---------------------------------------------------------------------------
 
+
 def discover(output_root: Path) -> Tuple[List[Path], List[Path]]:
     """Return (per_snap_files, per_sim_stacked_files), excluding backup paths."""
-    snap_files = [
-        p for p in output_root.rglob("snap_*/cddf.npz") if not _is_excluded(p)
-    ]
-    stacked_files = [
-        p for p in output_root.rglob("cddf_stacked.npz") if not _is_excluded(p)
-    ]
+    snap_files = [p for p in output_root.rglob("snap_*/cddf.npz") if not _is_excluded(p)]
+    stacked_files = [p for p in output_root.rglob("cddf_stacked.npz") if not _is_excluded(p)]
     return sorted(snap_files), sorted(stacked_files)
 
 
@@ -304,15 +305,30 @@ def _write_npz(path: Path, data: Dict, dry_run: bool) -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT,
-                   help=f"scratch hcd_outputs root (default: {DEFAULT_OUTPUT_ROOT})")
-    p.add_argument("--dry-run", action="store_true",
-                   help="report what would be done; do not write files")
-    p.add_argument("--in-place", metavar="YES_OVERWRITE", default=None,
-                   help="overwrite original .npz files (must literally pass 'YES_OVERWRITE')")
-    p.add_argument("--limit", type=int, default=None,
-                   help="process at most N per-snap and N stacked files (debug)")
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    p.add_argument(
+        "--output-root",
+        type=Path,
+        default=DEFAULT_OUTPUT_ROOT,
+        help=f"scratch hcd_outputs root (default: {DEFAULT_OUTPUT_ROOT})",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="report what would be done; do not write files"
+    )
+    p.add_argument(
+        "--in-place",
+        metavar="YES_OVERWRITE",
+        default=None,
+        help="overwrite original .npz files (must literally pass 'YES_OVERWRITE')",
+    )
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="process at most N per-snap and N stacked files (debug)",
+    )
     args = p.parse_args(argv)
 
     output_root = args.output_root
@@ -356,10 +372,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                 n_skipped += 1
                 continue
             target = f if in_place else f.with_name("cddf_corrected.npz")
-            log.info("  [snap] %s  z=%.3f h=%.3f  factor=%.4f -> %s",
-                     str(f.relative_to(output_root)), float(np.load(f)["z"]),
-                     h, float(patched["patch_factor"]),
-                     "in-place" if in_place else target.name)
+            log.info(
+                "  [snap] %s  z=%.3f h=%.3f  factor=%.4f -> %s",
+                str(f.relative_to(output_root)),
+                float(np.load(f)["z"]),
+                h,
+                float(patched["patch_factor"]),
+                "in-place" if in_place else target.name,
+            )
             _write_npz(target, patched, args.dry_run)
             n_patched += 1
         except Exception as exc:
@@ -382,10 +402,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                 continue
             patched = patch_stacked_cddf(f, h)
             target = f if in_place else f.with_name("cddf_stacked_corrected.npz")
-            log.info("  [stack] %s  h=%.3f  bins=%d -> %s",
-                     str(f.relative_to(output_root)), h,
-                     len(_bin_keys(patched.keys())),
-                     "in-place" if in_place else target.name)
+            log.info(
+                "  [stack] %s  h=%.3f  bins=%d -> %s",
+                str(f.relative_to(output_root)),
+                h,
+                len(_bin_keys(patched.keys())),
+                "in-place" if in_place else target.name,
+            )
             _write_npz(target, patched, args.dry_run)
             s_patched += 1
         except Exception as exc:
@@ -393,10 +416,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             s_failed += 1
 
     log.info("--- Summary ---")
-    log.info("  per-snap  : patched=%d skipped(already)=%d failed=%d",
-             n_patched, n_skipped, n_failed)
-    log.info("  stacked   : patched=%d skipped(already)=%d failed=%d",
-             s_patched, s_skipped, s_failed)
+    log.info(
+        "  per-snap  : patched=%d skipped(already)=%d failed=%d", n_patched, n_skipped, n_failed
+    )
+    log.info(
+        "  stacked   : patched=%d skipped(already)=%d failed=%d", s_patched, s_skipped, s_failed
+    )
     log.info("  dry_run=%s  in_place=%s", args.dry_run, in_place)
 
     return 0 if (n_failed == 0 and s_failed == 0) else 1

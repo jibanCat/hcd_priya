@@ -24,9 +24,13 @@ DEFECT LINEAGE:
 Everything here is built in tmp_path from a tiny synthetic z grid + the (blind-safe) prior-geometry
 constants, so the suite passes on a clean checkout with no notes-repo artifact present.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_export_deployed_centre.py -q
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
+     python -m pytest tests/test_export_deployed_centre.py -q
 """
+
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
 
@@ -43,7 +47,7 @@ from hcd_analysis.emulator.inference import (
     HCD_Z_PIVOT,
 )
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 # --- tiny synthetic inputs: 6 z nodes, real Xbar(z) magnitudes = EXACT evaluations of the frozen
 # deg-2 Xbar polynomial (f3_layers 'xbar_poly_deg2_coeffs' [0.04156166, 0.07087752, 0.04491599])
@@ -55,8 +59,17 @@ REPO = "/home/mfho/hcd_priya"
 # KS LLS column equal to the boosted lit law everywhere and no 27.631021/Xbar saturation
 # fingerprint anywhere (the v1/v2 shipped-artifact defect).
 Z_TINY = np.array([2.2, 2.6, 3.0, 3.4, 4.2, 4.6], float)
-XB_TINY = np.array([0.4020049401674796, 0.5101543263532812, 0.6316034425658955,
-                    0.7663522888053229, 1.075749171364616, 1.2503972076844816], float)
+XB_TINY = np.array(
+    [
+        0.4020049401674796,
+        0.5101543263532812,
+        0.6316034425658955,
+        0.7663522888053229,
+        1.075749171364616,
+        1.2503972076844816,
+    ],
+    float,
+)
 MU_CLOSURE = np.array([0.18811862664368107, 0.06218315972222222, 0.004409670138888889], float)
 SD_CLOSURE = np.array([0.028217793996552160, 0.02487326388888889, 0.0022048350694444446], float)
 
@@ -82,10 +95,12 @@ MOD = _load_script("export_deployed_centre_dndx")
 @pytest.fixture(scope="module")
 def built():
     """(payload, table) from the module's own assembly on the tiny grid."""
-    closure_center = MOD.band_curve(MU_CLOSURE, Z_TINY, XB_TINY, float(HCD_Z_PIVOT),
-                                    np.asarray(HCD_INCIDENCE_SLOPE, float))
-    return MOD.build_npz_payload(Z_TINY, XB_TINY, MU_CLOSURE, SD_CLOSURE,
-                                 float(HCD_Z_PIVOT), closure_center)
+    closure_center = MOD.band_curve(
+        MU_CLOSURE, Z_TINY, XB_TINY, float(HCD_Z_PIVOT), np.asarray(HCD_INCIDENCE_SLOPE, float)
+    )
+    return MOD.build_npz_payload(
+        Z_TINY, XB_TINY, MU_CLOSURE, SD_CLOSURE, float(HCD_Z_PIVOT), closure_center
+    )
 
 
 @pytest.fixture(scope="module")
@@ -104,7 +119,8 @@ def test_no_bare_zslope_key(npz):
     is the point of the fix. Renaming without deleting would leave the trap in place."""
     assert "zslope" not in npz.files, (
         f"bare 'zslope' still shipped (= {np.asarray(npz['zslope'])!r}); a reader cannot tell "
-        f"whether it labels the closure or the deployed curve. keys={sorted(npz.files)}")
+        f"whether it labels the closure or the deployed curve. keys={sorted(npz.files)}"
+    )
 
 
 def test_both_slope_keys_exist(npz):
@@ -113,8 +129,9 @@ def test_both_slope_keys_exist(npz):
 
 
 def test_closure_slope_is_the_sim_incidence_slope(npz):
-    np.testing.assert_array_equal(np.asarray(npz["zslope_closure"]),
-                                  np.asarray(HCD_INCIDENCE_SLOPE, float))
+    np.testing.assert_array_equal(
+        np.asarray(npz["zslope_closure"]), np.asarray(HCD_INCIDENCE_SLOPE, float)
+    )
     assert float(np.asarray(npz["zslope_closure"])[0]) == 2.465
 
 
@@ -129,8 +146,9 @@ def test_the_two_slopes_are_not_the_same_array(npz):
     clo = np.asarray(npz["zslope_closure"])
     dep = np.asarray(npz["zslope_deployed"])
     assert not np.array_equal(clo, dep), "zslope_closure and zslope_deployed are identical"
-    assert abs(float(dep[0]) - float(clo[0])) > 0.3, (
-        f"LLS slopes should differ by 2.465-2.127=0.338, got {float(clo[0])} vs {float(dep[0])}")
+    assert (
+        abs(float(dep[0]) - float(clo[0])) > 0.3
+    ), f"LLS slopes should differ by 2.465-2.127=0.338, got {float(clo[0])} vs {float(dep[0])}"
 
 
 def test_deployed_subdla_dla_slopes_equal_closure(npz):
@@ -145,10 +163,10 @@ def test_deployed_lls_curve_was_built_with_its_own_parameterization(npz):
     curve both ways and assert the shipped one matches the DEPLOYED slope and NOT the closure
     slope. KS (v4 mapped): the LLS column must BE the dndx-premap boosted lit law
     boost * A * (1+z)^gamma -- and must NOT be a band_curve alpha build of any slope."""
-    zg = np.asarray(npz["zgrid"]); xb = np.asarray(npz["xbar_grid"])
+    zg = np.asarray(npz["zgrid"])
+    xb = np.asarray(npz["xbar_grid"])
     zp = float(npz["z_pivot"])
-    par = {str(s): str(p) for s, p in zip(npz["survey_order"],
-                                          npz["parameterization_by_survey"])}
+    par = {str(s): str(p) for s, p in zip(npz["survey_order"], npz["parameterization_by_survey"])}
     boost = {str(s): float(b) for s, b in zip(npz["survey_order"], npz["boost_by_survey"])}
     for sv in [str(s) for s in npz["survey_order"]]:
         got = np.asarray(npz[f"deployed_center_dndx_{sv}"])
@@ -157,8 +175,9 @@ def test_deployed_lls_curve_was_built_with_its_own_parameterization(npz):
             want = MOD.band_curve(mu, zg, xb, zp, np.asarray(npz["zslope_deployed"]))
             wrong = MOD.band_curve(mu, zg, xb, zp, np.asarray(npz["zslope_closure"]))
             np.testing.assert_allclose(got[:, 0], want[:, 0], rtol=0, atol=1e-14)
-            assert not np.allclose(got[:, 0], wrong[:, 0], rtol=0, atol=1e-10), (
-                f"{sv}: deployed LLS curve is indistinguishable from the closure-slope build")
+            assert not np.allclose(
+                got[:, 0], wrong[:, 0], rtol=0, atol=1e-10
+            ), f"{sv}: deployed LLS curve is indistinguishable from the closure-slope build"
         else:
             assert par[sv] == "dndx_mapped_v2" and sv == "KS"
             A, g = [float(v) for v in np.asarray(npz["ks_lit_dndx_law_lls"], float)]
@@ -183,11 +202,13 @@ def test_subdla_dla_dndx_renorm_coupled_to_closure(npz):
             rel = np.max(np.abs(got[:, j] / clo[:, j] - 1.0))
             assert rel < 1e-2, (
                 f"{sv} {cname} centre differs from closure by {rel:.3e} relative -- far above "
-                f"the exact-inverse renorm coupling; centre/slope mislabel suspected")
+                f"the exact-inverse renorm coupling; centre/slope mislabel suspected"
+            )
             assert not np.array_equal(got[:, j], clo[:, j]), (
                 f"{sv} {cname} column is bit-identical to closure -- under the exact inverse "
                 f"the renorm coupling to the (re-centred) LLS alpha must be nonzero; was this "
-                f"array built with the deprecated approximate alpha_to_dndx?")
+                f"array built with the deprecated approximate alpha_to_dndx?"
+            )
         assert not np.array_equal(got[:, 0], clo[:, 0]), f"{sv} LLS centre should differ"
 
 
@@ -204,14 +225,17 @@ def test_subdla_dla_identical_across_surveys(npz):
 # ------------------------------------------------------- other unlabelled / misleading key axes
 def test_no_bare_survey_ordered_vectors(npz):
     """`boost` / `lls_frac_sigma` are length-3 per-SURVEY vectors in a file whose class_order is
-    also length 3 -- indistinguishable from per-class arrays. They must carry the axis in the name."""
+    also length 3 -- indistinguishable from per-class arrays. They must carry the axis in the name.
+    """
     for bad in ("boost", "lls_frac_sigma"):
         assert bad not in npz.files, f"axis-ambiguous key {bad!r} still shipped"
     sur = [str(s) for s in npz["survey_order"]]
-    np.testing.assert_allclose(np.asarray(npz["boost_by_survey"]),
-                               [HCD_LLS_SURVEY_BOOST[s] for s in sur])
-    np.testing.assert_allclose(np.asarray(npz["lls_frac_sigma_by_survey"]),
-                               [HCD_LLS_SURVEY_FRAC_SIGMA[s] for s in sur])
+    np.testing.assert_allclose(
+        np.asarray(npz["boost_by_survey"]), [HCD_LLS_SURVEY_BOOST[s] for s in sur]
+    )
+    np.testing.assert_allclose(
+        np.asarray(npz["lls_frac_sigma_by_survey"]), [HCD_LLS_SURVEY_FRAC_SIGMA[s] for s in sur]
+    )
 
 
 def test_alpha_pivot_keys_say_deployed_or_closure(npz):
@@ -224,8 +248,7 @@ def test_alpha_pivot_keys_say_deployed_or_closure(npz):
     w_c_corrected), asserted to DIFFER from the legacy alpha-postmap centre 0.4302804 the
     v1/v2 artifacts shipped -- and the mapped survey may NOT ship an alpha-space sigma."""
     sur = [str(s) for s in npz["survey_order"]]
-    par = {str(s): str(p) for s, p in zip(npz["survey_order"],
-                                          npz["parameterization_by_survey"])}
+    par = {str(s): str(p) for s, p in zip(npz["survey_order"], npz["parameterization_by_survey"])}
     for sv in sur:
         for bad in (f"alpha_pivot_mu_{sv}", f"alpha_pivot_sigma_{sv}"):
             assert bad not in npz.files, f"unprefixed key {bad!r} still shipped"
@@ -240,30 +263,39 @@ def test_alpha_pivot_keys_say_deployed_or_closure(npz):
         if par[sv] == "alpha_pivot_powerlaw_v1":
             assert f"deployed_alpha_pivot_sigma_{sv}" in npz.files
             # the deployed LLS centre is the corrected lit law x boost, NOT closure x boost.
-            assert abs(mu[0] - 0.17211216067355312 * b) < 1e-12, f"{sv} deployed LLS centre {mu[0]!r}"
+            assert (
+                abs(mu[0] - 0.17211216067355312 * b) < 1e-12
+            ), f"{sv} deployed LLS centre {mu[0]!r}"
             assert abs(mu[0] - MU_CLOSURE[0] * b) > 1e-3, (
                 f"{sv} deployed LLS centre equals closure x boost -- that is the construction the "
-                f"script's warning (1) exists to prevent")
+                f"script's warning (1) exists to prevent"
+            )
             np.testing.assert_array_equal(mu[1:], MU_CLOSURE[1:])
         else:
             assert sv == "KS" and par[sv] == "dndx_mapped_v2"
             # THE v4 PIN: the mapped pivot centre (W2 value), NOT the legacy postmap centre.
-            assert abs(mu[0] - KS_MAPPED_PIVOT) < 1e-6, (
-                f"KS mapped pivot {mu[0]!r} != W2-pinned {KS_MAPPED_PIVOT}")
+            assert (
+                abs(mu[0] - KS_MAPPED_PIVOT) < 1e-6
+            ), f"KS mapped pivot {mu[0]!r} != W2-pinned {KS_MAPPED_PIVOT}"
             assert abs(mu[0] - KS_LEGACY_PIVOT) > 0.03, (
                 "the KS row equals the LEGACY alpha-postmap centre 0.4302804 -- the exporter "
-                "regressed to the pre-v4 legacy surface (v1/v2 artifacts)")
+                "regressed to the pre-v4 legacy surface (v1/v2 artifacts)"
+            )
             # mapped sub/DLA pivot alphas: renorm-coupled to (not equal to) the closure values
             assert not np.array_equal(mu[1:], MU_CLOSURE[1:]), (
                 "KS mapped sub/DLA pivot alphas are bit-identical to the closure centres -- the "
-                "forward-map renorm coupling must be nonzero")
+                "forward-map renorm coupling must be nonzero"
+            )
             np.testing.assert_allclose(mu[1:], MU_CLOSURE[1:], rtol=1e-2)
             # NO alpha-space Gaussian width may ship for the mapped survey.
-            for bad in (f"deployed_alpha_pivot_sigma_{sv}",
-                        f"deployed_dla_softplus_quantiles_{sv}"):
+            for bad in (
+                f"deployed_alpha_pivot_sigma_{sv}",
+                f"deployed_dla_softplus_quantiles_{sv}",
+            ):
                 assert bad not in npz.files, (
                     f"{bad!r} shipped for the mapped KS survey -- no such alpha-space object "
-                    f"exists in the deployed dndx_mapped_v2 prior")
+                    f"exists in the deployed dndx_mapped_v2 prior"
+                )
 
 
 # --------------------------------------------------------------- v4 native-dN/dX KS semantics
@@ -277,8 +309,9 @@ def test_ks_centre_is_the_native_mapped_reference(npz):
     ref, xbar_z, ref_piv, xbar_piv = _ks_dndx_reference(MU_CLOSURE, cf, zg)
     got = np.asarray(npz["deployed_center_dndx_KS"], float)
     np.testing.assert_array_equal(got, np.asarray(ref, float))
-    np.testing.assert_allclose(np.asarray(npz["ks_dndx_ref_pivot"], float),
-                               np.asarray(ref_piv, float), rtol=0, atol=1e-15)
+    np.testing.assert_allclose(
+        np.asarray(npz["ks_dndx_ref_pivot"], float), np.asarray(ref_piv, float), rtol=0, atol=1e-15
+    )
     assert abs(float(np.asarray(npz["ks_xbar_pivot"])) - float(xbar_piv)) < 1e-12
 
 
@@ -288,6 +321,7 @@ def test_ks_band_is_pivot_amplitude_band(npz):
     and the softplus amplitude ratio on DLA. The tilt widths (sigma_kappa etc.) add z-dependent
     spread deliberately NOT shown -- mirroring the legacy pivot-amplitude-band-only convention."""
     import jax
+
     c = np.asarray(npz["deployed_center_dndx_KS"], float)
     hi = np.asarray(npz["deployed_hi1_dndx_KS"], float)
     lo = np.asarray(npz["deployed_lo1_dndx_KS"], float)
@@ -314,6 +348,7 @@ def test_ks_forward_roundtrip_machine_precision(npz):
     -- the inverse is a CHECK on the shipped curve, not its construction."""
     import jax.numpy as jnp
     from hcd_analysis.emulator.dndx_wc import alpha_to_dndx_exact, w_c_corrected
+
     zg = np.asarray(npz["zgrid"], float)
     xb = np.asarray(npz["xbar_grid"], float)
     c = np.asarray(npz["deployed_center_dndx_KS"], float)
@@ -328,16 +363,26 @@ def test_no_saturation_fingerprint_anywhere(npz):
     lit law at z>=4.5). No deployed or closure array in the v4 export may contain that
     fingerprint at ANY z -- including z=4.6, where v2 shipped garbage and v3 refused."""
     xb = np.asarray(npz["xbar_grid"], float)
-    fp = SATURATION_MU / xb                                     # (n_z,) per-z fingerprint
-    names = [k for k in npz.files
-             if k.startswith(("deployed_center_dndx", "deployed_lo1_dndx",
-                              "deployed_hi1_dndx", "closure_center_dndx"))]
+    fp = SATURATION_MU / xb  # (n_z,) per-z fingerprint
+    names = [
+        k
+        for k in npz.files
+        if k.startswith(
+            (
+                "deployed_center_dndx",
+                "deployed_lo1_dndx",
+                "deployed_hi1_dndx",
+                "closure_center_dndx",
+            )
+        )
+    ]
     assert len(names) >= 10
     for k in names:
         arr = np.asarray(npz[k], float)
         assert not np.any(np.isclose(arr, fp[:, None], rtol=1e-6)), (
             f"{k} contains the 27.631021/Xbar saturation fingerprint of the retired "
-            f"approximate inverse")
+            f"approximate inverse"
+        )
         assert np.all(np.isfinite(arr)), f"{k} contains non-finite entries"
     # and the KS centre at the last node is the boosted lit law, NOT the saturated value
     zg = np.asarray(npz["zgrid"], float)
@@ -345,7 +390,7 @@ def test_no_saturation_fingerprint_anywhere(npz):
     want_hi_z = 2.5 * A * (1.0 + zg[-1]) ** g
     got_hi_z = float(np.asarray(npz["deployed_center_dndx_KS"])[-1, 0])
     assert abs(got_hi_z / want_hi_z - 1.0) < 1e-12
-    assert got_hi_z < 0.2 * (SATURATION_MU / xb[-1])            # nowhere near the clamp value
+    assert got_hi_z < 0.2 * (SATURATION_MU / xb[-1])  # nowhere near the clamp value
 
 
 def test_full_grid_builds_no_ks_refusal():
@@ -355,12 +400,14 @@ def test_full_grid_builds_no_ks_refusal():
     Here we additionally pin that a refusal in the alpha-parameterized branch is still fail-loud
     (DESI/eBOSS drift guard): an absurd closure mu that leaves the simplex must raise, naming
     the survey."""
-    bad_mu = np.array([0.9, 0.6, 0.004], float)                 # sum >> 1 after z-scaling
-    closure_center = MOD.band_curve(MU_CLOSURE, Z_TINY, XB_TINY, float(HCD_Z_PIVOT),
-                                    np.asarray(HCD_INCIDENCE_SLOPE, float))
+    bad_mu = np.array([0.9, 0.6, 0.004], float)  # sum >> 1 after z-scaling
+    closure_center = MOD.band_curve(
+        MU_CLOSURE, Z_TINY, XB_TINY, float(HCD_Z_PIVOT), np.asarray(HCD_INCIDENCE_SLOPE, float)
+    )
     with pytest.raises((ValueError, AssertionError)):
-        MOD.build_npz_payload(Z_TINY, XB_TINY, bad_mu, SD_CLOSURE, float(HCD_Z_PIVOT),
-                              closure_center)
+        MOD.build_npz_payload(
+            Z_TINY, XB_TINY, bad_mu, SD_CLOSURE, float(HCD_Z_PIVOT), closure_center
+        )
 
 
 # ------------------------------------------------------------------ the sidecar, same class of ambiguity
@@ -370,7 +417,8 @@ def test_sidecar_table_has_no_bare_zslope(built):
         assert "zslope" not in row, (
             f"PROVENANCE prior_geometry_table[{sv}] still has a bare 'zslope' (= the DEPLOYED "
             f"slope there, while the npz's bare 'zslope' was the CLOSURE slope -- the same name "
-            f"meant opposite things in the same export dir)")
+            f"meant opposite things in the same export dir)"
+        )
         assert row["zslope_deployed"][0] == 2.127
         assert row["zslope_closure"][0] == 2.465
         assert row["zslope_deployed"][1:] == row["zslope_closure"][1:]
@@ -379,8 +427,9 @@ def test_sidecar_table_has_no_bare_zslope(built):
 def test_sidecar_dndx_scalar_names_its_class_and_layer(built):
     _, table = built
     for sv, row in table.items():
-        assert "dndx_center_z3" not in row, (
-            "'dndx_center_z3' does not say it is the LLS column of the DEPLOYED curve")
+        assert (
+            "dndx_center_z3" not in row
+        ), "'dndx_center_z3' does not say it is the LLS column of the DEPLOYED curve"
         assert "dndx_lls_center_z3_deployed" in row
         assert "alpha_pivot_mu" not in row and "alpha_pivot_sigma" not in row
         if row["parameterization"] == "alpha_pivot_powerlaw_v1":
@@ -400,16 +449,20 @@ def test_sidecar_dndx_scalar_names_its_class_and_layer(built):
 def test_verify_npz_payload_rejects_a_bare_zslope():
     """Root-cause guard: the export must re-read its own key set and refuse to write an
     ambiguous one, so a silently-failed edit can never ship again."""
-    payload = {"zslope_closure": np.asarray(HCD_INCIDENCE_SLOPE, float),
-               "zslope_deployed": np.array([2.127, 2.758, 2.366]),
-               "zslope": np.asarray(HCD_INCIDENCE_SLOPE, float)}
+    payload = {
+        "zslope_closure": np.asarray(HCD_INCIDENCE_SLOPE, float),
+        "zslope_deployed": np.array([2.127, 2.758, 2.366]),
+        "zslope": np.asarray(HCD_INCIDENCE_SLOPE, float),
+    }
     with pytest.raises(AssertionError, match="zslope"):
         MOD.verify_npz_payload(payload)
 
 
 def test_verify_npz_payload_rejects_identical_slopes():
-    payload = {"zslope_closure": np.asarray(HCD_INCIDENCE_SLOPE, float),
-               "zslope_deployed": np.asarray(HCD_INCIDENCE_SLOPE, float)}
+    payload = {
+        "zslope_closure": np.asarray(HCD_INCIDENCE_SLOPE, float),
+        "zslope_deployed": np.asarray(HCD_INCIDENCE_SLOPE, float),
+    }
     with pytest.raises(AssertionError):
         MOD.verify_npz_payload(payload)
 
@@ -450,4 +503,4 @@ def test_verify_npz_payload_accepts_the_real_payload(built, tmp_path):
     MOD.verify_npz_payload(payload)
     p = tmp_path / "x.npz"
     np.savez(p, **payload)
-    MOD.verify_npz_payload(dict(np.load(p, allow_pickle=True)))   # survives the round trip
+    MOD.verify_npz_payload(dict(np.load(p, allow_pickle=True)))  # survives the round trip

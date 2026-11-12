@@ -17,9 +17,13 @@ with the expected (a_lo,a_hi); the a=f/(1-F_ref) map; constrain_fn mirror parity
 the draws/packed-name columns; the a_SiII re-score threading fix; and a short flatlog NUTS smoke.
 
 Env (MANDATORY):
-  PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-    /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_legb_metal_flatlog.py -q
+  PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+    python -m pytest tests/test_legb_metal_flatlog.py -q
 """
+
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import os
 import numpy as np
 import pytest
@@ -32,10 +36,11 @@ from numpyro import handlers
 from numpyro.infer.util import constrain_fn, initialize_model
 
 from hcd_analysis.emulator import closure_legb as C
+from tests.gate_helpers import external_path  # noqa: E402  (data roots come from HCD_* variables)
 
-_CACHE = "/home/mfho/hcd_priya/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
-_CKPT0 = "/home/mfho/hcd_priya/checkpoints/final_fold0.eqx"
-_DESI_NPZ = "/home/mfho/data/desi_dr1_p1d/desi_dr1_p1d.npz"
+_CACHE = f"{_REPO_ROOT}/hcd_analysis/_emulator_data/observables_tau0_lf.h5"
+_CKPT0 = f"{_REPO_ROOT}/checkpoints/final_fold0.eqx"
+_DESI_NPZ = external_path("HCD_P1D_DATA_DIR", "desi_dr1_p1d/desi_dr1_p1d.npz")
 _have = all(os.path.exists(p) for p in (_CACHE, _CKPT0, _DESI_NPZ))
 
 
@@ -56,11 +61,16 @@ def _ctx_metal(metal_prior="uniform", sample_a_siii=True, metals_on=False):
     metal_prior mode selected, and the SiII doublet site optionally floated. ``metals_on``
     controls whether the DESI leg FORWARD-MODELS the metal factor (needed for the re-score /
     smoke tests where a_SiIII/a_SiII must enter the loglik)."""
-    ctx, d = C.build_legb_ctx(desi_kwargs=dict(z_lo=0.0, z_hi=2.6), use_xclass=True,
-                              sample_metals=True, metals_on=metals_on,
-                              metal_prior=metal_prior)
-    ctx = ctx._replace(legs=[l for l in ctx.legs if l.name == "DESI"],
-                       sample_a_siii=bool(sample_a_siii))
+    ctx, d = C.build_legb_ctx(
+        desi_kwargs=dict(z_lo=0.0, z_hi=2.6),
+        use_xclass=True,
+        sample_metals=True,
+        metals_on=metals_on,
+        metal_prior=metal_prior,
+    )
+    ctx = ctx._replace(
+        legs=[l for l in ctx.legs if l.name == "DESI"], sample_a_siii=bool(sample_a_siii)
+    )
     return ctx, d
 
 
@@ -68,7 +78,8 @@ def _mock(ctx, d, key_seed=0, inject_a_siiii=0.0):
     sims, _ = C.held_out_sims(d, fold=0)
     truth = C.make_truth_from_sim(d, sims[0], fold=0)
     mock_legs, truth_pack, _ = C.make_legb_mock(
-        ctx, truth, jax.random.PRNGKey(key_seed), inject_a_siiii=inject_a_siiii)
+        ctx, truth, jax.random.PRNGKey(key_seed), inject_a_siiii=inject_a_siiii
+    )
     core = C._mock_core_per_leg(ctx, truth)
     return mock_legs, truth_pack, core
 
@@ -84,19 +95,21 @@ def _bounds(ctx):
 #  1. UNIFORM default — site construction byte-exact (golden-safe).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_uniform_default_site_construction_unchanged():
     """metal_prior='uniform' (the default) keeps the a_SiIII/a_SiII sites as the literal legacy
     dist.Uniform(0, a_siiii_max), and _legb_model / _legb_priors_only trace the SAME ordered
     sample-site list (the golden-safe default contract)."""
     ctx, d = _ctx_metal(metal_prior="uniform", sample_a_siii=True)
-    assert ctx.metal_prior == "uniform"                     # the golden-safe default
+    assert ctx.metal_prior == "uniform"  # the golden-safe default
     mock_legs, _, core = _mock(ctx, d)
     trm = _trace(C._legb_model, ctx, mock_legs, core)
     for nm in ("a_SiIII", "a_SiII"):
         fn = trm[nm]["fn"]
         assert isinstance(fn, dist.Uniform), f"{nm} not Uniform under default: {type(fn).__name__}"
-        assert float(fn.low) == 0.0 and float(fn.high) == float(ctx.a_siiii_max), \
-            f"{nm} Uniform bounds drifted from (0, a_siiii_max)"
+        assert float(fn.low) == 0.0 and float(fn.high) == float(
+            ctx.a_siiii_max
+        ), f"{nm} Uniform bounds drifted from (0, a_siiii_max)"
     s_model = _sites(C._legb_model, ctx, mock_legs, core)
     s_prior = _sites(C._legb_priors_only, ctx)
     assert s_model == s_prior, f"uniform site-order mismatch: {s_model} vs {s_prior}"
@@ -108,6 +121,7 @@ def test_uniform_default_site_construction_unchanged():
 #  2. FLATLOG — the sites are LogUniform with the expected (a_lo, a_hi).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_flatlog_sites_are_loguniform_with_expected_bounds():
     """metal_prior='flatlog' → a_SiIII and a_SiII are dist.LogUniform with
     low==10**logf_lo/(1-F_ref), high==10**logf_hi/(1-F_ref) (the a=f/(1-F_ref) map), on the SAME
@@ -121,8 +135,9 @@ def test_flatlog_sites_are_loguniform_with_expected_bounds():
     for tr in (trm, trp):
         for nm in ("a_SiIII", "a_SiII"):
             fn = tr[nm]["fn"]
-            assert isinstance(fn, dist.LogUniform), \
-                f"{nm} not LogUniform under flatlog: {type(fn).__name__}"
+            assert isinstance(
+                fn, dist.LogUniform
+            ), f"{nm} not LogUniform under flatlog: {type(fn).__name__}"
             assert float(fn.low) == pytest.approx(a_lo, rel=1e-12), f"{nm} a_lo mismatch"
             assert float(fn.high) == pytest.approx(a_hi, rel=1e-12), f"{nm} a_hi mismatch"
     # the drawn amplitude lives strictly inside the bounds (LogUniform support).
@@ -134,6 +149,7 @@ def test_flatlog_sites_are_loguniform_with_expected_bounds():
 #  3. a = f/(1-F_ref) amplitude map + F_ref provenance.
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_amplitude_map_and_Fref_provenance():
     """The LogUniform bounds equal the f-bounds / (1-F_ref); a representative f=0.009 maps to
     a=f/(1-F_ref) interior to (a_lo,a_hi); and (1-F_ref) is the union-z fiducial mean-flux scalar
@@ -146,13 +162,16 @@ def test_amplitude_map_and_Fref_provenance():
     # a representative f maps to an interior a.
     f_rep = 0.009
     a_rep = f_rep / omf
-    assert a_lo < a_rep < a_hi, f"f={f_rep} -> a={a_rep:.4g} not interior to ({a_lo:.3g},{a_hi:.3g})"
+    assert (
+        a_lo < a_rep < a_hi
+    ), f"f={f_rep} -> a={a_rep:.4g} not interior to ({a_lo:.3g},{a_hi:.3g})"
     # F_ref provenance: the SAME fiducial mean flux the forward uses at the prior center
     # (tau0_amp=1, dtau0=0 => tau0(z)=Kim07(z)), averaged over the union z-grid.
     F_z = np.exp(-np.asarray(C._kim(jnp.asarray(ctx.z_global))))
     omf_expected = float(1.0 - np.mean(F_z))
-    assert omf == pytest.approx(omf_expected, rel=1e-12), \
-        f"1-F_ref {omf} != union-z fiducial mean-flux scalar {omf_expected}"
+    assert omf == pytest.approx(
+        omf_expected, rel=1e-12
+    ), f"1-F_ref {omf} != union-z fiducial mean-flux scalar {omf_expected}"
     assert 0.0 < omf < 1.0
 
 
@@ -161,6 +180,7 @@ def test_amplitude_map_and_Fref_provenance():
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
 @pytest.mark.parametrize("metal_prior", ["uniform", "flatlog"])
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_constrain_fn_mirror_parity(metal_prior):
     """For BOTH modes _legb_model and _legb_priors_only trace the IDENTICAL ordered sample-site
     name list (the fast-postprocess constrain_fn mirror), and the constrain_fn round-trip maps an
@@ -177,12 +197,15 @@ def test_constrain_fn_mirror_parity(metal_prior):
     init = initialize_model(jax.random.PRNGKey(2), lambda: C._legb_priors_only(ctx))
     z0 = dict(init.param_info.z)
     assert "a_SiIII" in z0 and "a_SiII" in z0
-    for u in (-25.0, 0.0, 25.0):                            # arbitrary unconstrained a_SiIII
-        z = dict(z0); z["a_SiIII"] = jnp.asarray(u)
+    for u in (-25.0, 0.0, 25.0):  # arbitrary unconstrained a_SiIII
+        z = dict(z0)
+        z["a_SiIII"] = jnp.asarray(u)
         c = constrain_fn(lambda: C._legb_priors_only(ctx), (), {}, z, return_deterministic=False)
         a = float(c["a_SiIII"])
         if metal_prior == "flatlog":
-            assert a_lo < a < a_hi, f"flatlog constrain a_SiIII {a:.3g} not in ({a_lo:.3g},{a_hi:.3g})"
+            assert (
+                a_lo < a < a_hi
+            ), f"flatlog constrain a_SiIII {a:.3g} not in ({a_lo:.3g},{a_hi:.3g})"
         else:
             assert 0.0 <= a <= float(ctx.a_siiii_max)
 
@@ -197,8 +220,12 @@ def test_draws_matrix_and_packed_names_carry_metal_columns():
     samples = dict(
         theta_unit=np.zeros((L, 9)),
         tau0_vec=np.zeros((L, nzg)),
-        alpha_lls=np.full(L, 0.27), alpha_subdla=np.full(L, 0.09), alpha_dla=np.full(L, 0.016),
-        a_SiIII=np.full(L, 1.2e-3), a_SiII=np.full(L, 4.0e-4))      # flatlog-scale amplitudes
+        alpha_lls=np.full(L, 0.27),
+        alpha_subdla=np.full(L, 0.09),
+        alpha_dla=np.full(L, 0.016),
+        a_SiIII=np.full(L, 1.2e-3),
+        a_SiII=np.full(L, 4.0e-4),
+    )  # flatlog-scale amplitudes
     kept_global = np.array([True, True, False])
     names = C._packed_names_for(samples, kept_global)
     mat = C._draws_matrix(samples, kept_global)
@@ -213,6 +240,7 @@ def test_draws_matrix_and_packed_names_carry_metal_columns():
 #  6. a_SiII threaded into the re-score loglik (the pre-existing :2156 gap fix).
 # --------------------------------------------------------------------------- #
 @pytest.mark.skipif(not _have, reason="real cache/ckpt/DESI not present")
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_a_siII_threaded_into_rescore_loglik():
     """_loglik_of_draws must CHANGE when samples['a_SiII'] is nonzero — the doublet nuisance now
     enters the re-score loglik (previously only a_SiIII was threaded → a wrong loglik rank for the
@@ -228,13 +256,16 @@ def test_a_siII_threaded_into_rescore_loglik():
         tau0_vec=np.tile(np.asarray(tr["tau0_vec"]["value"]), (L, 1)),
         alpha_hcd_z=np.tile(np.asarray(tr["alpha_hcd_z"]["value"]), (L, 1, 1)),
         a_SiIII=np.full(L, float(tr["a_SiIII"]["value"])),
-        a_SiII=np.zeros(L))
+        a_SiII=np.zeros(L),
+    )
     ll0 = C._loglik_of_draws(ctx, mock_legs, core, base, kept_global)
-    s2 = dict(base); s2["a_SiII"] = np.full(L, 0.05)        # a clearly-nonzero doublet amplitude
+    s2 = dict(base)
+    s2["a_SiII"] = np.full(L, 0.05)  # a clearly-nonzero doublet amplitude
     ll1 = C._loglik_of_draws(ctx, mock_legs, core, s2, kept_global)
     assert np.all(np.isfinite(ll0)) and np.all(np.isfinite(ll1))
-    assert not np.allclose(ll0, ll1), \
-        "_loglik_of_draws ignores samples['a_SiII'] — the doublet is not threaded into the re-score"
+    assert not np.allclose(
+        ll0, ll1
+    ), "_loglik_of_draws ignores samples['a_SiII'] — the doublet is not threaded into the re-score"
     # back-compat: absent a_SiII key reproduces the a_SiII=0 result exactly.
     nob = {k: v for k, v in base.items() if k != "a_SiII"}
     ll_absent = C._loglik_of_draws(ctx, mock_legs, core, nob, kept_global)
@@ -254,8 +285,16 @@ def test_flatlog_nuts_smoke_offrail():
     mock_legs, _, core = _mock(ctx, d, inject_a_siiii=0.01)
     a_lo, a_hi, _ = _bounds(ctx)
     samples, n_div = C._run_nuts_legb(
-        ctx, mock_legs, core, n_warmup=20, n_samples=20, seed=0,
-        target_accept=0.9, dense_mass=False, max_tree_depth=8)
+        ctx,
+        mock_legs,
+        core,
+        n_warmup=20,
+        n_samples=20,
+        seed=0,
+        target_accept=0.9,
+        dense_mass=False,
+        max_tree_depth=8,
+    )
     assert n_div == 0, f"flatlog metal smoke: {n_div} divergence(s)"
     for nm in ("a_SiIII", "a_SiII"):
         a = np.asarray(samples[nm])
@@ -263,10 +302,15 @@ def test_flatlog_nuts_smoke_offrail():
         assert np.all((a > a_lo) & (a < a_hi)), f"{nm} outside the LogUniform support"
         med = float(np.median(a))
         # off the LOWER rail (>> a_lo) and off the UPPER rail (comfortably below a_hi).
-        assert med > a_lo * 1e3, f"{nm} posterior median {med:.3g} jammed at the lower rail {a_lo:.3g}"
-        assert med < a_hi * 0.8, f"{nm} posterior median {med:.3g} pressed the upper rail {a_hi:.3g}"
+        assert (
+            med > a_lo * 1e3
+        ), f"{nm} posterior median {med:.3g} jammed at the lower rail {a_lo:.3g}"
+        assert (
+            med < a_hi * 0.8
+        ), f"{nm} posterior median {med:.3g} pressed the upper rail {a_hi:.3g}"
 
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(pytest.main([__file__, "-q", "-m", "not slow"]))
