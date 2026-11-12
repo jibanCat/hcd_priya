@@ -53,7 +53,7 @@ record must declare about a backbone, derived from its member metas; ``lf_P_filt
 MF builder. These are module functions, so the public surface of ``Bundle`` is unchanged.
 
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
-k_p = 0.78 h/Mpc, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
+k_p = 0.78 Mpc^-1, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
 snapshot redshift (2.0, 2.2, ..., 5.4, matched to 1e-9). The mean flux: either ``tau_eff``, -ln<F> of the PRIYA-filtered
 simulated forest (the model's tau0 input), or PRIYA's (``tau0_amp``, ``dtau0``), converted by ``tau_eff_priya``. ``k``:
 None for the native modes k_skm(z, hub, omegamh2), or wavenumbers in s/km inside that span (linear interpolation along
@@ -832,7 +832,7 @@ class _PredictorBase:
         ----------
         params : dict
             The nine PRIYA parameters by name (``PARAM_NAMES``): ``ns`` and ``Ap``, the slope and
-            amplitude of the primordial power spectrum at the pivot 0.78 h/Mpc; ``herei`` and
+            amplitude of the primordial power spectrum at the pivot 0.78 Mpc^-1; ``herei`` and
             ``heref``, the redshifts at which helium reionization starts and ends; ``alphaq``, the
             quasar spectral index that sets the heating of helium reionization; ``hub``, the
             dimensionless Hubble parameter h; ``omegamh2``, Omega_m h^2; ``hireionz``, the
