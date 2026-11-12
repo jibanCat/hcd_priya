@@ -1,16 +1,18 @@
-# hcd_priya — measuring cosmology from the Lyman-α forest, with the contaminants marginalised
+# hcd_priya: a Lyman-α forest P1D emulator with high-column-density absorber classes
 
 ![Python](https://img.shields.io/badge/python-3.11-blue)
 ![JAX](https://img.shields.io/badge/JAX%20%2F%20Equinox-float64-orange)
-![numpyro](https://img.shields.io/badge/numpyro-NUTS-9cf)
 [![tests](https://github.com/jibanCat/hcd_priya/actions/workflows/tests.yml/badge.svg)](https://github.com/jibanCat/hcd_priya/actions/workflows/tests.yml)
-![data](https://img.shields.io/badge/data-DESI%20DR1%20%C2%B7%20KODIAQ--SQUAD%20%C2%B7%20eBOSS-informational)
 
-This repository implements an end-to-end pipeline that measures two cosmological
-parameters, the forest power amplitude A_p and the tilt n_s, from the
-one-dimensional flux power spectrum (P1D) of the Lyman-α (Lyα) forest, while
-accounting for the high-column-density (HCD) absorbers that contaminate it. It is
-built on the PRIYA suite of cosmological hydrodynamic simulations.
+This repository holds the code of an emulator of the one-dimensional flux power spectrum
+(P1D) of the Lyman-α (Lyα) forest that models the high-column-density (HCD)
+absorbers contaminating it, together with the research pipeline it was built
+for: measuring two cosmological parameters, the forest power amplitude A_p and
+the tilt n_s, from the P1D. The supported interface of this release is the
+predictor of the per-class P1D; the measurement itself is research code that does
+not run at this commit (see
+[Scope and limitations of this release](#scope-and-limitations-of-this-release)).
+It is built on the PRIYA suite of cosmological hydrodynamic simulations.
 
 This document describes what the project does, how to set up the two software
 environments it requires, how to run the smallest useful piece, and what each
@@ -35,10 +37,11 @@ DLA), known collectively as HCDs. They imprint broad damped wings on the
 spectrum and bias the measured P1D if they are not modelled. We split the three
 classes by neutral-hydrogen column density N_HI (`hcd_analysis/catalog.py`):
 LLS at 10^17.2–10^19, subDLA at 10^19–10^20.3, and DLA at N_HI ≥ 10^20.3 cm⁻².
-The pipeline measures P1D from the PRIYA simulations, trains a fast
+The pipeline measures P1D from the PRIYA simulations and trains a fast
 differentiable emulator that carries an explicit free-amplitude model of the HCD
-contamination, and feeds that emulator into a gradient-based likelihood, so that
-(A_p, n_s) can be inferred while marginalising over the HCD incidence. Treating
+contamination. The research code then feeds that emulator into a gradient-based
+likelihood, with the aim of inferring (A_p, n_s) while marginalising over the HCD
+incidence; that last step is not part of this release. Treating
 the HCDs correctly is what allows a forest P1D analysis to remain unbiased at the
 sub-percent precision that DESI now delivers.
 
@@ -460,12 +463,12 @@ prediction to the data (the DESI DR1 and KODIAQ-SQUAD P1D) through an
 emulator-error covariance and physically motivated priors. The HCD incidence
 prior is centred on the observed dN/dX rather than the simulation's; it was
 designed so that an incorrect prior centre should not propagate into the
-cosmology, which the release validation tests (below).
+cosmology, which is a check of that research path (below).
 
-This stage yields a fully differentiable `log_posterior` suitable for a gradient
-sampler, together with the HCD-incidence prior. Whether a mis-centred incidence
-prior shifts the cosmology is one of the release validation checks, which are not
-public yet.
+As research code, this stage yields a fully differentiable log-posterior suitable
+for a gradient sampler, together with the HCD-incidence prior; neither is part of
+the supported interface of this release. Whether a mis-centred incidence
+prior shifts the cosmology is a check of that research path, not of this release.
 
 The likelihood is a Python API rather than a one-shot script. The snippet below
 shows the import only; it does not produce output on its own, and the full call
@@ -488,22 +491,23 @@ gradient-based MCMC method that exploits the differentiable likelihood. Before
 2026-10 the pipeline was checked with closure tests: mock data drawn from a known
 truth were fitted to confirm that it is recovered within the stated error bars. Closure on
 mocks and on public archival data (eBOSS DR14, KODIAQ-SQUAD) may be committed;
-the DESI cosmology result itself remains local and blinded.
+any DESI cosmology result stays local and blinded.
 
-This stage yields posterior constraints on (A_p, n_s) and a closure verdict: how
-many of the held-out mocks recover the truth within ±1σ, and whether the sampler
-diverges. The closure results are reported with the release validation, which is
-not public yet.
+This stage is designed to yield posterior constraints on (A_p, n_s) and a closure
+verdict: how many of the held-out mocks recover the truth within ±1σ, and whether
+the sampler diverges. It does not run at this commit, and no fit or closure result
+is part of this release.
 
 What these closures do and do not certify is worth stating plainly. Before 2026-10
 they checked the architecture, that is the forward model, the covariance and the
 sampler, that the production all-sims N=5 ensemble inherits. The ensemble-level production SBC
 (rank-based simulation-based calibration on the production ensemble itself) is the
-final inference-calibration gate, and it remains pending before the real fit.
+final inference-calibration gate of that research path; neither it nor a fit to
+real data is part of this release.
 
 The SBC / closure machinery (PIT-ECDF bands, coverage, whitening tests) lives in
-`hcd_analysis/emulator/closure_diagnostics.py`; the validation writeups are not
-public yet.
+`hcd_analysis/emulator/closure_diagnostics.py`; the validation writeups of that
+research path are not public and are not part of this release.
 
 ---
 
@@ -521,8 +525,9 @@ public yet.
   [`docs/bugs_found.md`](docs/bugs_found.md),
   [`docs/data_layout.md`](docs/data_layout.md) and
   [`docs/p1d_definition.md`](docs/p1d_definition.md).
-- The validation results (held-out LOSO error, coverage, the closure gates and
-  the Fisher checks) are not public yet.
+- The validation results (held-out LOSO error, coverage and the Fisher checks)
+  are not public yet; the closure gates belong to the research path and are not
+  part of this release.
 
 ---
 

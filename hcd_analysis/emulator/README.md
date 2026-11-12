@@ -718,8 +718,7 @@ interior cosmology sits away from it.
 Before 2026-10 these closures checked the architecture, the forward model, the covariance and the sampler, that
 the production all-sims N=5 ensemble inherits. The ensemble-level production SBC (rank-based
 simulation-based calibration on the production ensemble itself) is the final inference-calibration
-gate, and it remains pending before the real fit (notes
-`2026-06-14-validation-likelihood-production.md` §6).
+gate of that research path; neither it nor a fit to real data is part of this release.
 
 ![Per-mock closure coverage detail](../../figures/analysis/06_validation_summary/coverage_summary.png)
 
@@ -952,8 +951,8 @@ the priors, which is everything a sampler needs.
   `calibrate_cemu_inflate`. All NUTS-free and fast.
 
 Before 2026-10 the closures these tools drove checked the architecture that the production all-sims N=5
-ensemble inherits; the ensemble-level production SBC is the final inference-calibration gate and remains
-pending before the real fit.
+ensemble inherits; the ensemble-level production SBC is the final inference-calibration gate of that research
+path; neither it nor a fit to real data is part of this release.
 
 See `2026-06-04-phase-c-t4-closure-plan.md` (in the maintainers' private notes) for the closure/SBC harness
 (Phase-C T4, in progress) and `2026-06-04-phase-c-checkpoint-review.md` (in the maintainers' private notes) for the
@@ -1010,7 +1009,7 @@ judged while blind.
 
 The locked order is: production SBC → freeze the analysis (config, emulator ensemble and priors all
 fixed) → blind → unblind once. Unblinding happens a single time, only after the analysis is frozen
-and the production-ensemble SBC gate passes. That production SBC is still pending.
+and the production-ensemble SBC gate passes. That production SBC is not part of this release.
 
 ### Artifacts and where they live
 
