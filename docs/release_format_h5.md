@@ -88,7 +88,8 @@ from hcd_analysis.emulator.predict import predict_P_filt
 
 ensemble, metas, norm = safe_h5.load_ensemble("path/to/bundle",
                                               expected_manifest_sha256="<the published manifest sha256>")
-# theta9_unit, z_unit, tau0: the emulator inputs, built as in the README Quickstart
+# theta9_unit, z_unit, tau0: the emulator inputs (the nine parameters and the redshift scaled to the unit
+# interval, and the mean-flux input), built as in hcd_analysis/emulator/README.md, section 6
 P_filt = predict_P_filt(ensemble, theta9_unit, z_unit, tau0, norm["P_filt"])   # (4, K): clean, LLS, subDLA, DLA
 ```
 

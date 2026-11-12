@@ -6,7 +6,7 @@ HCD outputs from the ground up.  Read them in order:
 ## Before you start
 
 1. **Install the package.**  Follow the install instructions in the
-   [top-level `README.md`](../../README.md#installation) — either run
+   [top-level `README.md`](../../README.md#install): either run
    `bash scripts/install_greatlakes.sh` on Great Lakes, or the generic
    `pip install -c tools/ci/constraints-devenv.txt ".[tutorials]" <path to the hcd_priya_models wheel>` from the
    repository root on a laptop / other cluster (the README says where that wheel comes from).  The tutorial notebooks need

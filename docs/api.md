@@ -7,8 +7,9 @@ the data-leg loaders below, which are listed as a research interface.
 ## The predictor
 
 The supported public interface of this release. `predict` and `predict_many` are methods of a loaded model
-(`Bundle`, or `ResearchPredictor` for a research model); `load_release`, `load_bundle` and `load_research_bundle`
-return one.
+(`Bundle`, or `ResearchPredictor` for a research model); `load_published`, `load_release`, `load_bundle` and
+`load_research_bundle` return one. The loaders, `predict`, `predict_many`, `add_hcd`, `Prediction` and the helper
+functions have examples in their docstrings, and a test runs them (`tests/test_docstring_examples.py`).
 
 ```{eval-rst}
 .. autoapimodule:: hcd_analysis.predictor
@@ -22,6 +23,18 @@ return one.
 .. autoapiclass:: hcd_analysis.predictor.ResearchPredictor
    :members:
    :inherited-members:
+```
+
+## From dN/dX to sightline fractions
+
+How a model's incidence dN/dX becomes the sightline fractions `w_c` that `add_hcd` mixes with. A loaded model
+applies it through `emu.wc_map.w_c(dndx, z)`.
+
+```{eval-rst}
+.. autoapimethod:: hcd_analysis.emulator.wc_map.WcMap.w_c
+.. autoapifunction:: hcd_analysis.emulator.dndx_wc.w_c_from_mu
+.. autoapifunction:: hcd_analysis.emulator.dndx_wc.w_c_corrected
+.. autoapifunction:: hcd_analysis.emulator.dndx_wc.dndx_powerlaw
 ```
 
 ## The release format loaders
@@ -48,7 +61,8 @@ The loaders of `hcd_analysis.emulator.safe_h5`; the format itself is described i
 
 Where the package finds the observed P1D files and how it checks them: an explicit path, else the product's
 environment variable, with every file verified by sha256 before it is read. The variables and folders are listed in
-the README, section "Data and checkpoints"; the product ids are in the module docstring of `hcd_analysis.runtime_data`.
+the repository file `docs/models_and_data.md`; the product ids are in the module docstring of
+`hcd_analysis.runtime_data`.
 
 ```{eval-rst}
 .. autoapifunction:: hcd_analysis.runtime_data.resolve_file
@@ -103,7 +117,31 @@ this release"). Their full docstrings are in the source.
    :members:
 ```
 
+## The accepted model versions
+
+The trained models come in the companion package `hcd-priya-models`, which `hcd-priya` requires. `load_published`
+(above) loads a model from that package only against the digest listed here. No model is published yet.
+
+```{eval-rst}
+.. autoapimodule:: hcd_analysis.published_models
+   :members:
+```
+
+## Checking a release from a fresh install
+
+`python -I -m hcd_analysis.check_release --published lfmf` (or `RELEASE_DIR RELEASE_SHA256` for a release directory)
+loads a model in an environment that has only the installed packages, predicts, and compares with reference
+predictions published beside the release.
+
+```{eval-rst}
+.. autoapimodule:: hcd_analysis.check_release
+   :members:
+```
+
 ## The model registry
+
+A provisional module that fetches, verifies and caches model files by URL. Nothing in the package uses it: the
+models come in the model package.
 
 ```{eval-rst}
 .. autoapimodule:: hcd_analysis.registry

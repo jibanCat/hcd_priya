@@ -78,6 +78,23 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" -m pip check
           mkdir -p "$RUNNER_TEMP/results"
           "$RUNNER_TEMP/venv/bin/python" -m pip freeze | tee "$RUNNER_TEMP/results/pip-freeze.txt"
+      # What a user gets: a clean environment with only the two wheels (no test extra, no clone on the import
+      # path). The three lines of the README run as written, and the release check loads the model of the model
+      # package. The model package is the synthetic build, so the test switch is set.
+      - name: Fresh install of both wheels, then the README's three lines
+        env:
+          HCD_PRIYA_ALLOW_SYNTHETIC: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/fresh"
+          constraints=()
+          if [ "${{ matrix.deps }}" = development-environment ]; then
+            constraints=(-c tools/ci/constraints-devenv.txt)
+          fi
+          "$RUNNER_TEMP/fresh/bin/python" -m pip install "${constraints[@]}" \
+            "$(ls dist/*.whl)" "$(ls "$RUNNER_TEMP"/dist_models/*.whl)"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/fresh/bin/python" -I "$GITHUB_WORKSPACE/tools/ci/readme_three_lines.py" "$GITHUB_WORKSPACE/README.md"
+          "$RUNNER_TEMP/fresh/bin/python" -I -m hcd_analysis.check_release --published lfmf
       - name: Wheel tier (the installed package, tests copied outside the checkout)
         run: >-
           "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier wheel --wheel "$(ls dist/*.whl)"
