@@ -100,6 +100,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_predict_physical_grid.py" = { tier = "wheel" }
 "tests/test_predictor.py" = { tier = "wheel" }
 "tests/test_predictor_mf.py" = { tier = "wheel" }
+"tests/test_publish_workflow_is_disabled.py" = { tier = "source" }
 "tests/test_prod_forward_wiring.py" = { tier = "source" }
 "tests/test_prod_sbc_checkpoint.py" = { tier = "source" }
 "tests/test_product_manifest.py" = { tier = "wheel" }
