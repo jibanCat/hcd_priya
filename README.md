@@ -56,6 +56,29 @@ power spectra", JCAP 2026 (07) 094
 
 ---
 
+## Scope and limitations of this release
+
+The supported public interface of this release is the predictor (`hcd_analysis.predictor`): the per-class P1D
+(clean, LLS, subDLA, DLA) from an LF+MF model, and a linear mix of the HCD classes (`add_hcd`). The rest of the
+repository (the catalogue pipeline, training, the likelihood and the fit scripts) is research code outside that scope.
+
+Not in this release:
+
+- **No cosmological inference.** No fit, sampler driver or supported likelihood runs from this repository at this
+  commit (Stages 3 and 4 below; [`tests/DEFERRED.md`](tests/DEFERRED.md)).
+- **No HCD fitting, and no model of how the HCD content changes with redshift.** `add_hcd` evaluates any physical
+  amplitudes, one per class per redshift, and fits nothing; the incidence law and its priors are research code.
+- **No prediction between snapshot redshifts.** Predictions exist at z = 2.0, 2.2, ..., 5.4 only; an LF+MF prediction
+  is refused below the MF record's lower edge (z 2.2 by default) and flagged above z 4.6.
+- **No bandpower model.** A prediction is a per-class spectrum at points in k: no metal lines, no
+  spectrograph-resolution correction, no bin window, and no helper from a measured data leg to a model vector.
+- **No calibrated emulator error.** `member_std` is the spread over ensemble members that differ only in their random
+  seed; it is not an error bar and not a covariance.
+- **No trained model, catalogue or derived product of this project is public yet** (see
+  [Data and checkpoints](#data-and-checkpoints)).
+
+---
+
 ## Install / environment
 
 <!-- docs:install:start -->
@@ -141,10 +164,12 @@ verified file on stderr; in your own script, call `hcd_analysis.runtime_data.sho
 | `HCD_KS_BASEDIR` | `res_corr/` (the historical multi-fidelity layer's resolution-correction table) |
 | `HCD_LF_RAW_DIR`, `HCD_HR_RAW_DIR` | the LF and HiRes simulation outputs, used when the config file gives no `data_root` or `hires_data_root` |
 
-What you actually need to run the emulator or the likelihood yourself is modest:
-a trained checkpoint bundle plus at least a slice of the τ₀ cache — one LOSO fold
-is enough to exercise the forward model and the likelihood on real cache rows.
-You do not need the full 1.1 GB cache or a cluster for that.
+What you need to run the emulator's low-level forward model yourself is modest:
+a current-format trained checkpoint plus at least a slice of the current-format
+τ₀ cache (one fold is enough to exercise the forward model on real cache rows);
+neither is public. You do not need the full 1.1 GB cache or a cluster for that.
+The likelihood needs more, and no inference driver runs at this commit (see
+[Scope and limitations of this release](#scope-and-limitations-of-this-release)).
 
 A data and model release is planned but not yet available (work in progress). The
 natural home for the one-fold cache slice and a checkpoint is a dedicated data
@@ -430,9 +455,11 @@ reference for anything emulator-specific:
 
 ### Stage 3 — the differentiable likelihood
 
-**Runnable anywhere with a checkpoint + a cache slice.** The likelihood is a pure
-Python/JAX API that runs on top of a loaded checkpoint; it needs the DESI/KS data
-bindings and a cache slice but not the full cache or a cluster.
+**Research code; not runnable from this repository at this commit.** The likelihood
+is a Python/JAX API on top of the emulator. Its inputs (training checkpoints, the
+training cache and the emulator-error products) are not distributed, and no script
+here evaluates it on a data leg. What runs is the likelihood on synthetic inputs,
+in the test suite.
 
 The emulator's `P_obs` is wired into a Gaussian log-likelihood that compares the
 prediction to the data (the DESI DR1 and KODIAQ-SQUAD P1D) through an
@@ -457,9 +484,10 @@ from hcd_analysis.emulator.inference import log_lik_multiz, hcd_incidence_prior
 
 ### Stage 4 — inference and closure
 
-**Requires a checkpoint + a cache slice (not in this repo); not a cluster.** A
-short closure or eBOSS chain runs on CPU once a checkpoint and a cache slice are
-in place; the production all-sims ensemble is heavier and was run on the cluster.
+**Research code; no inference driver runs at this commit.** The fit and closure
+scripts in `scripts/` call interfaces that the 2026 k-grid fix retired
+([`tests/DEFERRED.md`](tests/DEFERRED.md)); rebuilding them is follow-up work. The
+paragraphs below describe the method and the runs made before 2026-10.
 
 The final stage samples the posterior with NUTS, the No-U-Turn Sampler, a
 gradient-based MCMC method that exploits the differentiable likelihood. Before
