@@ -1021,8 +1021,8 @@ columns of the θ9 block are shifted by `δ` at export (`export_getdist`), not i
 The `.health.json` carries the sampler diagnostics and is unblinded-safe; reading health does not
 reveal cosmology.
 
-DESI and eBOSS are fit separately, not jointly. The eBOSS and KS chains are public
-(`results/real_fit/`); the DESI chains are private and gitignored (`results_local/desi_production/`).
+DESI and eBOSS are fit separately, not jointly. The fit script is set up to write eBOSS and KS chains to
+`results/real_fit/` and DESI chains to the gitignored `results_local/desi_production/`; no chain is in this repository.
 The KS baseline is `z_lo = 2.4`; a `z_lo = 2.8` run is a diagnostic comparison.
 
 ### How to unblind
