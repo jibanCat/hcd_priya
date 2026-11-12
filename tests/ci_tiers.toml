@@ -45,6 +45,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_derive_dndx_historical.py" = { tier = "source" }
 "tests/test_derive_provenance.py" = { tier = "source" }
 "tests/test_dist_content.py" = { tier = "source" }
+"tests/test_docstring_examples.py" = { tier = "wheel" }
 "tests/test_dla_completeness_forward_parity.py" = { tier = "source" }
 "tests/test_dla_selfdraw_arm.py" = { tier = "source" }
 "tests/test_dla_truth.py" = { tier = "wheel" }

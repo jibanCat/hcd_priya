@@ -92,8 +92,11 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import os
+from typing import Any, Mapping, Sequence
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 import hcd_analysis.emulator  # noqa: F401  (float64 before any array)
 import equinox as eqx
@@ -194,7 +197,7 @@ def _array(name, v, ndim=None):
     return a
 
 
-def params_vector(params):
+def params_vector(params: Mapping[str, float]) -> np.ndarray:
     """Return the nine PRIYA parameters as an array in ``PARAM_NAMES`` order.
 
     Parameters
@@ -232,7 +235,7 @@ def params_vector(params):
     return np.array([_scalar(f"params[{n!r}]", params[n]) for n in PARAM_NAMES], dtype=np.float64)
 
 
-def snapshot_z(z):
+def snapshot_z(z: float) -> float:
     """Match a redshift to the PRIYA snapshot grid.
 
     The predictor works only at the snapshot redshifts 2.0, 2.2, ..., 5.4 (``Z_GRID``). A value
@@ -272,7 +275,9 @@ def snapshot_z(z):
     return hit[0]
 
 
-def tau_eff_priya(z, tau0_amp, dtau0, *, z_pivot=TAU0_PIVOT_Z):
+def tau_eff_priya(
+    z: float, tau0_amp: float, dtau0: float, *, z_pivot: float = TAU0_PIVOT_Z
+) -> float:
     """Convert PRIYA's mean-flux parameters to the predictor's input ``tau_eff``.
 
     ``tau_eff`` is the effective optical depth of the PRIYA-filtered forest: minus the natural log
@@ -281,6 +286,21 @@ def tau_eff_priya(z, tau0_amp, dtau0, *, z_pivot=TAU0_PIVOT_Z):
         tau_eff(z) = tau0_amp * ((1 + z) / (1 + z_pivot))**dtau0 * tau_Kim(z)
 
     where ``tau_Kim`` is the mean-flux fit of Kim et al. (2007), ``mean_flux_model.kim_tau0``.
+
+    **Using another mean-flux model.** ``predict`` and ``predict_many`` take ``tau_eff`` directly,
+    so any model of the mean flux can replace PRIYA's: compute its effective optical depth at the
+    redshift and pass it as ``tau_eff`` (and do not pass ``tau0_amp`` or ``dtau0``). For example,
+    with the fit of Becker et al. (2013, arXiv:1208.2584, Eq. 6)::
+
+        def tau_eff_becker13(z):
+            return 0.751 * ((1.0 + z) / 4.5) ** 2.90 - 0.132
+
+        pred = emu.predict(params, z=3.0, tau_eff=tau_eff_becker13(3.0))
+
+    Two cautions. ``tau_eff`` is that of the PRIYA-filtered simulated forest, so a published fit
+    that was corrected for metal lines or strong absorbers follows another convention. And a
+    value outside the range the model was trained on is still predicted, with the flag
+    ``mean_flux_off_ladder`` set.
 
     Parameters
     ----------
@@ -310,6 +330,14 @@ def tau_eff_priya(z, tau0_amp, dtau0, *, z_pivot=TAU0_PIVOT_Z):
     >>> import hcd_analysis.predictor as hp
     >>> round(hp.tau_eff_priya(3.0, 2.0, 0.0) / hp.tau_eff_priya(3.0, 1.0, 0.0), 12)
     2.0
+
+    Another mean-flux model, passed as ``tau_eff`` (``emu`` is a loaded model and ``params`` its
+    nine parameters, as in ``load_release``):
+
+    >>> tau_becker13 = 0.751 * ((1.0 + 3.0) / 4.5) ** 2.90 - 0.132
+    >>> pred = emu.predict(params, z=3.0, tau_eff=tau_becker13)
+    >>> pred.tau_eff == tau_becker13
+    True
     """
     zz = _scalar("z", z)
     return float(
@@ -338,7 +366,7 @@ def _taus(zs, tau_eff, tau0_amp, dtau0):
     return np.array(out, dtype=np.float64)
 
 
-def check_amplitudes(A, zs=None):
+def check_amplitudes(A: ArrayLike, zs: Sequence[float] | None = None) -> np.ndarray:
     """Check that HCD amplitudes are physical sightline fractions.
 
     An HCD amplitude A_c is the effective fraction of sightlines in class c, where c is LLS, subDLA
@@ -423,10 +451,32 @@ def _frozen(a):
 
 @dataclasses.dataclass(frozen=True)
 class Prediction:
-    """One prediction, returned by ``predict`` (one redshift) or ``predict_many`` (several).
+    """What ``predict`` (one redshift) and ``predict_many`` (several redshifts) return.
 
-    Every array is a read-only float64 numpy array. K is the number of wavenumbers. On a stack
-    (``stacked`` True), every array gains a leading redshift axis of length n_z.
+    How to read one::
+
+        pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+        pred.k           # (K,)    wavenumbers in s/km
+        pred.P_class     # (4, K)  P1D in km/s of the classes clean, LLS, subDLA, DLA
+        pred.w_c         # (3,)    the model's sightline fraction of LLS, subDLA, DLA
+        pred.dndx        # (3,)    the model's incidence dN/dX of LLS, subDLA, DLA
+        pred.flags       # dict    warnings; read them before you use the numbers
+        P_total = hp.add_hcd(pred, pred.w_c)     # (K,) the P1D with the model's own HCD content
+
+    Shapes. K is the number of wavenumbers, n_z the number of redshifts::
+
+        attribute     predict     predict_many
+        z             float       (n_z,)
+        k             (K,)        (n_z, K)
+        P_class       (4, K)      (n_z, 4, K)
+        template      (3, K)      (n_z, 3, K)
+        w_c, dndx     (3,)        (n_z, 3)
+        member_std    (4, K)      (n_z, 4, K)
+        tau_eff       float       (n_z,)
+
+    Every array is a read-only float64 numpy array. The class order is always clean, LLS, subDLA,
+    DLA (``hp.CLASSES``); ``template``, ``w_c`` and ``dndx`` have the three HCD classes only
+    (``hp.HCD_CLASSES``).
 
     Attributes
     ----------
@@ -469,20 +519,33 @@ class Prediction:
     -----
     ``add_hcd`` returns plain arrays without these flags. Keep the ``Prediction``, or its
     ``flags`` and ``provenance``, with any number you derive from it.
+
+    Examples
+    --------
+    ``emu`` is a loaded model and ``params`` its nine parameters, as in ``load_release``.
+
+    >>> pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+    >>> pred.P_class.shape == (4, pred.k.size), pred.w_c.shape, pred.stacked
+    (True, (3,), False)
+    >>> stack = emu.predict_many(params, z=[2.6, 2.8, 3.0], tau0_amp=1.0, dtau0=0.0)
+    >>> stack.P_class.shape[:2], stack.w_c.shape, stack.z.shape, stack.stacked
+    ((3, 4), (3, 3), (3,), True)
+    >>> isinstance(pred.flags, dict), "outside_training_box" in pred.flags
+    (True, True)
     """
 
-    z: object
+    z: float | np.ndarray
     k: np.ndarray
     P_class: np.ndarray
     template: np.ndarray
     w_c: np.ndarray
     dndx: np.ndarray
-    member_std: object
-    tau_eff: object
-    params: dict
-    flags: dict
-    labels: dict
-    provenance: dict
+    member_std: np.ndarray | None
+    tau_eff: float | np.ndarray
+    params: dict[str, float]
+    flags: dict[str, Any]
+    labels: dict[str, Any]
+    provenance: dict[str, Any]
     stacked: bool
 
 
@@ -825,7 +888,17 @@ class _PredictorBase:
         }
 
     # ------------------------------------------------------------------ predictions
-    def predict(self, params, z, *, tau_eff=None, tau0_amp=None, dtau0=None, k=None, fidelity=None):
+    def predict(
+        self,
+        params: Mapping[str, float],
+        z: float,
+        *,
+        tau_eff: float | None = None,
+        tau0_amp: float | None = None,
+        dtau0: float | None = None,
+        k: ArrayLike | None = None,
+        fidelity: str | None = None,
+    ) -> Prediction:
         """Predict the per-class P1D at one snapshot redshift.
 
         Parameters
@@ -892,6 +965,20 @@ class _PredictorBase:
           values there are served unchanged.
 
         The first call for an input shape compiles the model with JAX; later calls reuse it.
+
+        Examples
+        --------
+        ``emu`` is a loaded model and ``params`` its nine parameters, as in ``load_release``.
+
+        >>> pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+        >>> pred.P_class.shape == (4, pred.k.size), pred.z
+        (True, 3.0)
+        >>> at_k = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0, k=pred.k[1:4])   # your own k
+        >>> at_k.P_class.shape
+        (4, 3)
+        >>> lf = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0, fidelity="LF")
+        >>> lf.labels["product"]
+        'LF'
         """
         zg = snapshot_z(z)
         p = self._many(
@@ -907,8 +994,16 @@ class _PredictorBase:
         return p
 
     def predict_many(
-        self, params, z, *, tau_eff=None, tau0_amp=None, dtau0=None, k=None, fidelity=None
-    ):
+        self,
+        params: Mapping[str, float],
+        z: Sequence[float],
+        *,
+        tau_eff: ArrayLike | None = None,
+        tau0_amp: float | None = None,
+        dtau0: float | None = None,
+        k: ArrayLike | None = None,
+        fidelity: str | None = None,
+    ) -> Prediction:
         """Predict the per-class P1D at several snapshot redshifts, for one parameter set.
 
         Parameters
@@ -941,6 +1036,18 @@ class _PredictorBase:
         MFUnavailableError, MFRangeError
             As in ``predict``. ``MFRangeError`` is raised if any redshift is below the MF record's
             lowest redshift.
+
+        Examples
+        --------
+        ``emu`` is a loaded model and ``params`` its nine parameters, as in ``load_release``.
+
+        >>> import numpy as np
+        >>> stack = emu.predict_many(params, z=[2.6, 2.8, 3.0], tau0_amp=1.0, dtau0=0.0)
+        >>> stack.P_class.shape[:2], stack.k.shape[0], stack.stacked
+        ((3, 4), 3, True)
+        >>> one = emu.predict(params, z=2.8, tau0_amp=1.0, dtau0=0.0)
+        >>> bool(np.allclose(stack.P_class[1], one.P_class, rtol=1e-10))      # row 1 is z = 2.8
+        True
         """
         zs = [snapshot_z(v) for v in np.atleast_1d(_array("z", z, ndim=(0, 1)))]
         if len(set(zs)) != len(zs):
@@ -1154,6 +1261,14 @@ class ResearchPredictor(_PredictorBase):
     ``flags["research_model"]`` True, the declared split in ``flags["research_split"]``, and a
     ``labels["model"]`` line saying it is a research model.
 
+    How to use one::
+
+        rp = hp.load_research_bundle(bundle_dir, "<its manifest sha256>",
+                                     purpose="evaluate one fold")
+        rp.split["held_out_sims"]        # the simulations this model was not trained on
+        pred = rp.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)     # as for a Bundle
+        pred.flags["research_model"]     # True, on every prediction
+
     Attributes
     ----------
     research : dict
@@ -1255,7 +1370,13 @@ def _load_mf(rb, mf_dir, mf_record_sha256, kind):
     )
 
 
-def load_bundle(bundle_dir, expected_manifest_sha256, *, mf_dir=None, mf_record_sha256=None):
+def load_bundle(
+    bundle_dir: str | os.PathLike[str],
+    expected_manifest_sha256: str,
+    *,
+    mf_dir: str | os.PathLike[str] | None = None,
+    mf_record_sha256: str | None = None,
+) -> Bundle:
     """Load a production model bundle, checked against its published digest.
 
     A bundle is a directory in the release format ``hcd_priya.h5/2``: the member networks, the
@@ -1301,6 +1422,16 @@ def load_bundle(bundle_dir, expected_manifest_sha256, *, mf_dir=None, mf_record_
 
     For a whole release (the bundle and its MF record), use ``load_release``. A bundle loaded
     alone is the low-fidelity model: ``labels["mf_correction"]`` says so.
+
+    Examples
+    --------
+    ``bundle_dir`` is a bundle directory and ``manifest_sha256`` the published sha256 of its
+    ``manifest.json``; ``params`` are the nine parameters, as in ``load_release``.
+
+    >>> import hcd_analysis.predictor as hp
+    >>> lf_model = hp.load_bundle(bundle_dir, manifest_sha256)
+    >>> lf_model.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0).labels["product"]
+    'LF'
     """
     if expected_manifest_sha256 is None:
         raise _H.SafeFormatError(
@@ -1311,7 +1442,7 @@ def load_bundle(bundle_dir, expected_manifest_sha256, *, mf_dir=None, mf_record_
     return Bundle(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "release"))
 
 
-def load_release(release_dir, expected_release_sha256):
+def load_release(release_dir: str | os.PathLike[str], expected_release_sha256: str) -> Bundle:
     """Load a whole release, the backbone bundle and its MF record, from one published digest.
 
     A release directory holds ``release.json`` (format ``hcd_priya.release/1``) and the two parts
@@ -1349,6 +1480,18 @@ def load_release(release_dir, expected_release_sha256):
         lf = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0, fidelity="LF")
 
     A bundle without an MF record loads with ``load_bundle``.
+
+    Examples
+    --------
+    ``release_dir`` is a release directory and ``release_sha256`` its published digest. The nine
+    parameters are given by name; here they are the centre of the parameter box.
+
+    >>> import hcd_analysis.predictor as hp
+    >>> emu = hp.load_release(release_dir, release_sha256)
+    >>> params = {n: 0.5 * (lo + hi) for n, (lo, hi) in zip(hp.PARAM_NAMES, hp.PARAM_LIMITS)}
+    >>> pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+    >>> pred.labels["product"], pred.P_class.shape[0]
+    ('LF+MF', 4)
     """
     from .emulator import release_manifest as _RM
 
@@ -1368,8 +1511,13 @@ def load_release(release_dir, expected_release_sha256):
 
 
 def load_research_bundle(
-    bundle_dir, expected_manifest_sha256, *, purpose, mf_dir=None, mf_record_sha256=None
-):
+    bundle_dir: str | os.PathLike[str],
+    expected_manifest_sha256: str,
+    *,
+    purpose: str,
+    mf_dir: str | os.PathLike[str] | None = None,
+    mf_record_sha256: str | None = None,
+) -> ResearchPredictor:
     """Load a research model bundle, checked against its manifest digest.
 
     A research bundle holds models made for a study, such as cross-validation folds. It is never
@@ -1404,6 +1552,21 @@ def load_research_bundle(
     MFRecordError
         If only one of ``mf_dir`` and ``mf_record_sha256`` is given; if the record is not a fold
         record of this bundle; or if its held-out simulations were used to train this bundle.
+
+    Examples
+    --------
+    ``research_dir`` is a research bundle and ``research_sha256`` the sha256 of its
+    ``manifest.json``; ``params`` are the nine parameters, as in ``load_release``.
+
+    >>> import hcd_analysis.predictor as hp
+    >>> rp = hp.load_research_bundle(research_dir, research_sha256, purpose="docstring example")
+    >>> type(rp).__name__, sorted(rp.split)[:4]
+    ('ResearchPredictor', ['cv_set_id', 'fold', 'folds_digest', 'held_out_sims'])
+    >>> pred = rp.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+    >>> pred.flags["research_model"]
+    True
+    >>> pred.flags["research_split"]["held_out_sims"] == rp.split["held_out_sims"]
+    True
     """
     rb = _H.load_research(
         bundle_dir, expected_manifest_sha256=expected_manifest_sha256, purpose=purpose
@@ -1443,7 +1606,7 @@ def heldout_P_filt_at(pred, x, tau0):
     return _predictor(pred, "heldout_P_filt_at")._heldout_P_filt_at(x, tau0)
 
 
-def add_hcd(pred, A):
+def add_hcd(pred: Prediction, A: ArrayLike) -> np.ndarray:
     """Add the HCD classes to the clean P1D, with the given amplitudes.
 
     Returns P_clean + sum_c A_c (P_c - P_clean), where c runs over LLS, subDLA and DLA, and A_c is

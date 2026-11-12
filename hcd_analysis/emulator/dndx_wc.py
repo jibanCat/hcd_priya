@@ -14,12 +14,47 @@ duplicates; they remain only so the historical analyses reproduce, and the publi
 from __future__ import annotations
 from typing import NamedTuple
 
+import jax
 import numpy as np
 import jax.numpy as jnp
+from numpy.typing import ArrayLike
 
 
-def w_c_from_mu(mu):
-    """mu: (...,3) mean absorbers/sightline for (LLS, subDLA, DLA). Returns (...,4)."""
+def w_c_from_mu(mu: jax.Array | np.ndarray) -> jax.Array:
+    """Class fractions of sightlines from the mean number of absorbers per sightline.
+
+    Each sightline is put in ONE class: that of its strongest absorber. If the absorbers of class c
+    fall on sightlines as a Poisson process with mean ``mu_c`` per sightline, independently for
+    each class, the fractions of sightlines are::
+
+        w_DLA    = 1 - exp(-mu_DLA)                                   at least one DLA
+        w_subDLA = (1 - exp(-mu_subDLA)) * exp(-mu_DLA)               a subDLA and no DLA
+        w_LLS    = (1 - exp(-mu_LLS)) * exp(-mu_subDLA - mu_DLA)      an LLS and nothing stronger
+        w_clean  = exp(-mu_LLS - mu_subDLA - mu_DLA)                  no absorber
+
+    The four sum to one. ``w_c_corrected`` adds a small fitted correction to this model.
+
+    Parameters
+    ----------
+    mu : numpy or JAX array
+        Shape (..., 3): the mean number of absorbers per sightline for LLS, subDLA, DLA. It is the
+        incidence times the mean path of a sightline, ``dndx * Xbar`` (``mu_from_dndx``).
+
+    Returns
+    -------
+    jax.Array
+        Shape (..., 4): the fractions in the order clean, LLS, subDLA, DLA. Differentiable.
+
+    Examples
+    --------
+    >>> import jax.numpy as jnp
+    >>> from hcd_analysis.emulator.dndx_wc import w_c_from_mu
+    >>> w = w_c_from_mu(jnp.array([0.1, 0.02, 0.01]))      # synthetic means: LLS, subDLA, DLA
+    >>> w.shape, round(float(w.sum()), 12)
+    ((4,), 1.0)
+    >>> round(float(w[3]), 6) == round(1 - float(jnp.exp(-0.01)), 6)      # the DLA fraction
+    True
+    """
     mu_LLS, mu_sub, mu_DLA = mu[..., 0], mu[..., 1], mu[..., 2]
     w_DLA = 1.0 - jnp.exp(-mu_DLA)
     w_sub = (1.0 - jnp.exp(-mu_sub)) * jnp.exp(-mu_DLA)
@@ -28,8 +63,13 @@ def w_c_from_mu(mu):
     return jnp.stack([w_clean, w_LLS, w_sub, w_DLA], axis=-1)
 
 
-def mu_from_dndx(dndx, Xbar):
-    """dndx: (...,3) per-class incidence; Xbar: (...) mean path per sightline."""
+def mu_from_dndx(dndx: jax.Array | np.ndarray, Xbar: jax.Array | np.ndarray) -> jax.Array:
+    """Mean absorbers per sightline: ``mu_c = dndx_c * Xbar``.
+
+    ``dndx``: shape (..., 3), the incidence dN/dX of LLS, subDLA, DLA (absorbers per unit absorption
+    distance X). ``Xbar``: shape (...), the mean absorption distance of one sightline. Both are numpy or JAX
+    arrays (not lists or floats). Returns (..., 3).
+    """
     return dndx * Xbar[..., None]
 
 
@@ -98,10 +138,55 @@ def delta_c(z, delta_map=None):
     return zz @ jnp.asarray(m.coeffs).T  # (...,4)
 
 
-def w_c_corrected(dndx, Xbar, z, delta_map=None):
-    """Corrected per-sightline class weights: w_M0*(1+delta_c(z)), renormalised to 1.
-    dndx: (...,3) HCD incidence (LLS,subDLA,DLA); Xbar: (...); z: (...). Returns (...,4).
-    ``delta_map`` as in ``delta_c`` (None: the historical map)."""
+def w_c_corrected(
+    dndx: jax.Array | np.ndarray,
+    Xbar: jax.Array | np.ndarray,
+    z: ArrayLike,
+    delta_map: DeltaCMap | None = None,
+) -> jax.Array:
+    """Class fractions of sightlines from the incidence dN/dX, with the fitted correction.
+
+    Three steps::
+
+        mu  = dndx * Xbar                        mean absorbers per sightline (mu_from_dndx)
+        w0  = w_c_from_mu(mu)                    the Poisson model, 4 fractions
+        w_c = w0 * (1 + delta_c(z)) / sum_c[ w0 * (1 + delta_c(z)) ]
+
+    ``delta_c(z)`` is a small correction per class, a quadratic in redshift fitted to the simulations'
+    own counts; the division makes the four fractions sum to one again.
+
+    For a released model do not call this directly: use ``emu.wc_map.w_c(dndx, z)``, which passes the
+    model's own ``Xbar(z)`` and ``delta_c``. Note that ``delta_map=None`` selects the HISTORICAL map,
+    fitted to counts made before a catalogue fix; it is kept only so that old analyses reproduce.
+
+    Parameters
+    ----------
+    dndx : numpy or JAX array
+        Shape (..., 3): the incidence dN/dX of LLS, subDLA, DLA.
+    Xbar : numpy or JAX array
+        Shape (...): the mean absorption distance of one sightline.
+    z : array_like
+        Shape (...): the redshift.
+    delta_map : DeltaCMap, optional
+        The correction. A released model's is ``emu.wc_map.delta_c_map()``. None: the historical map.
+
+    Returns
+    -------
+    jax.Array
+        Shape (..., 4): the fractions in the order clean, LLS, subDLA, DLA. Differentiable.
+
+    Examples
+    --------
+    With a zero correction the result is the Poisson model (synthetic numbers):
+
+    >>> import numpy as np, jax.numpy as jnp
+    >>> from hcd_analysis.emulator.dndx_wc import DeltaCMap, w_c_corrected, w_c_from_mu
+    >>> no_correction = DeltaCMap(np.zeros((4, 3)), 2.0, 5.4, "no correction")
+    >>> dndx, Xbar = jnp.array([0.1, 0.02, 0.01]), jnp.array(1.0)
+    >>> w = w_c_corrected(dndx, Xbar, jnp.array(3.0), no_correction)
+    >>> bool(np.allclose(w, w_c_from_mu(dndx * Xbar)))
+    True
+    """
     w0 = w_c_from_mu(mu_from_dndx(dndx, Xbar))  # (...,4)
     w = w0 * (1.0 + delta_c(z, delta_map))
     return w / jnp.sum(w, axis=-1, keepdims=True)
@@ -111,10 +196,31 @@ def w_c_corrected(dndx, Xbar, z, delta_map=None):
 _LOG_FLOOR = 1e-12  # positive floor on (1 - w...) so log stays finite & differentiable
 
 
-def dndx_powerlaw(z, A, gamma):
-    """PW14 incidence law dN/dX_c(z) = A_c * (1+z)**gamma_c, per HCD class.
-    z: scalar or (...); A, gamma: scalar or (3,) for (LLS,subDLA,DLA).
-    Returns (...,3) dN/dX_c for (LLS, subDLA, DLA)."""
+def dndx_powerlaw(z: ArrayLike, A: ArrayLike, gamma: ArrayLike) -> jax.Array:
+    """A power law in redshift for the incidence of each HCD class.
+
+    ``dN/dX_c(z) = A_c * (1 + z)**gamma_c``. It is the incidence model of the research likelihood (named
+    PW14 in that code); the public predictor does not use it.
+
+    Parameters
+    ----------
+    z : array_like
+        The redshift: a scalar or shape (...).
+    A, gamma : array_like
+        The amplitude and the slope: a scalar, or shape (3,) for LLS, subDLA, DLA.
+
+    Returns
+    -------
+    jax.Array
+        Shape (..., 3): dN/dX of LLS, subDLA, DLA at ``z`` (shape (..., 1) when ``A`` and ``gamma`` are
+        both scalars). Differentiable.
+
+    Examples
+    --------
+    >>> from hcd_analysis.emulator.dndx_wc import dndx_powerlaw
+    >>> [round(float(v), 12) for v in dndx_powerlaw(3.0, [0.2, 0.1, 0.05], [1.0, 1.0, 1.0])]   # synthetic
+    [0.8, 0.4, 0.2]
+    """
     z = jnp.asarray(z)
     A = jnp.asarray(A)
     gamma = jnp.asarray(gamma)
