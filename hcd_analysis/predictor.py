@@ -81,6 +81,14 @@ incidence record ``cddf`` and ``log_nhi`` are None: the model files do not
 say what the bins are. A release without that part has no such
 record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition.
 
+**Logging.** Each prediction call that applies a correction emits one INFO record on the logger
+``hcd_analysis.predictor``: which correction (the P1D MF correction; with an incidence record also the correction of
+dN/dX and the CDDF) and the sha256 of each record. An LF prediction emits none. The library configures no logging; to
+see the records, let that logger's INFO records pass, for example
+``logging.getLogger("hcd_analysis.predictor").setLevel(logging.INFO)`` after ``logging.basicConfig()``. The same
+facts are on every prediction without any logging: the flags ``mf_applied`` and ``incidence_mf_applied`` and
+``provenance``.
+
 **The held-out error.** A corrected dN/dX or CDDF is not exact. An incidence record may carry a held-out error, and
 then every prediction carries it too: ``dndx_err`` and ``cddf_err``, the held-out rms of the fractional error, for
 the fidelity of the prediction (NaN where the record has no estimate; an error is never interpolated between
@@ -128,6 +136,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import logging
 import os
 import warnings
 from typing import Any, Mapping, Sequence
@@ -191,6 +200,12 @@ class MFRangeError(PredictorInputError):
     extrapolated or held constant there. Ask for ``fidelity="LF"`` instead. The message gives the
     edge and the redshifts you asked for.
     """
+
+
+# One INFO record per prediction call that applied a correction: which correction, with which record (sha256). The
+# library configures no logging, so nothing is printed unless the application lets this logger's INFO records pass:
+#     logging.getLogger("hcd_analysis.predictor").setLevel(logging.INFO)   (with a handler, or logging.basicConfig)
+_log = logging.getLogger(__name__)
 
 
 class HeldOutErrorWarning(UserWarning):
@@ -1484,6 +1499,16 @@ class _PredictorBase:
         if self._mf is not None:
             flags.update(self._mf_flags(zs, taus, use_mf))
             labels.update(self._mf_labels(labels, use_mf))
+        if use_mf:  # said in the log, once per call: which corrections this prediction carries
+            applied = [f"the P1D MF correction (record sha256 {self._mf.record_sha256})"]
+            if self._inc is not None:
+                applied.append(
+                    "the MF correction of the incidence, dN/dX and CDDF (record sha256 "
+                    f"{self._inc.record_sha256})"
+                )
+            _log.info(
+                "prediction at %d redshift(s), LF+MF: applied %s", len(zs), " and ".join(applied)
+            )
         dndx_err = cddf_err = None
         if self._inc is not None:
             flags.update(self._incidence_flags(zs, use_mf, cddf_gap))

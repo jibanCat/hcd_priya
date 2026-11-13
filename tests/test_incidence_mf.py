@@ -1030,3 +1030,37 @@ def test_a_record_without_a_held_out_error_gives_nan_and_warns_once(rel, monkeyp
         monkeypatch.setattr(hp, "_HELDOUT_WARNED", set())
         with pytest.raises(hp.HeldOutErrorWarning):
             two.predict(PARAMS, 3.0, tau_eff=0.4)
+
+
+# ------------------------------------------------------------------------------------------------- the log
+def test_a_call_that_applies_a_correction_says_so_once_in_the_log(rel, caplog):
+    import logging
+
+    two, one, info = rel["two"], rel["one"], rel["info"]
+    name = "hcd_analysis.predictor"
+    with caplog.at_level(logging.INFO, logger=name):
+        two.predict(PARAMS, 3.0, tau_eff=0.4)
+    (record,) = [r for r in caplog.records if r.name == name]
+    text = record.getMessage()
+    assert record.levelno == logging.INFO and "LF+MF" in text and "at 1 redshift(s)" in text
+    assert f"the P1D MF correction (record sha256 {info['mf_sha']})" in text
+    assert f"dN/dX and CDDF (record sha256 {info['incidence_sha']})" in text
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger=name):
+        two.predict_many(
+            PARAMS, [2.6, 3.0, 5.2], tau_eff=0.4
+        )  # one record for the call, not one per redshift
+        one.predict(
+            PARAMS, 3.0, tau_eff=0.4
+        )  # no incidence record: only the P1D correction is named
+        two.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")  # nothing applied: nothing logged
+    texts = [r.getMessage() for r in caplog.records if r.name == name]
+    assert len(texts) == 2 and "at 3 redshift(s)" in texts[0]
+    assert "P1D MF correction" in texts[1] and "incidence" not in texts[1]
+    # the library configures no logging: at the default level nothing is recorded
+    caplog.clear()
+    logging.getLogger(name).setLevel(logging.NOTSET)
+    with caplog.at_level(logging.WARNING):
+        two.predict(PARAMS, 3.0, tau_eff=0.4)
+    assert not [r for r in caplog.records if r.name == name]
+    assert not logging.getLogger(name).handlers

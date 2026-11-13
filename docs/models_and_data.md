@@ -138,5 +138,7 @@ carries the column-density distribution `pred.cddf` at the bin centres `pred.log
 no HR/LF simulation pair has absorbers at any tabulated redshift and, under LF+MF, where none has them at the
 redshift used. A record may also carry a held-out error of the dN/dX and the CDDF; a prediction then returns it as
 `dndx_err` and `cddf_err`, and an LF+MF prediction without one warns (`HeldOutErrorWarning`). No such record is
-released yet. Details:
+released yet. Each call that applies a correction also says so in one INFO record on the Python logger
+`hcd_analysis.predictor`, with the sha256 of each record applied; the library configures no logging, so the record
+shows only when the application lets it pass. Details:
 `docs/release_format_h5.md`, section "The incidence MF record".

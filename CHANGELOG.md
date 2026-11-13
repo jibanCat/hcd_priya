@@ -50,6 +50,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   mean times the record's HR/LF ratio per bin. A bin is NaN, never a number, where no HR/LF simulation pair has
   absorbers at any tabulated redshift, and under LF+MF also where none has them at the redshift used.
   Without an incidence record both are `None`.
+- **A log record when a correction is applied.** Each prediction call that applies the P1D MF correction, and with
+  an incidence record the correction of dN/dX and the CDDF, emits one INFO record on the logger
+  `hcd_analysis.predictor` with the sha256 of each record. The library configures no logging.
 - **The held-out error on the output.** An incidence record may carry a held-out error of the dN/dX and the CDDF (an
   optional block, copied by the builder from a table and never computed by it). A prediction then returns it as
   `dndx_err` and `cddf_err`: the held-out rms of the fractional error, for the fidelity of the prediction, NaN where
