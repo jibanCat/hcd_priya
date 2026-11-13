@@ -453,7 +453,8 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   partner, against that simulation's HR value) and what it does not cover (only the six LF simulations with an HR
   partner have such a model, six of sixty; all simulations share their initial phases; the form of the table was
   chosen with every HR simulation in view). Its last sentence gives the number of HR simulations that this record's
-  table is the mean over, which need not be all six.
+  table is built from (`train_sims`), which need not be those six; a redshift row or a CDDF bin may rest on fewer
+  (`n_sims`, `cddf_n_pairs`).
 - **Not validated here:** the w_c map was fitted on LF counts. That it still holds when dN/dX is scaled to the HR
   incidence has not been tested.
 

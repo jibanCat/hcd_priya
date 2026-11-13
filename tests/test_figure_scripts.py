@@ -214,6 +214,7 @@ def test_the_cddf_figure_runs_on_a_model_with_an_incidence_record(
         ), "the flags of the drawn line are recorded"
         assert panel["design_points_flagged"] == sum(panel["design_point_flags"].values()) == 0
     assert "3 design points" in capsys.readouterr().out
+    assert facts["design_table"] == "a table supplied with --design, not digest-checked"
     assert "composition" not in json.dumps(facts)
 
 
@@ -296,6 +297,14 @@ def test_an_absent_bin_breaks_the_line_and_the_band():
     assert len(drawn.get_ydata()) == 5 and np.isnan(
         drawn.get_ydata()[2]
     ), "the gap is kept, not bridged"
+    assert len(ax.lines) == 1, "no bin stands alone here, so no marker is added"
+    alone = np.array(
+        [1.0, 2.0, np.nan, 4.0, np.nan]
+    )  # the bin at index 3 has no supported neighbour
+    C.line(ax, x, alone)
+    marker = ax.lines[-1]
+    assert marker.get_marker() == "o" and marker.get_linestyle() == "None"
+    assert list(marker.get_xdata()) == [3.0] and list(marker.get_ydata()) == [4.0]
     pieces = C.band(ax, x, 0.5 * y, 2.0 * y).get_paths()
     assert len(pieces) == 2, "the band has one piece on each side of the absent bin"
     for piece in pieces:
@@ -331,7 +340,26 @@ def test_no_band_draws_the_line_and_the_points_only(tmp_path, release, monkeypat
     monkeypatch.setattr(cddf, "PANELS", moved)
     out = str(tmp_path / "cddf.png")
     assert cddf.main(_args(release) + ["--no-band", "--out", out]) == 0
-    assert all("design_points" not in panel for panel in _facts(out)["panels"])
+    facts = _facts(out)
+    assert all("design_points" not in panel for panel in facts["panels"])
+    assert facts["design_table"].startswith("none")
+
+
+def test_with_no_option_the_band_is_drawn_over_the_sixty_committed_points(
+    tmp_path, release, monkeypatch
+):
+    cddf = _script("fig_cddf_vs_ho21")
+    monkeypatch.setattr(cddf, "PANELS", cddf.PANELS[:1])  # one panel is enough, and faster
+    moved = tuple((label, name, SYNTHETIC_Z[0]) for (label, name, _) in cddf.PANELS)
+    monkeypatch.setattr(cddf, "PANELS", moved)
+    out = str(tmp_path / "cddf.png")
+    assert cddf.main(_args(release) + ["--out", out]) == 0
+    facts = _facts(out)
+    (panel,) = facts["panels"]
+    assert panel["design_points"] == 60
+    assert panel["design_points_in_band"] + panel["design_points_refused"] == 60
+    digest = _sums()["priya_lf_design_60.csv"]
+    assert facts["design_table"] == f"docs/figures/data/priya_lf_design_60.csv, sha256 {digest}"
 
 
 def test_a_design_table_with_another_header_is_refused(tmp_path):

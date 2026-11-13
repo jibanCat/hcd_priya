@@ -117,6 +117,16 @@ def design_points(args, names):
     return read_design(args.design if args.design else data_file(DESIGN_FILE), names)
 
 
+def design_source(args) -> str:
+    """What the side file says about the table the band was drawn from."""
+    if args.no_band:
+        return "none: no band was drawn"
+    if args.design:
+        return "a table supplied with --design, not digest-checked"
+    with open(data_file(DESIGN_FILE), "rb") as fh:
+        return f"docs/figures/data/{DESIGN_FILE}, sha256 {hashlib.sha256(fh.read()).hexdigest()}"
+
+
 def read_design(path: str, names) -> list[dict]:
     """A table of design points: comment lines starting with '#', one header line with the nine parameter names in
     the model's order, then one row of nine numbers per point."""
@@ -184,8 +194,22 @@ def flag_counts(flagged) -> dict:
 
 def line(ax, x, y, **kw):
     """Plot ``y`` against ``x`` with every NaN left in, so that an absent bin breaks the line. Compressing the
-    arrays first would join the two neighbours of an absent bin with a straight segment."""
-    return ax.plot(x, y, **kw)
+    arrays first would join the two neighbours of an absent bin with a straight segment. A supported bin that
+    stands alone between two absent bins has no segment to either side: it is drawn as a small marker, so that
+    no supported bin is missing from the figure."""
+    import numpy as np
+
+    y = np.asarray(y, dtype=float)
+    lines = ax.plot(x, y, **kw)
+    ok = np.isfinite(y)
+    left = np.concatenate(([False], ok[:-1]))
+    right = np.concatenate((ok[1:], [False]))
+    alone = ok & ~left & ~right
+    if alone.any():
+        ax.plot(
+            np.asarray(x)[alone], y[alone], ls="", marker="o", ms=3.0, color=lines[0].get_color(), zorder=lines[0].get_zorder()
+        )  # fmt: skip
+    return lines
 
 
 def band(ax, x, lo, hi, **kw):

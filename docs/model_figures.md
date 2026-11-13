@@ -7,7 +7,7 @@ repository.
 
 **What the model figures are drawn from.** No model is published yet. The two model figures below were drawn from the
 candidate LF+MF release (staged, not yet public) with the multi-fidelity correction of the incidence built from
-five high-resolution simulations. It will be redrawn from the published model.
+five high-resolution simulations. They will be redrawn from the published model.
 
 **The parameters of every model curve,** written out in `scripts/figures/figures_common.py`:
 
@@ -37,7 +37,7 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
   confirmed by the paper's first author on 2026-11-13. The file and its origin:
   `docs/figures/data/ho21/PROVENANCE.md` in the repository.
 - **Snapshots against bins.** The model is drawn at snapshot redshifts 0.2 apart; the measurement is in bins one
-  sixth of a unit wide. The three measured points above z = 4.6 have no model curve beside them, and neither has
+  sixth of a unit wide. The two measured points above z = 4.6 have no model curve beside them, and neither has
   the one below 2.2.
 - **Not shown and not tested here.** The held-out error of the model's dN/dX is not shown. Nothing was fitted. The
   measurement covers DLAs only: the subDLA and LLS curves have no measured point in this figure. The simulations and
@@ -85,8 +85,9 @@ python scripts/figures/fig_cddf_vs_ho21.py --published
 python scripts/figures/fig_cddf_vs_ho21.py --release RELEASE_DIR SHA256
 ```
 
-The band is drawn over the 60 design points of `docs/figures/data/priya_lf_design_60.csv` (the design of the PRIYA
-suite, Bird et al. 2023). `--design FILE` takes another table (one header line with the nine parameter names, one row
+The band is drawn over the 60 design points of `docs/figures/data/priya_lf_design_60.csv`: the design of the PRIYA
+suite of Bird et al. (2023) together with the simulations added later in a widened parameter range (the last 12
+rows, which are the 12 points the predictor flags `outside_sampling_box`). `--design FILE` takes another table (one header line with the nine parameter names, one row
 per point; read without a digest check), and `--no-band` draws the line and the points only.
 
 ## The class power ratio of the simulations against Rogers et al. (2018)

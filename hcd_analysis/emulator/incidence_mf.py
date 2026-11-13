@@ -86,14 +86,17 @@ HELDOUT_ERROR_STATEMENT = (
 
 
 def heldout_error_label(n_table_sims: int) -> str:
-    """``HELDOUT_ERROR_STATEMENT`` followed by the clause that links it to one record: the statement speaks of the
-    six fold models, and a record's table may be the mean over fewer HR simulations than that (those its composition
-    names). The number comes from the record, not from this text."""
+    """``HELDOUT_ERROR_STATEMENT`` followed by the sentences that link it to one record: the statement speaks of the
+    six fold models, and a record's table is built from the HR simulations that the record lists (``train_sims``),
+    which need not be those six. The number comes from the record, not from this text. A redshift row or a CDDF bin
+    of the table may rest on fewer simulations than the record lists (``n_sims``, ``cddf_n_pairs``).
+    """
     return (
         HELDOUT_ERROR_STATEMENT
-        + " The six fold models are those of the six LF simulations that have an HR partner; the correction table "
-        f"of this record is the mean over the {int(n_table_sims)} HR simulations named in its composition "
-        "(provenance incidence_mf train_sims), which need not be all six."
+        + " The six fold models are those of the six LF simulations that have an HR partner. The correction table "
+        "of this record is built from the HR simulations listed in provenance incidence_mf train_sims, "
+        f"{int(n_table_sims)} in number (a redshift row or a CDDF bin may rest on fewer: n_sims, cddf_n_pairs); "
+        "they need not be all of those six."
     )
 
 

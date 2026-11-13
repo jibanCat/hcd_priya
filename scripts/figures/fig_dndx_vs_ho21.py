@@ -73,7 +73,11 @@ def main(argv=None) -> int:
     design = C.design_points(args, hp.PARAM_NAMES)
     stack = emu.predict_many(C.MIDPOINT, z=list(REDSHIFTS), tau0_amp=1.0, dtau0=0.0)
     facts = dict(
-        what, figure="dN/dX against redshift", parameters=C.MIDPOINT, redshifts=list(REDSHIFTS)
+        what,
+        figure="dN/dX against redshift",
+        parameters=C.MIDPOINT,
+        redshifts=list(REDSHIFTS),
+        design_table=C.design_source(args),
     )
     facts["flags_set"] = sorted(n for n, v in stack.flags.items() if v is True)
     bands = None

@@ -507,13 +507,19 @@ def test_labels_and_provenance_say_what_was_applied(rel):
     assert "before the map" in p.labels["w_c"] and "fitted on LF counts" in p.labels["w_c"]
     assert "w_c stays the LF backbone's" not in p.labels["mf"] and "incidence MF" in p.labels["mf"]
     # no held-out error is shipped; the text that says how one is computed comes with the prediction
-    # and it says how many HR simulations this record's table is the mean over (the synthetic record names two)
+    # and it says how many HR simulations this record lists (the synthetic record lists two)
     label = p.labels["incidence_mf_error"]
     assert label == IM.heldout_error_label(2) and label.startswith(IM.HELDOUT_ERROR_STATEMENT)
     assert "No held-out error" in label and "six of sixty" in label
-    assert "is the mean over the 2 HR simulations named in its composition" in label
-    assert "the mean over the 5 HR simulations" in IM.heldout_error_label(5)
+    assert "listed in provenance incidence_mf train_sims, 2 in number" in label
+    assert "may rest on fewer" in label and "5 in number" in IM.heldout_error_label(5)
     assert len(p.provenance["incidence_mf"]["train_sims"]) == 2
+    # the number is the length of the record's list, not the largest number of pairs behind a redshift (also 2)
+    record = dict(two._inc.record, train_sims=["synthsim1", "synthsim2", "synthsim3"])
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(two, "_inc", two._inc._replace(record=record))
+        relabelled = two.predict(PARAMS, 3.0, tau_eff=0.4).labels["incidence_mf_error"]
+    assert relabelled == IM.heldout_error_label(3) and int(two._inc.n_sims.max()) == 2
     assert p.provenance["incidence_mf"]["heldout_error"] is None
     prov = p.provenance["incidence_mf"]
     assert prov["record_sha256"] == info["incidence_sha"]

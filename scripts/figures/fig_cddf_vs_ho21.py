@@ -79,7 +79,11 @@ def main(argv=None) -> int:
         1, 3, figsize=(10.0, 3.4), sharex=True, sharey=True, constrained_layout=True
     )
     facts = dict(
-        what, figure="CDDF against Ho, Bird and Garnett (2021)", parameters=C.MIDPOINT, panels=[]
+        what,
+        figure="CDDF against Ho, Bird and Garnett (2021)",
+        parameters=C.MIDPOINT,
+        design_table=C.design_source(args),
+        panels=[],
     )
     for ax, (bin_label, name, z) in zip(axes, PANELS):
         pred = emu.predict(C.MIDPOINT, z=z, tau0_amp=1.0, dtau0=0.0)

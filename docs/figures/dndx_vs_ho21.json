@@ -7,6 +7,7 @@
  "design_points_flagged": 12,
  "design_points_in_band_at_every_redshift": 60,
  "design_points_refused": 0,
+ "design_table": "docs/figures/data/priya_lf_design_60.csv, sha256 d1c887027341689e1aaf17bcda90d1526ae3a710102da80d9cf92b44b449e9c2",
  "figure": "dN/dX against redshift",
  "flags_set": [
   "cddf_bins_without_support",

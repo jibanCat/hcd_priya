@@ -1,4 +1,5 @@
 {
+ "design_table": "docs/figures/data/priya_lf_design_60.csv, sha256 d1c887027341689e1aaf17bcda90d1526ae3a710102da80d9cf92b44b449e9c2",
  "figure": "CDDF against Ho, Bird and Garnett (2021)",
  "incidence_hr_simulations": 5,
  "incidence_record": true,

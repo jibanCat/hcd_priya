@@ -621,8 +621,8 @@ class Prediction:
         Shape (Nbin,). The column-density distribution f(N_HI) of the absorbers, per unit column
         density and absorption distance, at the bin centres ``log_nhi``. It exists only for a
         release that carries an incidence MF record, which names the bins. The mean over the
-        members; in an LF+MF prediction multiplied by the record's HR/LF ratio per bin. A bin is
-        NaN where nothing supports it (``labels["cddf"]`` says which bins and why).
+        members; in an LF+MF prediction multiplied by the record's HR/LF ratio per bin. A bin
+        without HR/LF simulation pairs is NaN (``labels["cddf"]`` states the rule).
     log_nhi : numpy.ndarray or None
         Shape (Nbin,). The bin centres, log10 of N_HI in cm^-2, from the incidence record.
     member_std : numpy.ndarray or None
