@@ -50,6 +50,12 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   mean times the record's HR/LF ratio per bin. A bin is NaN, never a number, where no HR/LF simulation pair has
   absorbers at any tabulated redshift, and under LF+MF also where none has them at the redshift used.
   Without an incidence record both are `None`.
+- **The held-out error on the output.** An incidence record may carry a held-out error of the dN/dX and the CDDF (an
+  optional block, copied by the builder from a table and never computed by it). A prediction then returns it as
+  `dndx_err` and `cddf_err`: the held-out rms of the fractional error, for the fidelity of the prediction, NaN where
+  no estimate exists. An LF+MF prediction that returns a corrected value without an estimate beside it emits the new
+  `HeldOutErrorWarning`, once per process for each record. The builder refuses to run unless the held-out error is
+  stated (`--heldout-error FILE SHA256` or `--no-heldout-error`).
 - **A documentation page on the class spectra against the per-class model of Rogers et al. (2018)**
   ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)): what was compared, the numbers, and what the
   comparison is not.

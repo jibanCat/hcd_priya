@@ -64,8 +64,9 @@ then returns ``dndx = dndx_LF R_c(z)``, and ``w_c`` is the w_c map of that corre
 touched by it, so a mixed spectrum changes only through the fractions. An LF prediction is unchanged. R_c does not
 depend on the cosmological parameters or on the mean flux. At a redshift the table does not hold it is linear
 between its neighbours and flagged (``incidence_mf_z_interpolated``); beyond the table it is held constant and flagged
-(``incidence_mf_z_clamped``), where the P1D MF below its tables is refused. The w_c map was fitted on LF counts; that it holds for
-the corrected incidence is not validated.
+(``incidence_mf_z_clamped``), where the P1D MF below its tables is refused. The w_c map (a Poisson model with a small
+term per class fitted on LF counts) is applied unchanged to the corrected incidence; docs/release_format_h5.md says
+what was tested about that and what was not.
 
 **The column-density distribution.** With an incidence record a prediction also carries ``cddf``, the distribution
 f(N_HI) at the bin centres ``log_nhi`` that the record gives: the linear mean over the ensemble members of their
@@ -78,9 +79,14 @@ each redshift is not checked. The dN/dX table row that rests on one simulation p
 ``incidence_mf_single_pair`` (the pairs behind each CDDF bin are in the provenance, ``cddf_n_pairs``). Without an
 incidence record ``cddf`` and ``log_nhi`` are None: the model files do not
 say what the bins are. A release without that part has no such
-record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition. No
-held-out error of the corrected incidence is shipped; ``labels["incidence_mf_error"]`` says how one is computed and
-what it covers.
+record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition.
+
+**The held-out error.** A corrected dN/dX or CDDF is not exact. An incidence record may carry a held-out error, and
+then every prediction carries it too: ``dndx_err`` and ``cddf_err``, the held-out rms of the fractional error, for
+the fidelity of the prediction (NaN where the record has no estimate; an error is never interpolated between
+redshifts). ``labels["incidence_mf_error"]`` says what the numbers are, in the record's own words. An LF+MF
+prediction that returns a corrected value without an estimate beside it emits ``HeldOutErrorWarning``, once per
+process for each record.
 
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
 k_p = 0.78 Mpc^-1, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
@@ -185,6 +191,28 @@ class MFRangeError(PredictorInputError):
     extrapolated or held constant there. Ask for ``fidelity="LF"`` instead. The message gives the
     edge and the redshifts you asked for.
     """
+
+
+class HeldOutErrorWarning(UserWarning):
+    """A corrected dN/dX or CDDF was returned without a held-out error beside it.
+
+    With an incidence MF record an LF+MF prediction returns a corrected ``dndx`` and ``cddf``. They are not exact.
+    When the record carries a held-out error, the prediction carries it too (``dndx_err``, ``cddf_err``), and
+    nothing is warned. When the record carries none, or has no estimate for a class or bin at the redshift asked
+    for, those fields are NaN there and this warning says so: once per process for each incidence record, not
+    once per call, because a sampler calls the predictor thousands of times.
+
+    To make it an error, or to silence it, use the standard filter::
+
+        import warnings
+        import hcd_analysis.predictor as hp
+        warnings.simplefilter("error", hp.HeldOutErrorWarning)     # stop at the first one
+        warnings.simplefilter("ignore", hp.HeldOutErrorWarning)    # or never show it
+    """
+
+
+# the incidence records (by sha256) for which HeldOutErrorWarning was emitted in this process
+_HELDOUT_WARNED: set = set()
 
 
 class MeanFluxRangeWarning(UserWarning):
@@ -625,6 +653,16 @@ class Prediction:
         without HR/LF simulation pairs is NaN (``labels["cddf"]`` states the rule).
     log_nhi : numpy.ndarray or None
         Shape (Nbin,). The bin centres, log10 of N_HI in cm^-2, from the incidence record.
+    dndx_err : numpy.ndarray or None
+        Shape (3,), in the order of ``dndx``. The held-out rms of the fractional error of ``dndx``:
+        an indication of size, not the standard deviation of a known distribution; see
+        ``labels["incidence_mf_error"]`` for what it is and what it does not cover. Multiply by
+        ``dndx`` for an absolute size. For an LF prediction it is that of the uncorrected value,
+        for an LF+MF prediction that of the corrected one. NaN where the incidence record has no
+        estimate (it carries no held-out error, or none at this redshift; an error is never
+        interpolated between redshifts). None without an incidence record.
+    cddf_err : numpy.ndarray or None
+        Shape (Nbin,). The same for ``cddf``, per column-density bin; NaN also where ``cddf`` is.
     member_std : numpy.ndarray or None
         Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
         members disagree. It is not a calibrated emulator error and not a covariance. None for a
@@ -691,6 +729,8 @@ class Prediction:
     stacked: bool
     cddf: np.ndarray | None = None
     log_nhi: np.ndarray | None = None
+    dndx_err: np.ndarray | None = None
+    cddf_err: np.ndarray | None = None
 
 
 class _PredictorBase:
@@ -1051,7 +1091,9 @@ class _PredictorBase:
             "redshift (theta-independent; at a redshift the table does not hold it is linear in z between its "
             "neighbours, flagged incidence_mf_z_interpolated, and beyond the table held constant, flagged "
             "incidence_mf_z_clamped); applied with the P1D MF correction, never to an LF prediction",
-            "incidence_mf_error": _IM.heldout_error_label(len(self._inc.record["train_sims"])),
+            "incidence_mf_error": _IM.heldout_error_label(
+                len(self._inc.record["train_sims"]), self._inc.record.get("heldout_error")
+            ),
         }
         out["cddf"] = (
             "the column-density distribution f(N_HI), per unit column density and absorption distance, at the "
@@ -1258,7 +1300,9 @@ class _PredictorBase:
           ``incidence_mf_single_pair``, the dN/dX table row used rests on one simulation pair
           (these three say how the table was looked up, so they are False on an LF prediction);
           ``cddf_bins_without_support``, some bins of ``cddf`` are NaN because no correction was
-          measured there at this redshift.
+          measured there at this redshift; ``incidence_heldout_error_available``, every class of
+          ``dndx`` has a held-out error beside it in ``dndx_err`` (the per-bin gaps of ``cddf_err``
+          are NaN in that array).
 
         The first call for an input shape compiles the model with JAX; later calls reuse it.
 
@@ -1440,9 +1484,14 @@ class _PredictorBase:
         if self._mf is not None:
             flags.update(self._mf_flags(zs, taus, use_mf))
             labels.update(self._mf_labels(labels, use_mf))
+        dndx_err = cddf_err = None
         if self._inc is not None:
             flags.update(self._incidence_flags(zs, use_mf, cddf_gap))
             labels.update(self._incidence_labels(labels, use_mf))
+            dndx_err, cddf_err = self._heldout_errors(zs, use_mf, cddf)
+            flags["incidence_heldout_error_available"] = bool(np.all(np.isfinite(dndx_err)))
+            if use_mf:
+                self._warn_no_heldout_error(dndx_err, cddf_err, cddf)
         # a mean flux outside what the model covers is served, flagged, and said aloud: once per call
         if flags["mean_flux_off_ladder"]:
             self._warn_off_ladder(zs, taus)
@@ -1465,6 +1514,42 @@ class _PredictorBase:
             stacked=not single,
             cddf=None if cddf is None else _frozen(sel(cddf)),
             log_nhi=None if cddf is None else _frozen(self._inc.log_nhi_centres),
+            dndx_err=None if dndx_err is None else _frozen(sel(dndx_err)),
+            cddf_err=None if cddf_err is None else _frozen(sel(cddf_err)),
+        )
+
+    def _heldout_errors(self, zs, use_mf, cddf):
+        """The held-out error of ``dndx`` (n_z, 3) and of ``cddf`` (n_z, Nbin) from the incidence record: its
+        tables for the corrected prediction under LF+MF, for the uncorrected one under LF; NaN where the record has
+        no estimate, and where the CDDF itself is NaN."""
+        d = np.stack([self._inc.heldout_dndx(z, use_mf) for z in zs])
+        c = np.stack([self._inc.heldout_cddf(z, use_mf) for z in zs])
+        c[np.isnan(cddf)] = np.nan
+        return d, c
+
+    def _warn_no_heldout_error(self, dndx_err, cddf_err, cddf):
+        """``HeldOutErrorWarning``, once per process for this incidence record, when a corrected value is returned
+        without an estimate beside it: a class of ``dndx``, or a bin of ``cddf`` that holds a number.
+        """
+        missing = bool(
+            np.any(~np.isfinite(dndx_err)) or np.any(np.isfinite(cddf) & ~np.isfinite(cddf_err))
+        )
+        key = self._inc.record_sha256
+        if not missing or key in _HELDOUT_WARNED:
+            return
+        _HELDOUT_WARNED.add(key)
+        why = (
+            "the incidence record carries no held-out error"
+            if self._inc.heldout is None
+            else "the incidence record has no held-out estimate for some class, bin or redshift asked for"
+        )
+        warnings.warn(
+            HeldOutErrorWarning(
+                f"the corrected dN/dX and CDDF of this prediction are not exact, and {why}: dndx_err and cddf_err "
+                "are NaN there (labels['incidence_mf_error'] says what a held-out error is). This warning is shown "
+                "once per process for this record."
+            ),
+            stacklevel=4,
         )
 
     def _warn_off_ladder(self, zs, taus):

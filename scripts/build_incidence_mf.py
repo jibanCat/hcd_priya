@@ -24,13 +24,20 @@ either --exclude-sim NAME (repeatable) or --exclude-none. So is what the HR inci
   python scripts/build_incidence_mf.py --version V --out-dir NEW \\
       --lf-cache LF.h5 --lf-cache-sha256 H --hr-incidence HR.npz --hr-incidence-sha256 H \\
       --composition-id ID (--exclude-sim NAME ... | --exclude-none) --ruling-id R [--ruling-id ...] \\
-      (--group-not-in-product TEXT ... | --no-group-missing)
+      (--group-not-in-product TEXT ... | --no-group-missing) \\
+      (--heldout-error TABLE.json SHA256 [--heldout-error-other-composition] | --no-heldout-error)
+
+The held-out error of the dN/dX and the CDDF is stated in the same way: either a table to copy into the record
+(--heldout-error FILE SHA256; the numbers are copied, this script computes none of them; a table measured for
+another number of HR simulations than the record uses is refused unless --heldout-error-other-composition says the
+difference is intended), or --no-heldout-error, after which predictions of the record warn that they have none.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib.util
+import hashlib
 import json
 import os
 import sys
@@ -74,7 +81,29 @@ def parse(argv=None):
         action="store_true",
         help="say that the HR incidence product holds every HR snapshot group",
     )
+    ap.add_argument(
+        "--heldout-error",
+        nargs=2,
+        metavar=("FILE", "SHA256"),
+        help="a held-out error table (JSON) to copy into the record, with its sha256",
+    )
+    ap.add_argument(
+        "--no-heldout-error",
+        action="store_true",
+        help="say that the record carries no held-out error (its predictions then warn that they have none)",
+    )
+    ap.add_argument(
+        "--heldout-error-other-composition",
+        action="store_true",
+        help="accept a held-out error measured for another number of HR simulations than this record uses",
+    )
     a = ap.parse_args(argv)
+    if (a.heldout_error is not None) == a.no_heldout_error:
+        ap.error(
+            "state the held-out error: give --heldout-error FILE SHA256, or --no-heldout-error"
+        )
+    if a.heldout_error_other_composition and a.heldout_error is None:
+        ap.error("--heldout-error-other-composition needs --heldout-error")
     if bool(a.exclude_sim) == a.exclude_none:
         ap.error("state the composition: give --exclude-sim NAME (repeatable), or --exclude-none")
     if bool(a.group_not_in_product) == a.no_group_missing:
@@ -85,6 +114,10 @@ def parse(argv=None):
     if len(set(a.group_not_in_product)) != len(a.group_not_in_product):
         ap.error("--group-not-in-product names a group twice")
     return a
+
+
+def _no_constant(name):
+    raise ValueError(f"{name} is not a number of strict JSON")
 
 
 def main(argv=None, *, _code=None):
@@ -105,6 +138,8 @@ def main(argv=None, *, _code=None):
         "LF cache": (a.lf_cache, a.lf_cache_sha256),
         "HR incidence product": (a.hr_incidence, a.hr_incidence_sha256),
     }
+    if a.heldout_error is not None:
+        pins["held-out error table"] = tuple(a.heldout_error)
     for what, (p, want) in pins.items():
         got = L.sha256_file(p)
         if got != want:
@@ -125,6 +160,22 @@ def main(argv=None, *, _code=None):
             if L.sha256_file(p) != want:
                 sys.exit(f"refusing: the {what} changed while it was read")
         tables, train, n_pairs = IM.fit_tables(lf, hr, exclude_sims=composition["excluded_sims"])
+        heldout = None
+        if a.heldout_error is not None:  # copied, never computed here
+            with open(a.heldout_error[0], "rb") as fh:
+                raw = fh.read()
+            if hashlib.sha256(raw).hexdigest() != a.heldout_error[1]:
+                sys.exit("refusing: the held-out error table changed while it was read")
+            try:
+                doc = json.loads(raw.decode("utf-8"), parse_constant=_no_constant)
+            except ValueError as e:
+                sys.exit(f"refusing: the held-out error table is not strict JSON ({e})")
+            heldout = IM.heldout_block_from_table(
+                doc,
+                log_nhi_centres=tables["log_nhi_centres"],
+                n_train_sims=len(train),
+                other_composition=a.heldout_error_other_composition,
+            )
         path, sha = IM.write_record(
             out,
             tables,
@@ -139,6 +190,7 @@ def main(argv=None, *, _code=None):
             train_sims=train,
             n_pairs=n_pairs,
             fit_code=code,
+            heldout_error=heldout,
         )
     except (
         IM.MFRecordError,
@@ -155,6 +207,11 @@ def main(argv=None, *, _code=None):
         "n_pairs": n_pairs,
         "z": [float(v) for v in inc.z],
         "n_sims": [int(v) for v in inc.n_sims],
+        "heldout_error": (
+            None
+            if inc.heldout is None
+            else {"kind": inc.record["heldout_error"]["kind"], "z": inc.heldout["z"].tolist()}
+        ),
     }
     print(json.dumps(summary, indent=1))
 

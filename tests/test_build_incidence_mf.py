@@ -74,6 +74,8 @@ def _argv(inputs, out, extra=(), **over):
         extra.append("--exclude-none")
     if "--group-not-in-product" not in extra:
         extra.append("--no-group-missing")
+    if "--heldout-error" not in extra:
+        extra.append("--no-heldout-error")
     return [x for kv in a.items() for x in kv] + extra
 
 
@@ -217,3 +219,61 @@ def test_a_build_refuses_what_the_fit_refuses_and_writes_nothing(inputs, tmp_pat
     with pytest.raises(SystemExit, match="refusing: unknown simulations"):
         B.main(_argv(inputs, tmp_path / "out", extra=["--exclude-sim", "no_such_sim"]), _code=CLEAN)
     assert not (tmp_path / "out").exists()
+
+
+def test_the_held_out_error_is_stated_and_copied_never_computed(inputs, tmp_path, capsys):
+    import hashlib
+
+    from tests.synthetic_release import heldout_error
+
+    full = _argv(inputs, tmp_path / "none")
+    with pytest.raises(SystemExit) as e:  # neither option: refused, like the composition
+        B.main([x for x in full if x != "--no-heldout-error"], _code=CLEAN)
+    assert e.value.code == 2 and "state the held-out error" in capsys.readouterr().err
+    B.main(full, _code=CLEAN)
+    assert json.loads(capsys.readouterr().out)["heldout_error"] is None
+
+    plain = IM.load_record(
+        tmp_path / "none",
+        expected_record_sha256=IM.parse_record(
+            (tmp_path / "none" / IM.RECORD_FILE).read_bytes()
+        ).record_sha256,
+    )
+    n_bins, n_train = plain.log_nhi_centres.size, len(plain.record["train_sims"])
+    doc = dict(
+        heldout_error(n_bins),
+        n_hr_simulations=n_train,
+        class_names=["LLS", "subDLA", "DLA"],
+        log_nhi_centres=plain.log_nhi_centres.tolist(),
+    )
+    table = tmp_path / "heldout.json"
+    table.write_text(json.dumps(doc), encoding="utf-8")
+    sha = hashlib.sha256(table.read_bytes()).hexdigest()
+    B.main(
+        _argv(inputs, tmp_path / "with", extra=["--heldout-error", str(table), sha]), _code=CLEAN
+    )
+    s = json.loads(capsys.readouterr().out)
+    assert s["heldout_error"] == {"kind": "rms_log_error_heldout", "z": [3.0, 5.0]}
+    inc = IM.load_record(tmp_path / "with", expected_record_sha256=s["record_sha256"])
+    assert inc.record["heldout_error"]["dndx"] == doc["dndx"]  # the numbers of the file, unchanged
+    np.testing.assert_array_equal(
+        inc.dndx_ratio, plain.dndx_ratio
+    )  # the correction itself is the same
+
+    for name, argv_extra, why in (
+        ("wrong_sha", ["--heldout-error", str(table), "0" * 64], "held-out error table"),
+        (
+            "other",
+            ["--heldout-error", str(table), sha, "--exclude-sim", sorted(SIMS)[0]],
+            "measured for a correction of",
+        ),
+    ):
+        with pytest.raises(SystemExit) as e:
+            B.main(_argv(inputs, tmp_path / name, extra=argv_extra), _code=CLEAN)
+        assert why in str(e.value.code) and not (tmp_path / name).exists()
+    said = ["--heldout-error", str(table), sha, "--heldout-error-other-composition"]
+    B.main(
+        _argv(inputs, tmp_path / "said", extra=said + ["--exclude-sim", sorted(SIMS)[0]]),
+        _code=CLEAN,
+    )
+    assert json.loads(capsys.readouterr().out)["heldout_error"]["kind"] == "rms_log_error_heldout"

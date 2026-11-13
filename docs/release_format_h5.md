@@ -447,17 +447,44 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   it is held at the edge row and flagged `incidence_mf_z_clamped`. An LF prediction applies no table and has both
   flags False. This differs from the P1D record, which is refused
   below its tables.
-- **No error is shipped.** A record of this format carries no held-out error of the corrected dN/dX or CDDF, and
-  `provenance["incidence_mf"]["heldout_error"]` is `None`. Every prediction the correction is applied to carries the
-  text `labels["incidence_mf_error"]` (`incidence_mf.heldout_error_label`), which says how such an error is
-  computed (the table rebuilt without one HR simulation, times an LF model trained without that simulation's LF
-  partner, against that simulation's HR value) and what it does not cover (only the six LF simulations with an HR
-  partner have such a model, six of sixty; all simulations share their initial phases; the form of the table was
-  chosen with every HR simulation in view). Its last sentence gives the number of HR simulations that this record's
-  table is built from (`train_sims`), which need not be those six; a redshift row or a CDDF bin may rest on fewer
-  (`n_sims`, `cddf_n_pairs`).
-- **Not validated here:** the w_c map was fitted on LF counts. That it still holds when dN/dX is scaled to the HR
-  incidence has not been tested.
+- **The held-out error, an optional part of the record.** A record may carry a block `heldout_error`; a record
+  without it is valid, and its bytes are what they were before the key existed. The block holds what the numbers are
+  (`kind`, today only `rms_log_error_heldout`, and a `definition` in words), how the uncorrected (`lf`) and the
+  corrected (`lfmf`) values were held out, `what_it_does_not_cover`, the number of HR simulations of the correction
+  it was measured for (`n_hr_simulations`), its redshifts `z`, and two sets of tables: `dndx` (per redshift and
+  class) and `cddf` (per redshift and bin), each with `lf`, `lfmf` and the number of held-out simulations behind
+  every cell (`lf_n`, `lfmf_n`). A cell is a finite number >= 0, or null exactly where its count is 0. `source` names
+  the file the tables were copied from, by sha256. The record builder copies the tables
+  (`--heldout-error FILE SHA256`) and computes none of them; it refuses a table measured for another number of HR
+  simulations than the record uses unless that is said to be intended, and it refuses to run unless the held-out
+  error is stated one way or the other (`--no-heldout-error`). The block is inside the record's bytes, so the
+  record's digest covers it.
+- **On a prediction:** `dndx_err` (3,) and `cddf_err` (Nbin,) are the held-out rms of the fractional error of `dndx`
+  and `cddf`, for the fidelity of the prediction: the `lf` tables for an LF prediction, the `lfmf` tables for an
+  LF+MF one. It is an indication of size from a handful of held-out simulations, not the standard deviation of a
+  known distribution; `labels["incidence_mf_error"]` gives the record's definition word for word, and
+  `provenance["incidence_mf"]["heldout_error"]` its texts, redshifts, counts and source. A value is NaN where the
+  record has no estimate: no block, a redshift that is not one of the block's (an error is never interpolated), a
+  cell with a count of 0, or a CDDF bin that is itself NaN. The flag `incidence_heldout_error_available` is True when
+  every class of `dndx` has its estimate.
+- **A warning when a corrected value has no estimate beside it.** An LF+MF prediction that returns a corrected
+  `dndx` or `cddf` value without a held-out error emits `HeldOutErrorWarning`, once per process for each record (not
+  once per call). With an estimate beside every corrected value nothing is warned.
+- **The w_c map at the corrected incidence.** The map from dN/dX to the class fractions is a Poisson model with a
+  small term per class fitted on LF counts, and it is applied unchanged to the corrected dN/dX.
+  Tested on the training simulations. Evaluated as the predictor evaluates it, at each high-resolution run's
+  own dN/dX, the shipped map returns that run's counted class fractions with an rms relative error of 0.5 to 0.6 per
+  cent for LLS, subDLA and DLA at z 2.2 to 4.6 (largest 1.3 per cent), the same as for the low-resolution runs (0.5
+  per cent). Matched pairs differ by about 0.1 per cent between the two resolutions, and there is no trend with
+  incidence up to 23 per cent above the low-resolution range. Mixing the class spectra with the map's fractions
+  instead of the counted ones changes the total by at most 0.1 per cent below k = 0.02 s/km. Not tested: the
+  emulator's own dN/dX times the correction table carried through the map; redshifts between snapshots.
+- **A known bias of the map itself.** Its fitted term was calibrated with the geometric path per sightline and is
+  applied with the effective mean path `Xbar(z)`. As shipped, the HCD class fractions are 0.4 to 0.65 per cent low at
+  z 2.0 to 3.0 and 0.4 to 0.95 per cent high at z 4.6 to 5.2; with one path in both places the bias is gone (rms 0.3,
+  0.2 and 0.2 per cent for the three classes). The residuals stored in the map's own record are those of the
+  consistent form and understate what the predictor returns (about sixfold for DLA). The map and its record are
+  unchanged by this.
 
 ## The release manifest (`hcd_priya.release/1`)
 

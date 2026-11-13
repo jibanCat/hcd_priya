@@ -136,5 +136,7 @@ names the record, its two inputs and the HR simulations it was fitted on. A rele
 its `dndx` and `w_c` are the LF model's, as before, and it has no `cddf`. With the record a prediction also
 carries the column-density distribution `pred.cddf` at the bin centres `pred.log_nhi`, with NaN in every bin where
 no HR/LF simulation pair has absorbers at any tabulated redshift and, under LF+MF, where none has them at the
-redshift used. No such record is released yet. Details:
+redshift used. A record may also carry a held-out error of the dN/dX and the CDDF; a prediction then returns it as
+`dndx_err` and `cddf_err`, and an LF+MF prediction without one warns (`HeldOutErrorWarning`). No such record is
+released yet. Details:
 `docs/release_format_h5.md`, section "The incidence MF record".

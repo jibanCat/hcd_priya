@@ -17,7 +17,12 @@ from hcd_analysis.emulator import incidence_mf as IM
 from hcd_analysis.emulator import multifidelity as MF
 from hcd_analysis.emulator import release_manifest as RM
 from hcd_analysis.emulator.data import PARAM_LIMITS, normalize_params
-from tests.synthetic_release import INCIDENCE_TABLES, make_release, write_incidence
+from tests.synthetic_release import (
+    INCIDENCE_TABLES,
+    heldout_error,
+    make_release,
+    write_incidence,
+)
 from tests.test_predictor_mf import PARAMS
 
 E = IM.MFRecordError
@@ -789,3 +794,239 @@ def test_a_manifest_without_an_optional_part_is_written_byte_for_byte_as_before(
             mf_record_sha256="b" * 64,
             incidence_dir="incidence",
         )
+
+
+# --------------------------------------------------------------------------------------- the held-out error
+def _with(block, path, value):
+    """A deep copy of the synthetic held-out block with one entry replaced; ``path`` is a tuple of keys/indices."""
+    out = json.loads(json.dumps(block))
+    node = out
+    for key in path[:-1]:
+        node = node[key]
+    if value is KeyError:
+        del node[path[-1]]
+    else:
+        node[path[-1]] = value
+    return out
+
+
+def test_a_record_without_a_held_out_error_is_byte_for_byte_what_it_was(tmp_path):
+    a = write_incidence(tmp_path / "a", cache=CACHE)
+    b = write_incidence(tmp_path / "b", cache=CACHE, heldout_error=None)
+    assert (
+        a == b
+    )  # the same bytes, so the same digest: the optional key adds nothing when it is absent
+    inc = IM.load_record(tmp_path / "a", expected_record_sha256=a)
+    assert inc.heldout is None and "heldout_error" not in inc.record
+    assert inc.provenance()["heldout_error"] is None
+    assert np.all(np.isnan(inc.heldout_dndx(3.0, True))) and inc.heldout_cddf(3.0, False).shape == (
+        30,
+    )
+
+
+def test_a_record_carries_its_held_out_error_and_gives_it_only_at_a_tabulated_redshift(tmp_path):
+    block = heldout_error()
+    sha = write_incidence(tmp_path / "inc", cache=CACHE, heldout_error=block)
+    inc = IM.load_record(tmp_path / "inc", expected_record_sha256=sha)
+    assert inc.record["heldout_error"] == block and sha != write_incidence(
+        tmp_path / "plain", cache=CACHE
+    )
+    np.testing.assert_array_equal(inc.heldout_dndx(3.0, False), [0.11, 0.12, 0.13])
+    np.testing.assert_array_equal(inc.heldout_dndx(3.0, True), [0.05, 0.06, 0.07])
+    np.testing.assert_array_equal(
+        inc.heldout_dndx(5.0, True), [0.15, np.nan, 0.17]
+    )  # null: no estimate
+    for z in (
+        2.0,
+        2.6,
+        4.0,
+        5.2,
+    ):  # not a redshift of the error table: never interpolated, never the nearest
+        assert np.all(np.isnan(inc.heldout_dndx(z, True))) and np.all(
+            np.isnan(inc.heldout_cddf(z, False))
+        )
+    c = inc.heldout_cddf(5.0, True)
+    assert np.isnan(c[0]) and np.all(c[1:] == 0.21) and c.shape == (30,)
+    with pytest.raises(ValueError):  # read-only, like every table of the record
+        inc.heldout["dndx_lf"][0, 0] = 9.0
+    prov = inc.provenance()["heldout_error"]
+    assert prov["kind"] == "rms_log_error_heldout" and prov["z"] == [3.0, 5.0]
+    assert (
+        prov["dndx_lfmf_n"] == [[5, 5, 5], [5, 0, 5]] and "cddf" not in prov and "dndx" not in prov
+    )
+    # sealed with the record: a changed error table is not applied
+    changed = dict(inc.heldout, dndx_lf=inc.heldout["dndx_lf"] * 2.0)
+    with pytest.raises(E, match="changed in memory"):
+        IM.reverify(inc._replace(heldout=changed))
+    with pytest.raises(E, match="changed in memory"):
+        IM.reverify(inc._replace(heldout=None))
+
+
+@pytest.mark.parametrize(
+    "path, value, why",
+    [
+        (("kind",), "fractional_1sigma", "this code reads 'rms_log_error_heldout' only"),
+        (("note",), "x", "unknown \\['note'\\]"),
+        (("definition",), " ", "definition must be a non-empty text"),
+        (("n_hr_simulations",), 0, "n_hr_simulations must be an integer >= 1"),
+        (("z",), [5.0, 3.0], "strictly ascending"),
+        (("z",), [3.0], "must have shape \\(1, 3\\)"),
+        (("dndx", "lfmf", 0, 0), None, "null where its count is 5"),
+        (("dndx", "lfmf", 1, 1), 0.2, "or null with a count of 0"),
+        (("dndx", "lf", 0, 0), -0.1, "finite number >= 0"),
+        (("dndx", "lf", 0, 0), True, "finite number >= 0"),
+        (("dndx", "lf_n", 0, 0), 6.0, "not an integer >= 0"),
+        (("cddf", "lf", 0), [0.3] * 29, "must have shape \\(2, 30\\)"),
+        (("cddf", "extra"), [], "unknown \\['extra'\\]"),
+        (("source", "file"), "../x.npz", "plain file name"),
+        (("source", "sha256"), "ef" * 31, "sha256"),
+        (("source",), KeyError, "missing \\['source'\\]"),
+    ],
+)
+def test_a_malformed_held_out_error_is_refused_before_anything_is_written(
+    tmp_path, path, value, why
+):
+    with pytest.raises(E, match=why):
+        write_incidence(
+            tmp_path / "inc", cache=CACHE, heldout_error=_with(heldout_error(), path, value)
+        )
+    assert not (tmp_path / "inc").exists()
+
+
+def test_a_table_file_becomes_the_block_only_if_it_fits_the_record():
+    centres = INCIDENCE_TABLES["log_nhi_centres"]
+    doc = dict(
+        heldout_error(),
+        class_names=["LLS", "subDLA", "DLA"],
+        log_nhi_centres=list(centres),
+        pooled_dndx_z2p2_to_4p6={"lf": [0.1, 0.1, 0.1]},  # for documentation: not copied
+    )
+    block = IM.heldout_block_from_table(doc, log_nhi_centres=centres, n_train_sims=2)
+    assert block == heldout_error() and "pooled_dndx_z2p2_to_4p6" not in block
+    kw = dict(log_nhi_centres=centres, n_train_sims=2)
+    for bad, why in (
+        (dict(doc, class_names=["DLA", "subDLA", "LLS"]), "class_names must be"),
+        (dict(doc, log_nhi_centres=[c + 0.1 for c in centres]), "bins are not the record's"),
+        (dict(doc, something="else"), "unknown \\['something'\\]"),
+        ({k: v for k, v in doc.items() if k != "class_names"}, "missing \\['class_names'\\]"),
+        (dict(doc, kind="another"), "this code reads"),
+    ):
+        with pytest.raises(E, match=why):
+            IM.heldout_block_from_table(bad, **kw)
+    # measured for another number of HR simulations than the record uses: refused unless it is said to be intended
+    with pytest.raises(E, match="measured for a correction of 2 HR simulations"):
+        IM.heldout_block_from_table(doc, log_nhi_centres=centres, n_train_sims=3)
+    same = IM.heldout_block_from_table(
+        doc, log_nhi_centres=centres, n_train_sims=3, other_composition=True
+    )
+    assert same == block
+
+
+@pytest.fixture()
+def rel_err(tmp_path, monkeypatch):
+    """A release whose incidence record carries the synthetic held-out error; the once-per-process memory of the
+    warning is emptied for the test."""
+    monkeypatch.setattr(hp, "_HELDOUT_WARNED", set())
+    info = make_release(tmp_path / "err", incidence=True, heldout=True)
+    return hp.load_release(str(info["root"]), info["sha"])
+
+
+def _heldout_warnings(caught):
+    return [w for w in caught if issubclass(w.category, hp.HeldOutErrorWarning)]
+
+
+def test_a_prediction_carries_the_held_out_error_of_its_fidelity(rel_err):
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        mf = rel_err.predict(PARAMS, 3.0, tau_eff=0.4)
+        lf = rel_err.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")
+    np.testing.assert_array_equal(mf.dndx_err, [0.05, 0.06, 0.07])  # the corrected value's error
+    np.testing.assert_array_equal(lf.dndx_err, [0.11, 0.12, 0.13])  # the uncorrected value's error
+    assert mf.cddf_err.shape == mf.cddf.shape == (30,) and not mf.dndx_err.flags.writeable
+    assert np.array_equal(
+        np.isnan(mf.cddf_err), np.isnan(mf.cddf)
+    )  # an estimate beside every number, here
+    assert np.all(mf.cddf_err[np.isfinite(mf.cddf)] == 0.2) and np.all(lf.cddf_err[1:] == 0.3)
+    assert mf.flags["incidence_heldout_error_available"] is True
+    assert lf.flags["incidence_heldout_error_available"] is True
+    assert not _heldout_warnings(
+        caught
+    ), "a finite estimate beside every corrected value: nothing to warn about"
+    label = mf.labels["incidence_mf_error"]
+    assert label.startswith(
+        "The held-out error of this prediction's dndx and cddf is in dndx_err and cddf_err"
+    )
+    for text in (
+        "A synthetic definition of the synthetic numbers.",
+        "rms_log_error_heldout",
+        "2 in number",
+    ):
+        assert text in label
+    assert "No held-out error" not in label
+    prov = mf.provenance["incidence_mf"]["heldout_error"]
+    assert prov["definition"] == "A synthetic definition of the synthetic numbers." and prov[
+        "z"
+    ] == [3.0, 5.0]
+
+
+def test_no_estimate_is_nan_and_is_said_once_per_record_and_process(rel_err):
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        lf = rel_err.predict(
+            PARAMS, 5.0, tau_eff=1.5, fidelity="LF"
+        )  # an LF prediction never warns
+        assert not _heldout_warnings(caught)
+        mf = rel_err.predict(
+            PARAMS, 5.0, tau_eff=1.5
+        )  # the subDLA class has no LF+MF estimate at z 5.0
+        again = rel_err.predict(PARAMS, 5.0, tau_eff=1.5)
+        between = rel_err.predict(
+            PARAMS, 2.6, tau_eff=0.4
+        )  # not a redshift of the error table at all
+    np.testing.assert_array_equal(mf.dndx_err, [0.15, np.nan, 0.17])
+    assert mf.flags["incidence_heldout_error_available"] is False
+    assert lf.flags["incidence_heldout_error_available"] is True
+    assert np.all(np.isnan(between.dndx_err)) and np.all(np.isnan(between.cddf_err))
+    assert np.array_equal(again.dndx_err, mf.dndx_err, equal_nan=True)
+    said = _heldout_warnings(caught)
+    assert len(said) == 1, "once per process for this record, not once per call"
+    assert "has no held-out estimate for some class, bin or redshift" in str(said[0].message)
+    assert said[0].filename == __file__, "the warning points at the caller's line"
+    stack = rel_err.predict_many(PARAMS, [3.0, 5.0], tau_eff=[0.4, 1.5])
+    np.testing.assert_array_equal(stack.dndx_err, [[0.05, 0.06, 0.07], [0.15, np.nan, 0.17]])
+    assert (
+        stack.cddf_err.shape == (2, 30)
+        and stack.flags["incidence_heldout_error_available"] is False
+    )
+
+
+def test_a_record_without_a_held_out_error_gives_nan_and_warns_once(rel, monkeypatch):
+    import warnings
+
+    monkeypatch.setattr(hp, "_HELDOUT_WARNED", set())
+    two, one = rel["two"], rel["one"]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        p = two.predict(PARAMS, 3.0, tau_eff=0.4)
+        two.predict(PARAMS, 3.0, tau_eff=0.4)
+        q = one.predict(
+            PARAMS, 3.0, tau_eff=0.4
+        )  # no incidence record: nothing corrected, nothing to say
+    assert (
+        p.dndx_err.shape == (3,) and np.all(np.isnan(p.dndx_err)) and np.all(np.isnan(p.cddf_err))
+    )
+    assert p.flags["incidence_heldout_error_available"] is False
+    assert "No held-out error is available for this record" in p.labels["incidence_mf_error"]
+    assert q.dndx_err is None and q.cddf_err is None
+    assert "incidence_heldout_error_available" not in q.flags
+    said = _heldout_warnings(caught)
+    assert len(said) == 1 and "carries no held-out error" in str(said[0].message)
+    with warnings.catch_warnings():  # the standard filter turns it into an error
+        warnings.simplefilter("error", hp.HeldOutErrorWarning)
+        monkeypatch.setattr(hp, "_HELDOUT_WARNED", set())
+        with pytest.raises(hp.HeldOutErrorWarning):
+            two.predict(PARAMS, 3.0, tau_eff=0.4)
