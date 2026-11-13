@@ -67,6 +67,20 @@ LF_SOURCE = (
     "file pinned by its sha256; the predictor applies the record only when that sha256 is the training cache of "
     "the backbone"
 )
+# The place for a held-out error of the corrected incidence. No number is shipped with a record of this format; this
+# text says how such a number is computed and what it covers, so that one published later can be read. It is shown
+# with every prediction the correction is applied to (labels["incidence_mf_error"]).
+HELDOUT_ERROR_STATEMENT = (
+    "No held-out error of the corrected dN/dX or CDDF is shipped with this record. How such an error is computed: "
+    "for each HR simulation s the table is rebuilt without s; an LF model trained without the LF partner of s (a "
+    "fold model) predicts dN/dX at the parameters of s; that prediction times the table without s is compared with "
+    "the HR value of s, as ln(prediction / truth), per class and redshift. What it covers: the transfer to a "
+    "parameter point that neither the LF model nor the table has seen. What it does not cover: only the LF "
+    "simulations that have an HR partner have a fold model (six of sixty), so the LF part is tested at those "
+    "points only; every simulation shares one set of initial phases, so the part that depends on the realisation "
+    "is left out; the form of the table, one ratio per class and redshift, was chosen with every HR simulation in "
+    "view; a redshift with a single pair has no held-out value."
+)
 RECORD_KEYS = {
     "format",
     "version",
@@ -445,6 +459,7 @@ class IncidenceMF(NamedTuple):
             "lf_cache": _MR.copy_json(r["lf_cache"]),
             "hr_incidence": _MR.copy_json(r["hr_incidence"]),
             "fit_code": _MR.copy_json(r["fit_code"]),
+            "heldout_error": None,  # none is shipped (HELDOUT_ERROR_STATEMENT)
         }
 
 

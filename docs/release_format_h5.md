@@ -436,6 +436,13 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   between the neighbouring rows and the prediction is flagged `incidence_mf_z_interpolated`; beyond the table it is
   held at the edge row and flagged `incidence_mf_z_clamped`. This differs from the P1D record, which is refused
   below its tables.
+- **No error is shipped.** A record of this format carries no held-out error of the corrected dN/dX or CDDF, and
+  `provenance["incidence_mf"]["heldout_error"]` is `None`. Every prediction the correction is applied to carries the
+  text `labels["incidence_mf_error"]` (`incidence_mf.HELDOUT_ERROR_STATEMENT`), which says how such an error is
+  computed (the table rebuilt without one HR simulation, times an LF model trained without that simulation's LF
+  partner, against that simulation's HR value) and what it does not cover (only the six LF simulations with an HR
+  partner have such a model, six of sixty; all simulations share their initial phases; the form of the table was
+  chosen with every HR simulation in view).
 - **Not validated here:** the w_c map was fitted on LF counts. That it still holds when dN/dX is scaled to the HR
   incidence has not been tested.
 

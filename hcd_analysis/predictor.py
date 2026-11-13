@@ -67,7 +67,9 @@ between its neighbours and flagged (``incidence_mf_z_interpolated``); beyond the
 (``incidence_mf_z_clamped``), where the P1D MF below its tables is refused. The w_c map was fitted on LF counts; that it holds for
 the corrected incidence is not validated. The record also stores the same kind of table for the column-density
 distribution; the predictor returns no CDDF, so that table is not applied here. A release of format 1 has no such
-record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition.
+record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition. No
+held-out error of the corrected incidence is shipped; ``labels["incidence_mf_error"]`` says how one is computed and
+what it covers.
 
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
 k_p = 0.78 Mpc^-1, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
@@ -955,7 +957,8 @@ class _PredictorBase:
             "R_c(z), R_c(z) the mean over the matched HR simulations of (dN/dX)_HR / (dN/dX)_LF per class and "
             "redshift (theta-independent; at a redshift the table does not hold it is linear in z between its "
             "neighbours, flagged incidence_mf_z_interpolated, and beyond the table held constant, flagged "
-            "incidence_mf_z_clamped); applied with the P1D MF correction, never to an LF prediction"
+            "incidence_mf_z_clamped); applied with the P1D MF correction, never to an LF prediction",
+            "incidence_mf_error": _IM.HELDOUT_ERROR_STATEMENT,
         }
         if use_mf:
             out["dndx"] = (

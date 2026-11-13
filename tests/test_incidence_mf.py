@@ -472,6 +472,13 @@ def test_labels_and_provenance_say_what_was_applied(rel):
     assert "multiplied by the incidence MF factor" in p.labels["dndx"]
     assert "before the map" in p.labels["w_c"] and "fitted on LF counts" in p.labels["w_c"]
     assert "w_c stays the LF backbone's" not in p.labels["mf"] and "incidence MF" in p.labels["mf"]
+    # no held-out error is shipped; the text that says how one is computed comes with the prediction
+    assert p.labels["incidence_mf_error"] == IM.HELDOUT_ERROR_STATEMENT
+    assert (
+        "No held-out error" in p.labels["incidence_mf_error"]
+        and "six of sixty" in p.labels["incidence_mf_error"]
+    )
+    assert p.provenance["incidence_mf"]["heldout_error"] is None
     prov = p.provenance["incidence_mf"]
     assert prov["record_sha256"] == info["incidence_sha"]
     assert prov["lf_cache"]["sha256"] == info["bundle"].lineage["cache"]["sha256"]
