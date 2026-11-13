@@ -15,6 +15,9 @@ What is drawn, on one axis:
   redshift;
 - bands: the lowest and the highest value over the 60 design points of the PRIYA suite
   (``docs/figures/data/priya_lf_design_60.csv``; another table with ``--design``, none with ``--no-band``);
+- bars on the model lines (only when the model's incidence record carries a held-out error): ``pred.dndx_err`` times
+  ``pred.dndx``, the held-out rms of the fractional error of the corrected dN/dX. It is an indication of size from
+  a handful of held-out simulations, not the standard deviation of a known distribution;
 - points: the DLA dN/dX of Ho, Bird and Garnett (2021) in eighteen redshift bins, with the limits of the 68 per cent
   interval, from ``docs/figures/data/ho21/dndx_all.txt``.
 
@@ -113,6 +116,7 @@ def main(argv=None) -> int:
     C.style(plt)
     fig, ax = plt.subplots(figsize=(6.4, 4.0), constrained_layout=True)
     z = np.array(REDSHIFTS)
+    drew_error = False
     for name, col, colour, width in CLASSES:
         colour = getattr(C, colour)
         if bands is not None:
@@ -122,6 +126,16 @@ def main(argv=None) -> int:
         ax.plot(
             z, stack.dndx[:, col], color=colour, lw=width, zorder=2, label=f"model (LF+MF): {name}"
         )
+        # the held-out rms of the fractional error of the corrected dN/dX, as a bar on the model line: the
+        # fractional error times the model value. Drawn only where the model carries an estimate.
+        err = None if stack.dndx_err is None else stack.dndx_err[:, col] * stack.dndx[:, col]
+        if err is not None and np.any(np.isfinite(err)):
+            ok = np.isfinite(err)
+            ax.errorbar(
+                z[ok], stack.dndx[ok, col], yerr=err[ok], fmt="none", ecolor=colour, elinewidth=1.1, capsize=2.2,
+                capthick=1.1, zorder=2, label="held-out rms error of the model" if not drew_error else None,
+            )  # fmt: skip
+            drew_error = True
         ax.annotate(
             name,
             (z[-1], stack.dndx[-1, col]),
@@ -130,6 +144,11 @@ def main(argv=None) -> int:
             va="center",
             fontsize=8.5,
         )
+    facts["heldout_error"] = (
+        "drawn on the model lines: pred.dndx_err times pred.dndx (LF+MF), the held-out rms of the fractional error"
+        if drew_error
+        else "not drawn: the model carries no held-out error at these redshifts"
+    )
     zm, dndx, lo68, hi68 = read_ho21_dndx(C.data_file("ho21", "dndx_all.txt"))
     ax.errorbar(
         zm, dndx, yerr=[dndx - lo68, hi68 - dndx], fmt="o", ms=3.6, color=C.INK, ecolor=C.INK_SECONDARY,

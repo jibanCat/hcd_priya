@@ -18,6 +18,7 @@
    "model_bins_absent": 2,
    "model_flags_set": [
     "cddf_bins_without_support",
+    "incidence_heldout_error_available",
     "incidence_mf_applied",
     "k_downweighted",
     "mf_applied"
@@ -36,6 +37,7 @@
    "measurement_bin": "2.5 < z < 3",
    "model_bins_absent": 1,
    "model_flags_set": [
+    "incidence_heldout_error_available",
     "incidence_mf_applied",
     "k_downweighted",
     "mf_applied"
@@ -54,6 +56,7 @@
    "measurement_bin": "3 < z < 4",
    "model_bins_absent": 1,
    "model_flags_set": [
+    "incidence_heldout_error_available",
     "incidence_mf_applied",
     "k_downweighted",
     "mf_applied"

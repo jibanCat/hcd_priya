@@ -46,7 +46,12 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
 - **Snapshots against bins.** The model is drawn at snapshot redshifts 0.2 apart; the measurement is in bins one
   sixth of a unit wide. The two measured points above z = 4.6 have no model curve beside them, and neither has
   the one below 2.2.
-- **Not shown and not tested here.** The held-out error of the model's dN/dX is not shown. Nothing was fitted. The
+- **Model (bars on the lines):** the held-out error of the corrected dN/dX, `pred.dndx_err` times `pred.dndx`: at
+  each snapshot, the rms over five held-out high-resolution simulations of the logarithm of prediction over truth.
+  It includes the bias. With five values it is an indication of size, not the standard deviation of a known
+  distribution; `labels["incidence_mf_error"]` on a prediction says what it does not cover. It is not the same
+  thing as the band, which shows how far the prediction moves across the training set.
+- **Not shown and not tested here.** Nothing was fitted. The
   measurement covers DLAs only: the subDLA and LLS curves have no measured point in this figure. The simulations and
   the survey define and find absorbers differently; that difference was not assessed.
 
@@ -86,7 +91,9 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
 - **The bin 4 to 5 is left out.** It reaches beyond z = 4.6, the upper edge of the grouped-validation domain of the
   model's multi-fidelity correction of the P1D. The correction of the CDDF that is drawn here is not validated at
   any redshift.
-- **Not shown and not tested here.** The held-out error of the model's CDDF is not shown. The measurement's tables
+- **Not shown and not tested here.** The held-out error of the model's CDDF is not drawn in this figure (with 29
+  bins and five held-out simulations per bin it would hide the comparison); a prediction carries it per bin as
+  `pred.cddf_err`. The measurement's tables
   start at log10 N_HI = 20.05; below it the model has no measured point in this figure. The simulations and the
   survey define and find absorbers differently; that difference was not assessed.
 

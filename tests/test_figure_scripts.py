@@ -315,6 +315,18 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
     )
     assert facts["design_points"] == 3 and facts["design_points_refused"] == 0
     assert facts["redshifts"] == list(dndx.REDSHIFTS) and facts["parameters"] == C.MIDPOINT
+    assert facts["heldout_error"].startswith(
+        "not drawn"
+    ), "this synthetic record carries no held-out error"
+    with_error = SR.make_release(tmp_path / "with_error", incidence=True, heldout=True)
+    out2 = str(tmp_path / "dndx_with_error.png")
+    monkeypatch.setattr(
+        dndx, "REDSHIFTS", (2.6, 3.0, 5.0)
+    )  # 3.0 and 5.0 have a synthetic estimate, 2.6 has none
+    assert dndx.main(_args(with_error) + ["--no-band", "--out", out2]) == 0
+    assert _facts(out2)["heldout_error"].startswith(
+        "drawn on the model lines: pred.dndx_err times pred.dndx"
+    )
 
 
 def test_the_dndx_figure_refuses_a_model_without_an_incidence_record(tmp_path):

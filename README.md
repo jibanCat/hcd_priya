@@ -221,7 +221,8 @@ highest value over the 60 design points of the training simulations; they are no
 of Ho, Bird and Garnett (2021, [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals,
 from the tables of the DLA data collection [sbird/DLA_data](https://github.com/sbird/DLA_data)
 ([provenance](docs/figures/data/ho21/PROVENANCE.md)).
-The measurement covers DLAs only. The model's held-out error is not shown.
+The measurement covers DLAs only. Bars on the lines: the model's held-out error (the rms over five held-out
+simulations; an indication of size, not a standard deviation).
 
 ![The column-density distribution of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/cddf_vs_ho21.png)
 
@@ -233,7 +234,8 @@ not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
 where the measured value is zero are not drawn). One
 snapshot stands beside each bin (z = 3.4 for the bin 3 to 4). The bin 4 to 5 is left out because it reaches beyond
 z = 4.6, the edge of the range that the grouped validation of the model's P1D correction covers; the correction of
-the CDDF itself is not validated at any redshift. The model's held-out error is not shown.
+the CDDF itself is not validated at any redshift. The model's held-out error is not drawn here; a prediction
+carries it per bin (`pred.cddf_err`).
 
 ![The class power ratio at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](docs/figures/class_ratio_vs_rogers18.png)
 
