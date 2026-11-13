@@ -233,6 +233,41 @@ def test_the_class_ratio_figure_needs_no_model(tmp_path):
     assert facts["model"].startswith("none")
 
 
+def test_the_class_ratio_figure_draws_bands_from_a_table_of_ranges(tmp_path):
+    ratio = _script("fig_class_ratio_vs_rogers18")
+    k = np.geomspace(5e-4, 0.029, 12)
+    names, cols = ["k_s_per_km"], [k]
+    for _, stem, _ in ratio.PANELS:  # synthetic ranges: nested, the wide set outside the narrow one
+        for infix, half in (("sims60_rung1", 0.1), ("sims60_allrungs", 0.3)):
+            for tag, shift in (
+                ("min", -half),
+                ("p16", -half / 2),
+                ("p50", 0.0),
+                ("p84", half / 2),
+                ("max", half),
+            ):
+                names.append(f"R_{stem}_{infix}_{tag}")
+                cols.append(1.5 + shift + 0.0 * k)
+    table = tmp_path / "ranges.csv"
+    table.write_text(
+        "# synthetic ranges\n# " + ",".join(names) + "\n"
+        + "\n".join(",".join(repr(float(v)) for v in row) for row in np.array(cols).T) + "\n",
+        encoding="utf-8",
+    )  # fmt: skip
+    assert [s[0] for s in ratio.RANGE_SETS] == [
+        "sims60_allrungs",
+        "sims60_rung1",
+    ], "the wider set is drawn first"
+    out = str(tmp_path / "ratio_bands.png")
+    assert ratio.main(["--ranges", str(table), "--out", out]) == 0
+    assert _facts(out)["points"].startswith("bands from a table of ranges supplied with --ranges")
+    # without the option the committed figure is drawn as before, from the digest-checked table of points
+    out2 = str(tmp_path / "ratio_points.png")
+    assert (
+        ratio.main(["--out", out2]) == 0 and "class_ratio_z3p0_lf60.csv" in _facts(out2)["points"]
+    )
+
+
 def test_the_cddf_figure_runs_on_a_model_with_an_incidence_record(
     tmp_path, release, design, capsys, monkeypatch
 ):

@@ -54,11 +54,34 @@ def read_table(path: str) -> dict:
     return {name: values[:, i] for i, name in enumerate(header)}
 
 
+# The two sets of a table of ranges, widest first: (the column infix, the opacity of its band, its legend text).
+RANGE_SETS = (
+    ("sims60_allrungs", 0.16, "PRIYA simulations, troughs restored: 60 simulations at all mean-flux rungs (min to max)"),
+    ("sims60_rung1", 0.38, "the 60 simulations at the mean-flux rung nearest 1 (min to max, and the median)"),
+)  # fmt: skip
+
+
+def draw_ranges(ax, ranges, stem):
+    """The simulations as bands in one hue: for each set the range from its minimum to its maximum, the wider set
+    lighter, and the median of the narrower set as a line. Columns: ``R_<stem>_<set>_<min|p16|p50|p84|max>``.
+    """
+    k = ranges["k_s_per_km"]
+    for infix, alpha, label in RANGE_SETS:
+        lo, hi = ranges[f"R_{stem}_{infix}_min"], ranges[f"R_{stem}_{infix}_max"]
+        ax.fill_between(k, lo, hi, color=C.BLUE, alpha=alpha, lw=0, zorder=1, label=label)
+    ax.plot(k, ranges[f"R_{stem}_{RANGE_SETS[-1][0]}_p50"], color=C.BLUE, lw=1.6, zorder=2)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--out", default=os.path.join(C.FIGURES, "class_ratio_vs_rogers18.png"))
+    ap.add_argument(
+        "--ranges",
+        help="a table of ranges over the simulations (per class and set: min, p16, p50, p84, max) to draw as bands "
+        "in place of the points; it is read without a digest check",
+    )
     args = ap.parse_args(argv)
     import matplotlib
 
@@ -74,14 +97,26 @@ def main(argv=None) -> int:
     template = class_ratio(kk, Z)
     C.style(plt)
     fig, axes = plt.subplots(1, 4, figsize=(11.0, 3.1), sharex=True, constrained_layout=True)
+    ranges = read_table(args.ranges) if args.ranges else None
     for ax, (title, stem, name) in zip(axes, PANELS):
-        mean, sd = table[f"R_{stem}_addback_mean"], table[f"R_{stem}_addback_sd_over_sims"]
         ax.axvspan(k.min() * 0.9, ROGERS_KMIN, color=C.SHADE, lw=0, zorder=0)
-        ax.plot(kk, template[name], color=C.BLUE, zorder=2, label="Rogers et al. (2018), Eq. 6")
-        ax.errorbar(
-            k, mean, yerr=sd, fmt="o", ms=3.2, color=C.INK, ecolor=C.INK_SECONDARY, elinewidth=0.8,
-            mec=C.SURFACE, mew=0.5, zorder=3, label="PRIYA simulations, troughs restored\n(mean and standard deviation over 60)",
-        )  # fmt: skip
+        if ranges is not None:
+            draw_ranges(ax, ranges, stem)
+            ax.plot(
+                kk,
+                template[name],
+                color=C.INK,
+                lw=1.3,
+                zorder=3,
+                label="Rogers et al. (2018), Eq. 6",
+            )
+        else:
+            mean, sd = table[f"R_{stem}_addback_mean"], table[f"R_{stem}_addback_sd_over_sims"]
+            ax.plot(kk, template[name], color=C.BLUE, zorder=2, label="Rogers et al. (2018), Eq. 6")
+            ax.errorbar(
+                k, mean, yerr=sd, fmt="o", ms=3.2, color=C.INK, ecolor=C.INK_SECONDARY, elinewidth=0.8, mec=C.SURFACE,
+                mew=0.5, zorder=3, label="PRIYA simulations, troughs restored\n(mean and standard deviation over 60)",
+            )  # fmt: skip
         ax.set_xscale("log")
         if stem not in LINEAR_Y:
             ax.set_yscale("log")
@@ -104,7 +139,11 @@ def main(argv=None) -> int:
         {
             "figure": "class power ratio against Rogers et al. (2018), Eq. 6",
             "z": Z,
-            "points": "docs/figures/data/class_ratio_z3p0_lf60.csv (troughs restored; mean and sd over 60 simulations)",
+            "points": (
+                "docs/figures/data/class_ratio_z3p0_lf60.csv (troughs restored; mean and sd over 60 simulations)"
+                if ranges is None
+                else "bands from a table of ranges supplied with --ranges (not digest-checked)"
+            ),
             "line": "hcd_analysis.hcd_template.class_ratio",
             "template_extrapolated_below_k_s_per_km": ROGERS_KMIN,
             "template_box_km_per_s": ROGERS_BOX_KMS,
