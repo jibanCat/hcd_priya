@@ -62,6 +62,16 @@ Three things to read with the table:
     and 2 to 5 per cent for k < 3e-3 s/km at z >= 4. Those numbers are for the total flux power, not for the class
     ratios compared here, whose own variance was not measured.
 
+## The comparison at z = 3, drawn
+
+![The class power ratio at z = 3 of the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](figures/class_ratio_vs_rogers18.png)
+
+Points: the simulations with the troughs restored, the mean and the standard deviation over the 60 simulations, at
+z = 3.0, with the DLA class split into small and large as in Rogers et al. Line: Eq. 6 of Rogers et al. (2018) from
+`hcd_template.class_ratio`; their snapshot is at z = 3.01. Shaded: below 2 pi / 8000 km/s = 7.85e-4 s/km, the
+lowest mode of their box, where the template is evaluated by extrapolation. The figure holds no emulator prediction.
+Its script and data: [the figures page](model_figures.md).
+
 ## What "restoring the troughs" means
 
 - The restored term is the unfiltered class power minus the filtered class power, at the same optical-depth scaling

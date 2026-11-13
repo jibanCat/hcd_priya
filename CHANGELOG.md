@@ -27,6 +27,11 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   the nine parameters out; `example_params` gives the midpoint of the training range of each parameter and prints
   that statement and the values when it is called. No model is published yet, so the list is empty; tests
   and CI use a model package built with a synthetic bundle.
+- **Two figures with their scripts and data** ([`docs/model_figures.md`](docs/model_figures.md)): the model's
+  column-density distribution against the DLA measurement of Ho, Bird and Garnett (2021), and the class power ratio
+  of the training simulations against Eq. 6 of Rogers et al. (2018). `scripts/figures/` regenerates them from the
+  package and the files in `docs/figures/data/`, each with its origin and sha256. A third script, for dN/dX against
+  redshift, is ready; its figure waits for the meaning of the measurement's table to be confirmed.
 - **A warning for a mean flux outside the trained range.** A prediction whose `tau_eff` lies outside the range of
   mean flux the model was trained on, or outside the tables of the multi-fidelity correction, emits a
   `MeanFluxRangeWarning` that gives the range. The prediction is still

@@ -14,6 +14,7 @@ data
 compatibility
 release_format_h5
 rogers_comparison
+model_figures
 tutorials/production_and_research_bundles
 api
 ```

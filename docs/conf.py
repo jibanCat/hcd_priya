@@ -57,6 +57,7 @@ include_patterns = [
     "compatibility.md",
     "release_format_h5.md",
     "rogers_comparison.md",
+    "model_figures.md",
     "tutorials/production_and_research_bundles.md",
     "api.md",
     "contributing.md",

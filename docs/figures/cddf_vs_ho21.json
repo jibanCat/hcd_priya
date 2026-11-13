@@ -1,0 +1,44 @@
+{
+ "figure": "CDDF against Ho, Bird and Garnett (2021)",
+ "incidence_hr_simulations": 5,
+ "incidence_record": true,
+ "panels": [
+  {
+   "design_points": 60,
+   "design_points_flagged": 12,
+   "design_points_refused": 0,
+   "measurement_bin": "2 < z < 2.5",
+   "model_bins_absent": 2,
+   "model_z": 2.2
+  },
+  {
+   "design_points": 60,
+   "design_points_flagged": 12,
+   "design_points_refused": 0,
+   "measurement_bin": "2.5 < z < 3",
+   "model_bins_absent": 1,
+   "model_z": 2.8
+  },
+  {
+   "design_points": 60,
+   "design_points_flagged": 12,
+   "design_points_refused": 0,
+   "measurement_bin": "3 < z < 4",
+   "model_bins_absent": 1,
+   "model_z": 3.4
+  }
+ ],
+ "parameters": {
+  "Ap": 1.9e-09,
+  "alphaq": 2.15,
+  "bhfeedback": 0.05,
+  "heref": 2.7,
+  "herei": 4.0,
+  "hireionz": 7.25,
+  "hub": 0.7,
+  "ns": 0.925,
+  "omegamh2": 0.143
+ },
+ "release_format": "hcd_priya.release/2",
+ "synthetic_build": false
+}
