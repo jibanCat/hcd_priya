@@ -105,7 +105,8 @@ the mode axis, kcoord.bind / at_data). Values outside the training box are evalu
 above the original PRIYA design box (``NS_RIDGE``, where the design is sparse) is flagged ``ns_ridge``.
 
 **Outputs** (``Prediction``; host numpy, float64):
-  * ``k`` (K,) s/km; ``P_class`` (4, K): clean, LLS, subDLA, DLA, PRIYA-filtered (tau > 1e6 troughs filled), the mean
+  * ``k`` (K,) s/km; ``P_class`` (4, K): clean, LLS, subDLA, DLA, PRIYA-filtered (on a sightline whose largest
+    optical depth exceeds 1e6, the region around that maximum where tau > 0.25 + tau_eff is set to tau_eff), the mean
     over the ensemble members of their reconstructed spectra;
   * ``template`` (3, K) = P_c / P_clean - 1 for LLS, subDLA, DLA;
   * ``w_c`` (3,): an estimate of the simulation's own sightline fractions (LLS, subDLA, DLA) at (params, z), from the
@@ -647,8 +648,9 @@ class Prediction:
         The wavenumbers in s/km, shape (K,): the simulation's own modes, or the ``k`` asked for.
     P_class : numpy.ndarray
         Shape (4, K). The one-dimensional flux power spectrum (P1D, in km/s) of each class, in the
-        order clean, LLS, subDLA, DLA. It is the PRIYA-filtered spectrum (pixels with optical depth
-        above 1e6 are filled), averaged over the ensemble members.
+        order clean, LLS, subDLA, DLA. It is the PRIYA-filtered spectrum (on a sightline whose
+        largest pixel optical depth exceeds 1e6, the region around that maximum where
+        tau > 0.25 + tau_eff is set to tau_eff), averaged over the ensemble members.
     template : numpy.ndarray
         Shape (3, K): P_c / P_clean - 1 for LLS, subDLA and DLA.
     w_c : numpy.ndarray
