@@ -108,7 +108,14 @@ def test_the_ho21_provenance_names_each_file_with_its_digest_and_the_commit():
     assert "confirmed the rows on 2026-11-13" in text
     for name, digest in ho21.items():
         assert os.path.basename(name) in text and digest in text, name
-    for needed in ("github.com/jibanCat/DLA_data", "10.1093/mnras/stab2169", "no licence file"):
+    for needed in (
+        "github.com/sbird/DLA_data",  # where the tables originate
+        "147c616ba4f5779bea0ef3e23255f4a9c2021cea",
+        "github.com/jibanCat/DLA_data",  # the fork they were fetched from
+        "daa595c692254c93b86009318a6e2b029db67112",
+        "10.1093/mnras/stab2169",
+        "no licence file",
+    ):
         assert needed in text, needed
     assert (
         len(
@@ -168,6 +175,39 @@ def test_the_ho21_tables_read_as_centre_value_and_68_per_cent_limits():
         assert low <= z < high, "the model's redshift lies inside the measurement's bin"
 
 
+def test_the_cddf_reader_maps_the_columns_as_the_collections_own_reader_does():
+    """The mapping of ``ho21_cddf`` in the DLA data collection (PROVENANCE.md compares the two step by step),
+    restated here in plain numpy: the table transposed, the column density as ten to the power of column 0, f in
+    column 1, and with its ``onesigma`` option the limits in columns 2 and 3 (columns 4 and 5 otherwise).
+    """
+    cddf = _script("fig_cddf_vs_ho21")
+    for _, name, _ in cddf.PANELS:
+        path = os.path.join(DATA, "ho21", name)
+        data = np.loadtxt(path).T
+        assert data.shape == (30, 6)
+        nhi, f_theirs, lower68, upper68 = 10 ** data[:, 0], data[:, 1], data[:, 2], data[:, 3]
+        lower95, upper95 = data[:, 4], data[:, 5]
+        logn, f, lo, hi = cddf.read_ho21_cddf(path)
+        drawn = f_theirs > 0  # the one difference in drawing: a bin with f = 0 is not drawn here
+        assert np.array_equal(10**logn, nhi[drawn]) and np.array_equal(f, f_theirs[drawn])
+        assert np.array_equal(lo, lower68[drawn]) and np.array_equal(hi, upper68[drawn])
+        assert np.array_equal(f - lo, (f_theirs - lower68)[drawn])  # the lower error bar
+        assert np.array_equal(hi - f, (upper68 - f_theirs)[drawn])  # the upper error bar
+        if not np.array_equal(
+            lower68, lower95
+        ):  # and it is the 68 per cent pair that is read, not the 95
+            assert not np.array_equal(lo, lower95[drawn])
+        assert np.all(lower95[drawn] <= lo) and np.all(hi <= upper95[drawn])
+    # the other difference: the bin 3 to 4 takes the file named for it, whose numbers are not those of the
+    # 2.5 to 3 file that the collection's reader opens for that range
+    files = {label: name for label, name, _ in cddf.PANELS}
+    assert files["3 < z < 4"] == "cddf_z34.txt" and files["2.5 < z < 3"] == "cddf_z253.txt"
+    assert not np.array_equal(
+        np.loadtxt(os.path.join(DATA, "ho21", "cddf_z34.txt")),
+        np.loadtxt(os.path.join(DATA, "ho21", "cddf_z253.txt")),
+    )
+
+
 def test_the_class_ratio_table_has_the_columns_the_figure_reads():
     ratio = _script("fig_class_ratio_vs_rogers18")
     table = ratio.read_table(os.path.join(DATA, "class_ratio_z3p0_lf60.csv"))
@@ -204,6 +244,7 @@ def test_the_cddf_figure_runs_on_a_model_with_an_incidence_record(
     assert cddf.main(_args(release) + ["--design", design, "--out", out]) == 0
     facts = _facts(out)
     assert facts["parameters"] == C.MIDPOINT and facts["incidence_record"] is True
+    assert "github.com/sbird/DLA_data" in facts["measurement_source"]
     assert [p["model_z"] for p in facts["panels"]] == list(SYNTHETIC_Z)
     for panel in facts["panels"]:
         assert panel["design_points"] == 3 and panel["design_points_refused"] == 0

@@ -80,6 +80,7 @@ def main(argv=None) -> int:
         parameters=C.MIDPOINT,
         redshifts=list(REDSHIFTS),
         design_table=C.design_source(args),
+        measurement_source=C.MEASUREMENT_SOURCE,
     )
     facts["flags_set"] = sorted(n for n, v in stack.flags.items() if v is True)
     bands = None

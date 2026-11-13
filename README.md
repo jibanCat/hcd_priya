@@ -218,7 +218,9 @@ midpoint of each parameter's training range (the nine values are written in the 
 snapshots from z = 2.2 to 4.6, the range that the grouped validation of the model's P1D correction covers (the
 correction of the incidence drawn here is not validated at any redshift). Bands: the lowest and the
 highest value over the 60 design points of the training simulations; they are not an uncertainty. Points: the DLAs
-of Ho, Bird and Garnett (2021, [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals.
+of Ho, Bird and Garnett (2021, [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals,
+from the tables of the DLA data collection [sbird/DLA_data](https://github.com/sbird/DLA_data)
+([provenance](docs/figures/data/ho21/PROVENANCE.md)).
 The measurement covers DLAs only. The model's held-out error is not shown.
 
 ![The column-density distribution of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/cddf_vs_ho21.png)

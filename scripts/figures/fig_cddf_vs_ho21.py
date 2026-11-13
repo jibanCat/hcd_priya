@@ -84,6 +84,7 @@ def main(argv=None) -> int:
         figure="CDDF against Ho, Bird and Garnett (2021)",
         parameters=C.MIDPOINT,
         design_table=C.design_source(args),
+        measurement_source=C.MEASUREMENT_SOURCE,
         panels=[],
     )
     for ax, (bin_label, name, z) in zip(axes, PANELS):

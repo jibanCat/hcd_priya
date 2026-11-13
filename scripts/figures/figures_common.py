@@ -93,6 +93,10 @@ def load_model(args):
     return emu, what
 
 
+MEASUREMENT_SOURCE = (
+    "Ho, Bird and Garnett (2021), doi:10.1093/mnras/stab2169; tables of github.com/sbird/DLA_data (commit 147c616), "
+    "fetched from the fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/ho21/PROVENANCE.md"
+)
 DESIGN_FILE = "priya_lf_design_60.csv"  # the 60 low-resolution design points of the PRIYA suite
 
 

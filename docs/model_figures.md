@@ -39,7 +39,10 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
 - **Data (points):** the incidence of DLAs that Ho, Bird and Garnett (2021) measured in SDSS DR16Q, in eighteen
   redshift bins with centres from 2.08 to 4.92, with the 68 per cent interval. The meaning of the table's rows was
   confirmed by the paper's first author on 2026-11-13. The file and its origin:
-  `docs/figures/data/ho21/PROVENANCE.md` in the repository.
+  `docs/figures/data/ho21/PROVENANCE.md` in the repository. The tables are those of the DLA data collection
+  https://github.com/sbird/DLA_data (fetched from its fork https://github.com/jibanCat/DLA_data), read as that
+  collection's own reader `ho21_cddf` reads them where it has a reader; the provenance file compares the two step
+  by step.
 - **Snapshots against bins.** The model is drawn at snapshot redshifts 0.2 apart; the measurement is in bins one
   sixth of a unit wide. The two measured points above z = 4.6 have no model curve beside them, and neither has
   the one below 2.2.
@@ -71,9 +74,13 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
 - **Data (points):** the column-density distribution of DLAs that Ho, Bird and Garnett (2021) measured in SDSS
   DR16Q, in their redshift bins 2 to 2.5, 2.5 to 3 and 3 to 4, with the 68 per cent interval. A bar that reaches the
   bottom of a panel has a lower limit of zero. A bin in which the measured f is zero is not drawn, also where the
-  table gives an upper limit for it (four bins of the 2.5 to 3 table, six of the 3 to 4 table). The files and their
-  origin:
-  `docs/figures/data/ho21/PROVENANCE.md` in the repository.
+  table gives an upper limit for it (four bins of the 2.5 to 3 table, six of the 3 to 4 table). For the bin 3 to 4
+  the figure takes the table named for that range (`cddf_z34.txt`); the collection's own reader opens the 2.5 to 3
+  table for it. The files and their origin:
+  `docs/figures/data/ho21/PROVENANCE.md` in the repository. The tables are those of the DLA data collection
+  https://github.com/sbird/DLA_data (fetched from its fork https://github.com/jibanCat/DLA_data), read as that
+  collection's own reader `ho21_cddf` reads them where it has a reader; the provenance file compares the two step
+  by step.
 - **One snapshot against one bin.** Each panel sets one snapshot beside a measurement over a range of redshifts. In
   the third panel the model is at the single redshift 3.4 inside a bin one unit wide.
 - **The bin 4 to 5 is left out.** It reaches beyond z = 4.6, the upper edge of the grouped-validation domain of the
