@@ -1,6 +1,9 @@
-# The 60 low-resolution design points of the PRIYA simulation suite (Bird et al. 2023), nine parameters each, as stored in the
-# design file (emulator_params.json, key sample_params) of the emulator directory used by this project; sha256 of that file:
-# 623aa4cad657d10ae9bb659f73d23ef001fc870fc63a947f635d6b912a1b740d. Row order is the file's. Units: Ap dimensionless amplitude at the pivot; others as in the paper.
+# The 60 low-resolution training simulations of this project, nine parameters each, as stored in the design file
+# (emulator_params.json, key sample_params) of the emulator directory used by this project; sha256 of that file:
+# 623aa4cad657d10ae9bb659f73d23ef001fc870fc63a947f635d6b912a1b740d. Row order is the file's (rows counted from 0).
+# Rows 0 to 47 lie inside the original parameter box of the PRIYA design (Bird et al. 2023). Rows 48 to 59 are the 12
+# simulations in the widened parameter range (n_s up to 1.05, and wider helium reionisation ranges); the predictor flags
+# all 12 as outside its sampling box. Units: Ap is the dimensionless amplitude at the pivot; the others as in the paper.
 ns,Ap,herei,heref,alphaq,hub,omegamh2,hireionz,bhfeedback
 0.84225,1.3633333333333334e-09,3.51,2.85,2.005,0.6583333333333333,0.1403,6.725,0.04533333333333334
 0.93975,1.97e-09,3.57,2.71,2.4850000000000003,0.6716666666666666,0.1451,7.225,0.060000000000000005
