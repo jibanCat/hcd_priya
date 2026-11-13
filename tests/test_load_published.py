@@ -305,7 +305,7 @@ def test_the_list_of_accepted_models_is_well_formed():
     seen = set()
     for m in PM.MODELS:
         assert set(m) == {"name", "version", "format", "anchor_sha256"}
-        assert m["format"] == "hcd_priya.release/1"
+        assert m["format"] in ("hcd_priya.release/1", "hcd_priya.release/2")
         assert re.fullmatch(r"[0-9a-f]{64}", m["anchor_sha256"])
         assert (
             re.fullmatch(r"(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*", m["version"])
@@ -391,3 +391,21 @@ def test_the_codes_entry_may_spell_the_name_like_a_user(release, tmp_path, monke
         hp.ModelPackageError, match="accepts for 'lfmf'"
     ):  # two entries for one version
         hp.load_published()
+
+
+# ------------------------------------------------------------------------------------- a release of format 2
+def test_a_pinned_release_of_format_2_loads_with_its_incidence_record(tmp_path, monkeypatch):
+    rel2 = make_release(tmp_path / "release2", incidence=True)
+    model_package(tmp_path, rel2, version="8.0.0", synthetic=False)
+    use_model_package(monkeypatch, tmp_path)
+    pin = _pin(rel2, "8.0.0", format="hcd_priya.release/2")
+    monkeypatch.setattr(PM, "MODELS", [pin])
+    emu = hp.load_published("lfmf")
+    p = emu.predict(PARAMS, 3.0, tau0_amp=1.0, dtau0=0.0)
+    assert p.flags["incidence_mf_applied"] is True
+    assert p.provenance["incidence_mf"]["record_sha256"] == rel2["incidence_sha"]
+    assert p.provenance["release"]["format"] == "hcd_priya.release/2"
+    # the format the code lists is the release's own: a release listed under another format is refused
+    monkeypatch.setattr(PM, "MODELS", [dict(pin, format="hcd_priya.release/1")])
+    with pytest.raises(hp.ModelPackageError, match="it is listed as hcd_priya.release/1"):
+        hp.load_published("lfmf")

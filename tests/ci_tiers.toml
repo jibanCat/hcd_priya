@@ -26,6 +26,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_analyze_dnuis_resolution_oos.py" = { tier = "source" }
 "tests/test_analyze_lls_dispcenter.py" = { tier = "source" }
 "tests/test_blinding.py" = { tier = "wheel" }
+"tests/test_build_incidence_mf.py" = { tier = "source" }
 "tests/test_build_mf_release.py" = { tier = "source" }
 "tests/test_bundle_lineage.py" = { tier = "wheel" }
 "tests/test_cache_builder_catalogue_guard.py" = { tier = "source" }
@@ -72,6 +73,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_gate_helpers.py" = { tier = "wheel" }
 "tests/test_grad_fidelity.py" = { tier = "wheel" }
 "tests/test_hcd_template.py" = { tier = "wheel" }
+"tests/test_incidence_mf.py" = { tier = "wheel" }
 "tests/test_interface_markers.py" = { tier = "source" }
 "tests/test_kcoord_binding.py" = { tier = "wheel" }
 "tests/test_ks_selboost_hooks.py" = { tier = "wheel" }

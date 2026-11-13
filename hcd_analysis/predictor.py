@@ -47,7 +47,7 @@ clamped there. Above the highest redshift and outside the
 tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). Above z 4.6
 (``mf_release.VALIDATED_Z_MAX``, the upper edge of the frozen grouped-validation domain (z 2.2-4.6; the held-out validation is reported separately)) an LF+MF prediction is
 served with the same values but flagged ``mf_z_above_validated``, inside the tables too: it lies outside that domain. ``w_c`` and ``dndx`` stay the LF
-backbone's. ``fidelity`` ("LF" or "LF+MF"; None: the bundle's own) selects the output; "LF+MF" without a record raises
+backbone's unless the release also carries an incidence MF record (next paragraph). ``fidelity`` ("LF" or "LF+MF"; None: the bundle's own) selects the output; "LF+MF" without a record raises
 ``MFUnavailableError``. The record's provenance (version, composition and ruling ids, cache digests and their
 provenance statements, fit commit, the settled mean-flux convention of its targets, the HR inputs used) is in
 ``provenance["mf"]``. Without an MF record nothing here changes. A FOLD record (a held-out fit for grouped cross-validation) applies only on its research backbone
@@ -55,6 +55,18 @@ provenance statements, fit commit, the settled mean-flux convention of its targe
 fold's held-out LF and MF predictions at cache inputs from the same object. ``backbone_identity(pred)`` is what an MF
 record must declare about a backbone, derived from its member metas; ``lf_P_filt_at`` and ``native_modes`` serve the
 MF builder. These are module functions, so the public surface of ``Bundle`` is unchanged.
+
+**The MF correction of the incidence.** A release of format ``hcd_priya.release/2`` also names an incidence MF record
+(format ``hcd_priya.incidence_mf_record/1``, ``emulator.incidence_mf``): a fixed table R_c(z), the mean over the matched
+HR simulations of (dN/dX)_HR / (dN/dX)_LF per HCD class and redshift. ``load_release`` loads it, anchored on the digest
+the manifest gives, and refuses one fitted on another LF cache than the backbone's training cache. An LF+MF prediction
+then returns ``dndx = dndx_LF R_c(z)``, and ``w_c`` is the w_c map of that corrected ``dndx``; ``P_class`` is not
+touched by it, so a mixed spectrum changes only through the fractions. An LF prediction is unchanged. R_c does not
+depend on the cosmological parameters or on the mean flux; between the tabulated redshifts it is linear, beyond them
+it is held constant and flagged (``incidence_mf_z_clamped``). The w_c map was fitted on LF counts; that it holds for
+the corrected incidence is not validated. The record also stores the same kind of table for the column-density
+distribution; the predictor returns no CDDF, so that table is not applied here. A release of format 1 has no such
+record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition.
 
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
 k_p = 0.78 Mpc^-1, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
@@ -108,6 +120,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from .emulator import incidence_mf as _IM
 from .emulator import kcoord as _K
 from .emulator import mf_release as _MR
 from .emulator import safe_h5 as _H
@@ -571,9 +584,12 @@ class Prediction:
     w_c : numpy.ndarray
         Shape (3,). The model's estimate of each HCD class's sightline fraction at these
         parameters and redshift, from ``dndx`` through the w_c map of the bundle.
+        With an incidence MF record (flag ``incidence_mf_applied``), from the corrected ``dndx``.
     dndx : numpy.ndarray
         Shape (3,). The predicted incidence dN/dX of each HCD class (absorbers per unit absorption
-        distance X), averaged over the members.
+        distance X), averaged over the members. In an LF+MF prediction of a release that carries
+        an incidence MF record it is multiplied by that record's factor R_c(z), the HR/LF ratio
+        of the incidence (flag ``incidence_mf_applied``; ``labels["incidence_mf"]``).
     member_std : numpy.ndarray or None
         Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
         members disagree. It is not a calibrated emulator error and not a covariance. None for a
@@ -707,6 +723,8 @@ class _PredictorBase:
         }
         if self._mf is not None:
             out["mf"] = self._mf.provenance()
+        if self._inc is not None:
+            out["incidence_mf"] = self._inc.provenance()
         if self._release is not None:
             out["release"] = copy.deepcopy(self._release)
         return out
@@ -893,6 +911,58 @@ class _PredictorBase:
         # grouped-validation domain); at build time this is the domain edge, not a passed validation.
         self._mf_vzmin = float(rec["validated_z_min"])
 
+    # ------------------------------------------------------------------ the MF correction of the incidence
+    _inc = None
+
+    def _attach_incidence(self, inc):
+        """Bind a loaded incidence MF record (``incidence_mf.load_record``, anchored; re-derived from its sealed
+        bytes by ``incidence_mf.reverify``). Its LF cache must be this backbone's training cache, as re-derived from
+        the member metas: the table's denominators are that cache's dN/dX. It is applied only together with the P1D
+        MF record, so a bundle without one refuses it."""
+        inc = _IM.reverify(inc)
+        if self._mf is None:
+            raise _MR.MFRecordError(
+                "the incidence MF record is applied with the P1D MF record (fidelity LF+MF); this bundle "
+                "carries none"
+            )
+        cache = self._backbone_identity()["cache_sha256"]
+        if inc.record["lf_cache"]["sha256"] != cache:
+            raise _MR.MFRecordError(
+                f"the incidence MF record was fitted on the LF cache {inc.record['lf_cache']['sha256'][:12]}, "
+                f"not on this bundle's training cache {cache[:12]}"
+            )
+        self._inc = inc
+        self._inc_tab = inc.dndx_table()
+
+    def _incidence_flags(self, zs, use_mf):
+        z = self._inc.z
+        return {
+            "incidence_mf_applied": bool(use_mf),
+            "incidence_mf_z_clamped": bool(any(v < z[0] - Z_TOL or v > z[-1] + Z_TOL for v in zs)),
+        }
+
+    def _incidence_labels(self, labels, use_mf):
+        out = {
+            "incidence_mf": "the MF correction of the incidence of the loaded incidence record: dndx_MF = dndx_LF "
+            "R_c(z), R_c(z) the mean over the matched HR simulations of (dN/dX)_HR / (dN/dX)_LF per class and "
+            "redshift (theta-independent; linear in z between the tabulated redshifts, held constant and flagged "
+            "incidence_mf_z_clamped beyond them); applied with the P1D MF correction, never to an LF prediction"
+        }
+        if use_mf:
+            out["dndx"] = (
+                "the members' mean Head-A dN/dX, multiplied by the incidence MF factor R_c(z)"
+            )
+            out["w_c"] = (
+                labels["w_c"]
+                + "; the dN/dX is multiplied by the incidence MF factor R_c(z) before the map (the map itself "
+                "was fitted on LF counts)"
+            )
+            out["mf"] = labels["mf"].replace(
+                "w_c stays the LF backbone's",
+                "dndx and w_c carry the incidence MF correction (labels incidence_mf)",
+            )
+        return out
+
     def _use_mf(self, fidelity):
         if fidelity is None:
             return self._mf is not None
@@ -1054,6 +1124,9 @@ class _PredictorBase:
           correction is held constant beyond its tables; ``mf_z_above_validated``, an LF+MF
           prediction above z 4.6, outside the frozen grouped-validation domain (z 2.2-4.6). The
           values there are served unchanged.
+        - With an incidence MF record: ``incidence_mf_applied``, ``dndx`` was multiplied by the
+          HR/LF ratio of the incidence and ``w_c`` follows; ``incidence_mf_z_clamped``, the
+          ratio is held constant beyond its table.
 
         The first call for an input shape compiles the model with JAX; later calls reuse it.
 
@@ -1217,12 +1290,31 @@ class _PredictorBase:
         Pm = P.mean(axis=1)  # (n_z, 4, K)
         std = P.std(axis=1, ddof=1) if P.shape[1] > 1 else None
         dmean = dn.mean(axis=1)  # (n_z, 3)
+        if (
+            use_mf and self._inc is not None
+        ):  # dndx_MF = dndx_LF R_c(z), before the map to fractions
+            from .emulator.multifidelity import apply_dndx_res_corr
+
+            dmean = np.stack(
+                [
+                    np.asarray(
+                        apply_dndx_res_corr(
+                            self._inc_tab, jnp.asarray(dmean[i]), jnp.asarray(float(z))
+                        ),
+                        dtype=np.float64,
+                    )
+                    for i, z in enumerate(zs)
+                ]
+            )
         w4 = np.stack([self._rb.wc_map.w_c(dmean[i], z) for i, z in enumerate(zs)])
         template = Pm[:, 1:, :] / Pm[:, :1, :] - 1.0
         flags, labels, prov = self._flags(pv, th, zs, taus, kout), self.labels(), self.provenance
         if self._mf is not None:
             flags.update(self._mf_flags(zs, taus, use_mf))
             labels.update(self._mf_labels(labels, use_mf))
+        if self._inc is not None:
+            flags.update(self._incidence_flags(zs, use_mf))
+            labels.update(self._incidence_labels(labels, use_mf))
         # a mean flux outside what the model covers is served, flagged, and said aloud: once per call
         if flags["mean_flux_off_ladder"]:
             self._warn_off_ladder(zs, taus)
@@ -1598,7 +1690,11 @@ def load_release(release_dir: str | os.PathLike[str], expected_release_sha256: s
 
     A release directory holds ``release.json`` (format ``hcd_priya.release/1``) and the two parts
     it names with their sha256: the backbone bundle and the MF record. The one published sha256,
-    that of ``release.json``, anchors the whole release.
+    that of ``release.json``, anchors the whole release. A release of format
+    ``hcd_priya.release/2`` names a third part, the incidence MF record: with it, an LF+MF
+    prediction's ``dndx`` is multiplied by the HR/LF ratio of the incidence, R_c(z), and ``w_c``
+    follows through the w_c map. A release of format 1 has no such record: its ``dndx`` and
+    ``w_c`` are the LF model's.
 
     Parameters
     ----------
@@ -1657,6 +1753,12 @@ def load_release(release_dir: str | os.PathLike[str], expected_release_sha256: s
         mf_dir=parts["mf"],
         mf_record_sha256=m["mf"]["record_sha256"],
     )
+    if "incidence" in parts:  # format 2: the MF correction of the incidence
+        b._attach_incidence(
+            _IM.load_record(
+                parts["incidence"], expected_record_sha256=m["incidence"]["record_sha256"]
+            )
+        )
     b._release = {
         "format": m["format"],
         "release_version": m["release_version"],
@@ -2014,7 +2116,7 @@ def load_published(name: str = DEFAULT_MODEL) -> Bundle:
         )
 
     # 3. Only an LF+MF release directory loads here; another format has its own loader.
-    if fmt != "hcd_priya.release/1":
+    if fmt not in ("hcd_priya.release/1", "hcd_priya.release/2"):
         raise ModelPackageError(f"{name!r}: the format {fmt!r} is not one load_published loads")
 
     # 4. Find the files inside the installed model package. A package whose list names files it
@@ -2028,6 +2130,10 @@ def load_published(name: str = DEFAULT_MODEL) -> Bundle:
 
     # 5. Load. load_release verifies release.json against the digest and then every file it names.
     emu = load_release(root, anchor)
+    if emu._release["format"] != fmt:
+        raise ModelPackageError(
+            f"{name!r}: the release is {emu._release['format']}, but it is listed as {fmt}"
+        )
     if synthetic:  # visible in every prediction's provenance, also when warnings are filtered
         emu._release = dict(emu._release, synthetic_build=True)
     return emu

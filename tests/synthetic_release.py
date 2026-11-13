@@ -11,25 +11,66 @@ from pathlib import Path
 from hcd_analysis.emulator import release_manifest as RM
 from hcd_analysis.emulator import release_testing as RT
 
+# A plainly synthetic incidence table: round numbers that no simulation gives.
+INCIDENCE_TABLES = {
+    "z": [2.0, 3.0, 5.0],
+    "n_sims": [1, 2, 2],
+    "dndx_ratio": [[2.0, 3.0, 0.5], [4.0, 3.0, 0.5], [4.0, 5.0, 0.25]],
+    "log_nhi_centres": [17.5, 20.5],
+    "cddf_ratio": [[2.0, 0.5], [4.0, 0.5], [4.0, 0.25]],
+}
 
-def make_release(root, *, version="synthetic-release-1", n_members=2):
+
+def write_incidence(path, *, cache, tables=None, **over):
+    """Write a synthetic incidence MF record into the new directory ``path``, fitted (in name) on the LF cache
+    ``cache``. ``over`` replaces arguments of ``incidence_mf.write_record``. Returns the record's sha256.
+    """
+    from hcd_analysis.emulator import incidence_mf as IM
+
+    kw = dict(
+        version="synthetic-incidence-1",
+        lf_cache={"file": RT.SYNTHETIC_CACHE_NAME, "sha256": cache},
+        hr_incidence={"file": "synthetic_hr_incidence.npz", "sha256": "ab" * 32},
+        groups_not_in_product=["synthsim9 snapshot 3"],
+        composition={
+            "id": "synthetic-composition",
+            "excluded_sims": ["synthsim3"],
+            "ruling_ids": ["synthetic ruling"],
+        },
+        train_sims=["synthsim1", "synthsim2"],
+        n_pairs=5,
+        fit_code={"commit": "c" * 40, "dirty": False},
+    )
+    kw.update(over)
+    return IM.write_record(str(path), INCIDENCE_TABLES if tables is None else tables, **kw)[1]
+
+
+def make_release(root, *, version="synthetic-release-1", n_members=2, incidence=False):
     """Write the release under ``root`` (created). Returns {"root": Path, "sha": the sha256 of release.json,
-    "bundle": the backbone's SyntheticBundle, "mf_sha": the MF record's sha256}."""
+    "bundle": the backbone's SyntheticBundle, "mf_sha": the MF record's sha256}. With ``incidence`` the release is of
+    format 2 and also holds a synthetic incidence MF record ("incidence_sha": its sha256)."""
     from tests.test_predictor_mf import write_mf
 
     root = Path(root)
     root.mkdir(parents=True)
     b = RT.write_synthetic_bundle(str(root / "backbone"), n_members=n_members)
-    s = write_mf(root / "mf", manifest=b.manifest_sha256, cache=b.lineage["cache"]["sha256"])
-    _, rs = RM.write_release_manifest(
+    cache = b.lineage["cache"]["sha256"]
+    s = write_mf(root / "mf", manifest=b.manifest_sha256, cache=cache)
+    out = {"root": root, "bundle": b, "mf_sha": s}
+    extra = {}
+    if incidence:
+        out["incidence_sha"] = write_incidence(root / "incidence", cache=cache)
+        extra = dict(incidence_dir="incidence", incidence_record_sha256=out["incidence_sha"])
+    _, out["sha"] = RM.write_release_manifest(
         str(root),
         release_version=version,
         backbone_dir="backbone",
         backbone_manifest_sha256=b.manifest_sha256,
         mf_dir="mf",
         mf_record_sha256=s,
+        **extra,
     )
-    return {"root": root, "sha": rs, "bundle": b, "mf_sha": s}
+    return out
 
 
 def model_package(
@@ -47,7 +88,7 @@ def model_package(
     shutil.copytree(release["root"], pkg / "data" / name)
     entry = {
         "name": name,
-        "format": "hcd_priya.release/1",
+        "format": json.loads((Path(release["root"]) / "release.json").read_text())["format"],
         "path": name,
         "anchor_sha256": release["sha"] if anchor is None else anchor,
     }

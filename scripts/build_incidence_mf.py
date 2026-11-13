@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""Build one incidence MF record (format ``hcd_priya.incidence_mf_record/1``; hcd_analysis/emulator/incidence_mf.py)
+from explicit, digest-pinned inputs, into a NEW directory.
+
+The record holds the fixed table R_c(z) = mean over the matched HR simulations of (dN/dX)_HR / (dN/dX)_LF per HCD
+class and redshift, and the same kind of table per column-density bin for the CDDF. The tables are computed by the
+functions of hcd_analysis/emulator/multifidelity.py (build_dndx_res_corr, build_cddf_res_corr); this script adds no
+estimator.
+
+  1. refuses an existing --out-dir, and a dirty tree, before any input is read;
+  2. hashes the LF cache and the HR incidence product and refuses any that differs from its pin;
+  3. reads the LF cache's snapshot columns (multifidelity.load_snap_cache) and the HR incidence product
+     (incidence_mf.hr_snap_from_product: an .npz of plain arrays derived from the rebuilt HR catalogues; the HR
+     cache is never read);
+  4. leaves out the simulations the composition excludes (--exclude-sim), pairs every remaining HR snapshot with its
+     LF partner on parameters and redshift (multifidelity.match_snap_hr_to_lf) and refuses an HR snapshot without a
+     partner;
+  5. fits the two tables, writes the record, reloads it and prints its sha256 (the anchor to publish).
+
+The composition has no default: which HR simulations make the table is stated on the command line and in the record.
+
+  python scripts/build_incidence_mf.py --version V --out-dir NEW \\
+      --lf-cache LF.h5 --lf-cache-sha256 H --hr-incidence HR.npz --hr-incidence-sha256 H \\
+      --composition-id ID [--exclude-sim NAME ...] --ruling-id R [--ruling-id ...] \\
+      [--group-not-in-product TEXT ...]
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+import sys
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _REPO_ROOT)
+
+# the code identity ({commit, dirty} of this checkout) is the P1D MF builder's function, not a second one
+_spec = importlib.util.spec_from_file_location(
+    "build_mf_release", os.path.join(_REPO_ROOT, "scripts", "build_mf_release.py")
+)
+_BMR = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_BMR)
+code_identity = _BMR.code_identity
+
+
+def parse(argv=None):
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument("--version", required=True, help="the record's version text")
+    ap.add_argument("--out-dir", required=True, help="a NEW directory (an existing one is refused)")
+    ap.add_argument("--lf-cache", required=True, help="the LF training cache (.h5)")
+    ap.add_argument("--lf-cache-sha256", required=True)
+    ap.add_argument("--hr-incidence", required=True, help="the HR incidence product (.npz)")
+    ap.add_argument("--hr-incidence-sha256", required=True)
+    ap.add_argument("--composition-id", required=True)
+    ap.add_argument("--exclude-sim", action="append", default=[], help="an HR simulation left out")
+    ap.add_argument("--ruling-id", action="append", default=[], required=True)
+    ap.add_argument(
+        "--group-not-in-product",
+        action="append",
+        default=[],
+        help="an HR snapshot group that the HR incidence product does not hold (recorded as given)",
+    )
+    return ap.parse_args(argv)
+
+
+def main(argv=None, *, _code=None):
+    a = parse(argv)
+    out = os.path.abspath(a.out_dir)
+    if os.path.lexists(out):  # write once: before any input is read
+        sys.exit(
+            f"refusing: --out-dir {out} exists (a record is written once into a new directory)"
+        )
+    code = (_code or code_identity)()
+    if code["dirty"]:
+        sys.exit(
+            "refusing: an incidence MF record is built from a clean tree (git status is not empty)"
+        )
+    from hcd_analysis import lineage as L
+
+    pins = {
+        "LF cache": (a.lf_cache, a.lf_cache_sha256),
+        "HR incidence product": (a.hr_incidence, a.hr_incidence_sha256),
+    }
+    for what, (p, want) in pins.items():
+        got = L.sha256_file(p)
+        if got != want:
+            sys.exit(f"refusing: the {what} {p} has sha256 {got}, not the pinned {want}")
+    import hcd_analysis.emulator  # noqa: F401  (float64)
+    from hcd_analysis.emulator import incidence_mf as IM
+    from hcd_analysis.emulator import multifidelity as MF
+
+    lf = MF.load_snap_cache(a.lf_cache)
+    hr = IM.hr_snap_from_product(a.hr_incidence)
+    for what, (p, want) in pins.items():
+        if L.sha256_file(p) != want:
+            sys.exit(f"refusing: the {what} changed while it was read")
+    composition = {
+        "id": a.composition_id,
+        "excluded_sims": sorted(set(a.exclude_sim)),
+        "ruling_ids": a.ruling_id,
+    }
+    try:
+        tables, train, n_pairs = IM.fit_tables(lf, hr, exclude_sims=composition["excluded_sims"])
+        path, sha = IM.write_record(
+            out,
+            tables,
+            version=a.version,
+            lf_cache={"file": os.path.basename(a.lf_cache), "sha256": a.lf_cache_sha256},
+            hr_incidence={
+                "file": os.path.basename(a.hr_incidence),
+                "sha256": a.hr_incidence_sha256,
+            },
+            groups_not_in_product=a.group_not_in_product,
+            composition=composition,
+            train_sims=train,
+            n_pairs=n_pairs,
+            fit_code=code,
+        )
+    except IM.MFRecordError as e:
+        sys.exit(f"refusing: {e}")
+    inc = IM.load_record(out, expected_record_sha256=sha, lf_cache_sha256=a.lf_cache_sha256)
+    summary = {
+        "record": path,
+        "record_sha256": sha,
+        "composition": composition,
+        "train_sims": train,
+        "n_pairs": n_pairs,
+        "z": [float(v) for v in inc.z],
+        "n_sims": [int(v) for v in inc.n_sims],
+    }
+    print(json.dumps(summary, indent=1))
+
+
+if __name__ == "__main__":
+    main()

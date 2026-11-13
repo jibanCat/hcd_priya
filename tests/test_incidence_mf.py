@@ -1,0 +1,463 @@
+"""The MF correction of the incidence (hcd_analysis/emulator/incidence_mf.py): the fit is the historical functions of
+multifidelity.py on the matched pairs; the record round-trips and is strict; a release of format 2 names it; and an
+LF+MF prediction's dN/dX is multiplied by the record's factor before the w_c map. Synthetic values only: the ratios
+are round numbers that no simulation gives."""
+
+import hashlib
+import json
+import os
+import shutil
+
+import jax.numpy as jnp
+import numpy as np
+import pytest
+
+import hcd_analysis.predictor as hp
+from hcd_analysis.emulator import incidence_mf as IM
+from hcd_analysis.emulator import multifidelity as MF
+from hcd_analysis.emulator import release_manifest as RM
+from hcd_analysis.emulator.data import PARAM_LIMITS, normalize_params
+from tests.synthetic_release import INCIDENCE_TABLES, make_release, write_incidence
+from tests.test_predictor_mf import PARAMS
+
+E = IM.MFRecordError
+SIMS = ("synthsimA", "synthsimB", "synthsimC")
+ZS = (2.0, 3.0, 4.0)
+RATIO = np.array(
+    [[2.0, 3.0, 0.5], [4.0, 3.0, 0.5], [4.0, 5.0, 0.25]]
+)  # (z, class): the synthetic HR/LF
+LOG_NHI = np.array([17.5, 20.5])
+CDDF_RATIO = np.array([[2.0, 0.5], [4.0, 0.5], [4.0, 0.25]])
+
+
+def snaps(sims=SIMS, zs=ZS):
+    """Synthetic LF and HR snapshot dicts (the keys of multifidelity.load_snap_cache): one LF and one HR snapshot per
+    simulation and redshift, HR = LF times RATIO exactly, plus one LF simulation with no HR run."""
+    lim = np.asarray(PARAM_LIMITS, float)
+    rows = {"lf": [], "hr": []}
+    for i, s in enumerate(list(sims) + ["synthsim_lf_only"]):
+        params = lim[:, 0] + (0.1 + 0.2 * i) * (lim[:, 1] - lim[:, 0])
+        for j, z in enumerate(zs):
+            dndx = np.array([0.25, 0.125, 0.0625]) * (1 + i) * (1 + j)
+            f = np.array([8.0, 2.0]) * (1 + i) * (1 + j)
+            rows["lf"].append((s, z, params, dndx, f))
+            if s in sims:
+                rows["hr"].append((s, z, params, dndx * RATIO[j], f * CDDF_RATIO[j]))
+
+    def pack(r):
+        params = np.array([x[2] for x in r])
+        return dict(
+            sim=np.array([x[0] for x in r]),
+            z=np.round(np.array([x[1] for x in r]), 4),
+            params=params,
+            pu=np.round(normalize_params(params), 6),
+            dndx=np.array([x[3] for x in r]),
+            f_nhi=np.array([x[4] for x in r]),
+            log_nhi=LOG_NHI.copy(),
+        )
+
+    return pack(rows["lf"]), pack(rows["hr"])
+
+
+# ----------------------------------------------------------------------------------------------- the fit
+def test_the_fit_is_the_historical_functions_on_the_matched_pairs():
+    lf, hr = snaps()
+    t, train, n = IM.fit_tables(lf, hr)
+    assert train == sorted(SIMS) and n == 9 and t["n_sims"].tolist() == [3, 3, 3]
+    np.testing.assert_allclose(t["dndx_ratio"], RATIO, rtol=1e-14)
+    np.testing.assert_allclose(t["cddf_ratio"], CDDF_RATIO, rtol=1e-14)
+    assert t["z"].tolist() == list(ZS) and t["log_nhi_centres"].tolist() == LOG_NHI.tolist()
+    # the same numbers as the historical builders called by hand on the pairs
+    pairs = MF.match_snap_hr_to_lf(lf, hr)
+    h, l = np.array([p[0] for p in pairs]), np.array([p[1] for p in pairs])
+    old = MF.build_dndx_res_corr(lf["dndx"][l], lf["z"][l], hr["dndx"][h], hr["z"][h])
+    oldc = MF.build_cddf_res_corr(lf["f_nhi"][l], lf["z"][l], hr["f_nhi"][h], hr["z"][h], LOG_NHI)
+    assert t["dndx_ratio"].tobytes() == old["ratio"].tobytes()
+    assert t["cddf_ratio"].tobytes() == oldc["ratio"].tobytes()
+
+
+def test_the_composition_leaves_simulations_out_and_says_which_remain():
+    lf, hr = snaps()
+    hr["dndx"][hr["sim"] == "synthsimC"] *= 3.0  # one run with another ratio
+    all3, _, _ = IM.fit_tables(lf, hr)
+    t, train, n = IM.fit_tables(lf, hr, exclude_sims=["synthsimC"])
+    assert train == ["synthsimA", "synthsimB"] and n == 6 and t["n_sims"].tolist() == [2, 2, 2]
+    np.testing.assert_allclose(t["dndx_ratio"], RATIO, rtol=1e-14)
+    np.testing.assert_allclose(all3["dndx_ratio"], RATIO * 5.0 / 3.0, rtol=1e-14)
+    with pytest.raises(E, match="unknown simulations"):
+        IM.fit_tables(lf, hr, exclude_sims=["no_such_sim"])
+    with pytest.raises(E, match="no HR simulation left"):
+        IM.fit_tables(lf, hr, exclude_sims=list(SIMS))
+
+
+def test_an_hr_snapshot_without_its_lf_partner_is_refused_not_dropped():
+    lf, hr = snaps()
+    hr["z"][0] = 2.5  # no LF snapshot of that simulation there
+    with pytest.raises(E, match="without an LF partner.*synthsimA z=2.5"):
+        IM.fit_tables(lf, hr)
+    lf, hr = snaps()
+    hr["log_nhi"] = LOG_NHI + 0.1
+    with pytest.raises(E, match="column-density bins differ"):
+        IM.fit_tables(lf, hr)
+
+
+def test_the_hr_product_is_read_as_plain_arrays(tmp_path):
+    _, hr = snaps()
+    arrays = dict(
+        sim_name=hr["sim"],
+        z=hr["z"],
+        params=hr["params"],
+        dndx=hr["dndx"],
+        cddf=hr["f_nhi"],
+        log_nhi_centres=hr["log_nhi"],
+        class_names=np.array(IM.CLASS_ORDER),
+    )
+    p = tmp_path / "hr.npz"
+    np.savez(p, **arrays)
+    got = IM.hr_snap_from_product(p)
+    assert set(got) == set(hr) and all(np.array_equal(got[k], hr[k]) for k in hr)
+    for name, change, why in (
+        ("missing", {"dndx": None}, "lacks the arrays"),
+        ("order", {"class_names": np.array(["DLA", "subDLA", "LLS"])}, "class_names must be"),
+        ("shape", {"dndx": hr["dndx"][:, :2]}, "inconsistent shapes"),
+        ("pickle", {"sim_name": np.array(list(hr["sim"]), dtype=object)}, "unreadable"),
+    ):
+        q = tmp_path / f"{name}.npz"
+        np.savez(q, **{k: v for k, v in dict(arrays, **change).items() if v is not None})
+        with pytest.raises(E, match=why):
+            IM.hr_snap_from_product(q)
+    (tmp_path / "text.npz").write_text("not an archive")
+    with pytest.raises(E, match="unreadable"):
+        IM.hr_snap_from_product(tmp_path / "text.npz")
+
+
+# ----------------------------------------------------------------------------------------------- the record
+CACHE = "cd" * 32
+
+
+def test_a_record_round_trips_and_its_factor_is_the_historical_lookup(tmp_path):
+    lf, hr = snaps()
+    t, train, n = IM.fit_tables(lf, hr)
+    sha = write_incidence(tmp_path / "inc", cache=CACHE, tables=t, train_sims=train, n_pairs=n)
+    inc = IM.load_record(tmp_path / "inc", expected_record_sha256=sha, lf_cache_sha256=CACHE)
+    assert inc.anchored is True and inc.record_sha256 == sha
+    for k in ("z", "dndx_ratio", "log_nhi_centres", "cddf_ratio"):
+        assert getattr(inc, k).tobytes() == np.asarray(t[k], float).tobytes()  # bit for bit
+        assert not getattr(inc, k).flags.writeable
+    assert inc.n_sims.tolist() == [3, 3, 3]
+    old = {"z": t["z"], "ratio": t["dndx_ratio"]}
+    for z in (1.0, 2.0, 2.5, 3.0, 3.75, 4.0, 6.0):
+        want = np.asarray(MF.dndx_res_factor(old, jnp.asarray(z)))
+        assert inc.dndx_factor(z).tobytes() == want.tobytes()
+    assert inc.dndx_factor(2.5).tolist() == [3.0, 3.0, 0.5]  # linear between the rows
+    assert inc.dndx_factor(9.0).tolist() == RATIO[-1].tolist()  # held beyond the table
+    assert inc.dndx_factor(0.0).tolist() == RATIO[0].tolist()
+    assert inc.cddf_factor(2.5).tolist() == [3.0, 0.5] and inc.cddf_factor(7.0).tolist() == [
+        4.0,
+        0.25,
+    ]
+    old_c = {"z": t["z"], "log_nhi": LOG_NHI, "ratio": t["cddf_ratio"]}
+    assert (
+        inc.cddf_factor(3.5).tobytes()
+        == np.asarray(MF.cddf_res_factor(old_c, jnp.asarray(3.5))).tobytes()
+    )
+    # the record states its inputs, its runs and the groups its HR product does not hold
+    p = inc.provenance()
+    assert p["lf_cache"]["sha256"] == CACHE and p["lf_cache"]["source"] == IM.LF_SOURCE
+    assert p["hr_incidence"]["sha256"] == "ab" * 32 and p["hr_incidence"]["source"] == IM.HR_SOURCE
+    assert p["hr_incidence"]["groups_not_in_product"] == ["synthsim9 snapshot 3"]
+    assert p["train_sims"] == sorted(SIMS) and p["composition"]["excluded_sims"] == ["synthsim3"]
+    assert p["n_sims"] == [3, 3, 3] and p["z"] == list(ZS)
+
+
+def test_a_record_is_written_once_and_only_from_a_clean_tree(tmp_path):
+    write_incidence(tmp_path / "inc", cache=CACHE)
+    with pytest.raises(FileExistsError, match="written once"):
+        write_incidence(tmp_path / "inc", cache=CACHE)
+    with pytest.raises(E, match="clean tree"):
+        write_incidence(
+            tmp_path / "dirty", cache=CACHE, fit_code={"commit": "c" * 40, "dirty": True}
+        )
+    assert not (tmp_path / "dirty").exists()  # refused before anything is written
+    bad = dict(INCIDENCE_TABLES, dndx_ratio=[[2.0, 3.0, float("nan")]] * 3)
+    with pytest.raises(E, match="finite"):
+        write_incidence(tmp_path / "nan", cache=CACHE, tables=bad)
+    with pytest.raises(E, match="file, sha256"):
+        write_incidence(tmp_path / "keys", cache=CACHE, lf_cache={"file": "x.h5"})
+
+
+def _rewrite(tmp_path, name, change):
+    """A record directory whose JSON was changed by ``change(doc)`` (or replaced by the bytes it returns), with the
+    sha256 of the changed file."""
+    d = tmp_path / name
+    write_incidence(d, cache=CACHE)
+    p = d / IM.RECORD_FILE
+    doc = json.loads(p.read_text())
+    out = change(doc)
+    raw = out if isinstance(out, bytes) else json.dumps(doc).encode()
+    os.chmod(p, 0o644)
+    p.write_bytes(raw)
+    return d, hashlib.sha256(raw).hexdigest()
+
+
+def _set(path, value):
+    def change(doc):
+        d = doc
+        for k in path[:-1]:
+            d = d[k]
+        d[path[-1]] = value
+
+    return change
+
+
+@pytest.mark.parametrize(
+    "name, change, why",
+    [
+        ("extra_key", _set(["note"], "anything"), "unknown \\['note'\\]"),
+        ("format", _set(["format"], "hcd_priya.incidence_mf_record/0"), "format"),
+        ("form", _set(["model_form"], "another form"), "model_form"),
+        ("classes", _set(["class_order"], ["DLA", "subDLA", "LLS"]), "class_order"),
+        ("z_order", _set(["tables", "z"], [3.0, 2.0, 5.0]), "must ascend"),
+        ("one_z", _set(["tables", "z"], [3.0]), "at least two redshifts"),
+        ("negative", _set(["tables", "dndx_ratio"], [[2.0, 3.0, -0.5]] * 3), "must be positive"),
+        ("ragged", _set(["tables", "dndx_ratio"], [[2.0, 3.0], [1.0], [2.0]]), "dndx_ratio"),
+        ("text", _set(["tables", "cddf_ratio"], [["2.0", 0.5]] * 3), "cddf_ratio"),
+        ("bool", _set(["tables", "dndx_ratio"], [[True, 3.0, 0.5]] * 3), "dndx_ratio"),
+        ("no_pairs", _set(["tables", "n_sims"], [0, 2, 3]), "positive integers"),
+        ("pairs_sum", _set(["n_pairs"], 6), "sum of tables.n_sims"),
+        ("too_many", _set(["train_sims"], ["synthsim1"]), "more pairs than"),
+        ("excluded", _set(["train_sims"], ["synthsim1", "synthsim3"]), "excluded"),
+        ("dirty", _set(["fit_code", "dirty"], True), "clean tree"),
+        ("lf_source", _set(["lf_cache", "source"], "the HR cache"), "lf_cache.source"),
+        ("hr_source", _set(["hr_incidence", "source"], "the HR cache"), "hr_incidence.source"),
+        ("path", _set(["hr_incidence", "file"], "../hr.npz"), "plain file name"),
+        (
+            "groups",
+            _set(["hr_incidence", "groups_not_in_product"], "none"),
+            "groups_not_in_product",
+        ),
+        ("ruling", _set(["composition", "ruling_ids"], []), "ruling"),
+        ("nan", lambda d: json.dumps(dict(d, version=float("nan"))).encode(), "NaN|constant"),
+        (
+            "duplicate",
+            lambda d: json.dumps(d).encode()[:-1] + b', "version": "second"}',
+            "duplicate",
+        ),
+        ("not_json", lambda d: b"\x00\x01", "JSON|json|decode"),
+    ],
+)
+def test_a_changed_record_is_refused(tmp_path, name, change, why):
+    d, sha = _rewrite(tmp_path, name, change)
+    with pytest.raises(E, match=why):
+        IM.load_record(d, expected_record_sha256=sha)
+
+
+def test_a_record_loads_only_under_its_published_digest_from_its_own_directory(tmp_path):
+    sha = write_incidence(tmp_path / "inc", cache=CACHE)
+    for bad in (None, "ab" * 32, sha.upper(), sha[:-1]):
+        with pytest.raises(E, match="sha256"):
+            IM.load_record(tmp_path / "inc", expected_record_sha256=bad)
+    with pytest.raises(E, match="built from the LF cache"):
+        IM.load_record(tmp_path / "inc", expected_record_sha256=sha, lf_cache_sha256="ef" * 32)
+    os.symlink(tmp_path / "inc", tmp_path / "link")
+    with pytest.raises(E, match="not an incidence MF record directory"):
+        IM.load_record(tmp_path / "link", expected_record_sha256=sha)
+    (tmp_path / "inc" / "notes.txt").write_text("x")
+    with pytest.raises(E, match="unexpected files"):
+        IM.load_record(tmp_path / "inc", expected_record_sha256=sha)
+    with pytest.raises(E, match="no readable"):
+        IM.load_record(tmp_path, expected_record_sha256=sha)
+
+
+def test_only_a_sealed_unchanged_record_is_applied(tmp_path):
+    sha = write_incidence(tmp_path / "inc", cache=CACHE)
+    inc = IM.load_record(tmp_path / "inc", expected_record_sha256=sha)
+    assert IM.reverify(inc).dndx_ratio.tobytes() == inc.dndx_ratio.tobytes()
+    raw = (tmp_path / "inc" / IM.RECORD_FILE).read_bytes()
+    with pytest.raises(E, match="loaded by incidence_mf.load_record"):
+        IM.reverify(IM.parse_record(raw))  # parsed without its published digest: not anchored
+    with pytest.raises(E, match="changed in memory"):
+        IM.reverify(inc._replace(dndx_ratio=inc.dndx_ratio * 2.0))
+    with pytest.raises(E, match="changed in memory"):
+        IM.reverify(inc._replace(record=dict(inc.record, version="another")))
+    with pytest.raises(E, match="sha256"):
+        IM.reverify(inc._replace(record_bytes=raw + b" "))
+    with pytest.raises(E, match="loaded by"):
+        IM.reverify({"z": [2.0]})
+
+
+# ----------------------------------------------------------------------------------------------- the manifest
+def test_format_2_is_format_1_plus_a_named_optional_part():
+    one = {
+        "format": RM.FORMAT,
+        "release_version": "v",
+        "backbone": {"dir": "backbone", "manifest_sha256": "a" * 64},
+        "mf": {"dir": "mf", "record_sha256": "b" * 64},
+    }
+    inc = {"dir": "incidence", "record_sha256": "c" * 64}
+    two = dict(one, format=RM.FORMAT_2, incidence=inc)
+    assert (
+        RM.check_release_manifest(dict(one)) == one and RM.check_release_manifest(dict(two)) == two
+    )
+    for bad, why in (
+        (dict(one, incidence=inc), "unknown \\['incidence'\\]"),  # format 1 has exactly two parts
+        (dict(one, format=RM.FORMAT_2), "at least one optional part"),
+        (dict(two, error={"dir": "error", "record_sha256": "d" * 64}), "unknown \\['error'\\]"),
+        (dict(two, incidence=dict(inc, dir="mf")), "two different directories"),
+        (dict(two, incidence=dict(inc, dir="../incidence")), "plain path segment"),
+        (dict(two, incidence=dict(inc, record_sha256="C" * 64)), "64 lowercase hex"),
+        (dict(two, incidence=dict(inc, note="x")), "incidence: keys"),
+        (dict(two, incidence=None), "incidence: keys"),
+        (dict(two, format="hcd_priya.release/3"), "format"),
+    ):
+        with pytest.raises(RM.ReleaseManifestError, match=why):
+            RM.check_release_manifest(bad)
+
+
+# ----------------------------------------------------------------------------------------------- the predictor
+@pytest.fixture(scope="module")
+def rel(tmp_path_factory):
+    """One synthetic backbone and MF record, as a release of format 2 (with the incidence record) and, from copies of
+    the same two parts, as a release of format 1."""
+    root = tmp_path_factory.mktemp("incidence")
+    two = make_release(root / "two", incidence=True)
+    one = root / "one"
+    one.mkdir()
+    for part in ("backbone", "mf"):
+        shutil.copytree(two["root"] / part, one / part)
+    _, sha1 = RM.write_release_manifest(
+        str(one),
+        release_version="synthetic-release-1",
+        backbone_dir="backbone",
+        backbone_manifest_sha256=two["bundle"].manifest_sha256,
+        mf_dir="mf",
+        mf_record_sha256=two["mf_sha"],
+    )
+    return {
+        "two": hp.load_release(str(two["root"]), two["sha"]),
+        "one": hp.load_release(str(one), sha1),
+        "info": two,
+        "root": root,
+    }
+
+
+def test_lf_mf_dndx_is_the_lf_dndx_times_the_factor_and_w_c_follows(rel):
+    two, one = rel["two"], rel["one"]
+    for z, factor, clamped in (
+        (3.0, [4.0, 3.0, 0.5], False),  # a tabulated redshift
+        (2.6, [3.2, 3.0, 0.5], False),  # between two rows: linear
+        (5.2, [4.0, 5.0, 0.25], True),  # above the table: held at the last row, and flagged
+    ):
+        p = two.predict(PARAMS, z, tau_eff=0.4)
+        q = one.predict(
+            PARAMS, z, tau_eff=0.4
+        )  # the same backbone and MF record, no incidence record
+        lf = two.predict(PARAMS, z, tau_eff=0.4, fidelity="LF")
+        np.testing.assert_allclose(p.dndx / q.dndx, factor, rtol=1e-13)
+        np.testing.assert_allclose(p.dndx, np.asarray(q.dndx) * two._inc.dndx_factor(z), rtol=1e-15)
+        assert (
+            q.dndx.tobytes() == lf.dndx.tobytes()
+        )  # without the record, LF+MF dN/dX is the LF dN/dX
+        assert (
+            p.w_c.tobytes() == two.wc_map.w_c(p.dndx, z)[1:].tobytes()
+        )  # the shipped map of the corrected dN/dX
+        assert not np.array_equal(p.w_c, q.w_c)
+        # the class spectra are not touched: a mixed spectrum changes only through the fractions
+        assert (
+            p.P_class.tobytes() == q.P_class.tobytes()
+            and p.template.tobytes() == q.template.tobytes()
+        )
+        assert hp.add_hcd(p, q.w_c).tobytes() == hp.add_hcd(q, q.w_c).tobytes()
+        assert not np.array_equal(hp.add_hcd(p, p.w_c), hp.add_hcd(q, q.w_c))
+        assert p.flags["incidence_mf_applied"] is True and p.flags["mf_applied"] is True
+        assert p.flags["incidence_mf_z_clamped"] is clamped
+        assert "incidence_mf_applied" not in q.flags and "incidence_mf" not in q.labels
+
+
+def test_an_lf_prediction_is_not_corrected(rel):
+    two, one = rel["two"], rel["one"]
+    a = two.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")
+    b = one.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")
+    for k in ("dndx", "w_c", "P_class"):
+        assert getattr(a, k).tobytes() == getattr(b, k).tobytes()
+    assert a.flags["incidence_mf_applied"] is False and "dndx" not in a.labels
+    assert "R_c(z)" in a.labels["incidence_mf"]  # the record is named, and said not to apply to LF
+
+
+def test_the_stack_equals_the_single_predictions(rel):
+    two = rel["two"]
+    zs = [2.6, 3.0, 5.2]
+    s = two.predict_many(PARAMS, zs, tau_eff=0.4)
+    for i, z in enumerate(zs):
+        p = two.predict(PARAMS, z, tau_eff=0.4)
+        np.testing.assert_allclose(s.dndx[i], p.dndx, rtol=1e-12)
+        np.testing.assert_allclose(s.w_c[i], p.w_c, rtol=1e-12)
+    assert s.flags["incidence_mf_applied"] is True and s.flags["incidence_mf_z_clamped"] is True
+
+
+def test_labels_and_provenance_say_what_was_applied(rel):
+    two, info = rel["two"], rel["info"]
+    p = two.predict(PARAMS, 3.0, tau_eff=0.4)
+    assert "multiplied by the incidence MF factor" in p.labels["dndx"]
+    assert "before the map" in p.labels["w_c"] and "fitted on LF counts" in p.labels["w_c"]
+    assert "w_c stays the LF backbone's" not in p.labels["mf"] and "incidence MF" in p.labels["mf"]
+    prov = p.provenance["incidence_mf"]
+    assert prov["record_sha256"] == info["incidence_sha"]
+    assert prov["lf_cache"]["sha256"] == info["bundle"].lineage["cache"]["sha256"]
+    assert prov["composition"]["id"] == "synthetic-composition" and prov["n_sims"] == [1, 2, 2]
+    assert p.provenance["release"]["format"] == RM.FORMAT_2
+    q = rel["one"].predict(PARAMS, 3.0, tau_eff=0.4)
+    assert "incidence_mf" not in q.provenance and q.provenance["release"]["format"] == RM.FORMAT
+    assert "w_c stays the LF backbone's" in q.labels["mf"]
+
+
+def _release_with(rel, tmp_path, name, write):
+    """A format-2 release from copies of the fixture's backbone and MF record, with the incidence record that
+    ``write(path)`` writes (it returns the record's sha256)."""
+    src, d = rel["info"]["root"], tmp_path / name
+    d.mkdir()
+    for part in ("backbone", "mf"):
+        shutil.copytree(src / part, d / part)
+    sha = write(d / "incidence")
+    _, rs = RM.write_release_manifest(
+        str(d),
+        release_version="synthetic-release-1",
+        backbone_dir="backbone",
+        backbone_manifest_sha256=rel["info"]["bundle"].manifest_sha256,
+        mf_dir="mf",
+        mf_record_sha256=rel["info"]["mf_sha"],
+        incidence_dir="incidence",
+        incidence_record_sha256=sha,
+    )
+    return str(d), rs, sha
+
+
+def test_a_record_fitted_on_another_lf_cache_is_refused_at_load(rel, tmp_path):
+    d, rs, _ = _release_with(rel, tmp_path, "other", lambda p: write_incidence(p, cache="ef" * 32))
+    with pytest.raises(E, match="not on this bundle's training cache"):
+        hp.load_release(d, rs)
+
+
+def test_a_release_names_its_incidence_record_by_digest(rel, tmp_path):
+    cache = rel["info"]["bundle"].lineage["cache"]["sha256"]
+    d, rs, sha = _release_with(rel, tmp_path, "good", lambda p: write_incidence(p, cache=cache))
+    assert hp.load_release(d, rs).provenance["incidence_mf"]["record_sha256"] == sha
+    p = os.path.join(d, "incidence", IM.RECORD_FILE)  # one changed number in the table
+    os.chmod(p, 0o644)
+    raw = open(p, "rb").read()
+    assert raw.count(b"0.25") == 2
+    open(p, "wb").write(raw.replace(b"0.25", b"0.26"))
+    with pytest.raises(E, match="sha256 does not match"):
+        hp.load_release(d, rs)
+
+
+def test_the_record_is_applied_only_with_the_p1d_mf_record(rel, tmp_path):
+    b = rel["info"]["bundle"]
+    sha = write_incidence(tmp_path / "inc", cache=b.lineage["cache"]["sha256"])
+    inc = IM.load_record(tmp_path / "inc", expected_record_sha256=sha)
+    lf_only = hp.load_bundle(b.bundle_dir, b.manifest_sha256)
+    with pytest.raises(E, match="applied with the P1D MF record"):
+        lf_only._attach_incidence(inc)
+    with pytest.raises(E, match="changed in memory"):
+        rel["one"]._attach_incidence(inc._replace(dndx_ratio=inc.dndx_ratio * 2.0))
+    assert rel["one"]._inc is None  # a refused record is not attached
