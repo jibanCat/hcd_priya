@@ -92,5 +92,7 @@ disabled until then.
       environment, with `--write-reference`.
 - [ ] A dry run on the test index, then the model package on the index, then the code package, by the manual
       workflow. A synthetic build (version `0+synthetic`) cannot be uploaded: the index refuses a local version.
+- [ ] The images of `README.md` are relative links, and the README is the package's long description: before the
+      upload they point to absolute URLs at the release tag, or the package index page shows them as broken.
 - [ ] After publication: the statements "not published yet" in `README.md`, `model_package/README.md` and the
       docstrings are updated, and the install commands become `pip install hcd-priya`.

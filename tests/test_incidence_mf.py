@@ -486,6 +486,24 @@ def test_an_lf_prediction_is_not_corrected(rel):
     for k in ("dndx", "w_c", "P_class"):
         assert getattr(a, k).tobytes() == getattr(b, k).tobytes()
     assert a.flags["incidence_mf_applied"] is False and "dndx" not in a.labels
+    # nothing was applied, so no flag says how the table was looked up: not at a tabulated redshift, not between
+    # two rows (2.6), not beyond the table (5.2), where the same LF+MF prediction is flagged
+    for z, flag in (
+        (3.0, None),
+        (2.6, "incidence_mf_z_interpolated"),
+        (5.2, "incidence_mf_z_clamped"),
+    ):
+        lf = two.predict(PARAMS, z, tau_eff=0.4, fidelity="LF")
+        for name in (
+            "incidence_mf_z_clamped",
+            "incidence_mf_z_interpolated",
+            "incidence_mf_single_pair",
+        ):
+            assert lf.flags[name] is False, (z, name)
+        if flag:
+            assert two.predict(PARAMS, z, tau_eff=0.4).flags[flag] is True
+    lf_stack = two.predict_many(PARAMS, [2.6, 3.0, 5.2], tau_eff=0.4, fidelity="LF")
+    assert not any(lf_stack.flags[n] for n in lf_stack.flags if n.startswith("incidence_mf_"))
     assert "R_c(z)" in a.labels["incidence_mf"]  # the record is named, and said not to apply to LF
 
 

@@ -20,7 +20,8 @@ What is drawn, in three panels (one per redshift bin of the measurement):
 
 The model needs an incidence MF record (a release of format 2): without one it returns no CDDF. The measurement bin
 from z = 4 to 5 is left out: it reaches beyond z 4.6, the upper edge of the redshift range the multi-fidelity
-correction is validated on.
+correction of the P1D is validated on. The correction of the CDDF that is drawn here is not validated at any
+redshift.
 """
 
 from __future__ import annotations

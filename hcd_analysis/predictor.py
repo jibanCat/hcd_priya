@@ -1033,8 +1033,10 @@ class _PredictorBase:
         between = [not c and not any(abs(v - t) <= Z_TOL for t in z) for v, c in zip(zs, clamped)]
         return {
             "incidence_mf_applied": bool(use_mf),
-            "incidence_mf_z_clamped": bool(any(clamped)),
-            "incidence_mf_z_interpolated": bool(any(between)),
+            # how the table was looked up: only when it was applied (an LF prediction applies nothing, so its
+            # three lookup flags are False)
+            "incidence_mf_z_clamped": bool(use_mf and any(clamped)),
+            "incidence_mf_z_interpolated": bool(use_mf and any(between)),
             # the dN/dX table row used rests on one simulation pair: a ratio of one simulation, not a mean (the
             # pairs behind each CDDF bin are in the provenance, cddf_n_pairs, and are not flagged one by one)
             "incidence_mf_single_pair": bool(use_mf and any(self._inc.single_pair(v) for v in zs)),

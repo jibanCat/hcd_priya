@@ -167,6 +167,18 @@ def write_package(version: str, synthetic: bool, models: list[dict]) -> None:
         fh.write(f"__version__ = {json.dumps(version)}\n")
 
 
+def check_loaded(loaded: dict, version: str, fmt: str) -> None:
+    """Stop unless the release that was loaded back from the copy is the one whose manifest was read: the same
+    version and the same format. An explicit check, so that it also runs under ``python -O``."""
+    for key, want in (("release_version", version), ("format", fmt)):
+        got = loaded.get(key)
+        if got != want:
+            sys.exit(
+                f"prepare: the copied release loads with {key} {got!r}, not {want!r} as its manifest says: no "
+                "package entry was written"
+            )
+
+
 def add_release(
     src: str, anchor: str, name: str = "lfmf", extra: tuple[str, ...] = ()
 ) -> tuple[dict, str]:
@@ -188,12 +200,11 @@ def add_release(
     emu = hp.load_release(
         dst, anchor
     )  # verifies every model file; refuses a file its manifests do not list
-    assert emu.provenance["release"]["release_version"] == version
+    check_loaded(emu.provenance["release"], version, fmt)
     sums = check_sums(dst, copied)
     print(
         f"prepare: {name}: {len(copied)} files copied and verified; {emu.n_members} members; {sums}"
     )
-    assert emu.provenance["release"]["format"] == fmt
     entry = {"name": name, "format": fmt, "path": name, "anchor_sha256": anchor}
     return entry, version
 
