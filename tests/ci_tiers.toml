@@ -65,6 +65,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_export_deployed_centre.py" = { tier = "source" }
 "tests/test_export_release_bundle.py" = { tier = "source" }
 "tests/test_export_research_bundle.py" = { tier = "source" }
+"tests/test_figure_scripts.py" = { tier = "source" }
 "tests/test_fisher_kit.py" = { tier = "wheel" }
 "tests/test_forward_ctx_v2.py" = { tier = "source" }
 "tests/test_forward_v2.py" = { tier = "wheel" }
