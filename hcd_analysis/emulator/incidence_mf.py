@@ -14,7 +14,9 @@ on the mean flux. Between the tabulated redshifts it is interpolated linearly, a
 **This module adds no estimator.** The tables are built and evaluated by the functions that have been in
 ``multifidelity.py`` since June 2026: ``load_snap_cache``, ``match_snap_hr_to_lf``, ``build_dndx_res_corr``,
 ``build_cddf_res_corr``, ``dndx_res_factor``, ``apply_dndx_res_corr``, ``cddf_res_factor``. What is here is the
-container: the record that carries a fitted table with its inputs, and its strict reader.
+container: the record that carries a fitted table with its inputs, and its strict reader. The predictor applies the
+dN/dX table before the map to sightline fractions, and the CDDF table to the column-density distribution it returns
+(``pred.cddf``), never returning a number in a bin where nothing was trained or measured (``cddf_n_pairs``).
 
 **Inputs.** The LF side is the LF training cache (its snapshot-level columns). The HR side is NOT the HR cache: the HR
 cache's catalogue-derived columns predate a catalogue fix and stay refused by ``mf_release`` (PI ruling 2026-11-06b
@@ -94,7 +96,7 @@ RECORD_KEYS = {
     "n_pairs",
     "fit_code",
 }
-_TABLE_KEYS = {"z", "n_sims", "dndx_ratio", "log_nhi_centres", "cddf_ratio"}
+_TABLE_KEYS = {"z", "n_sims", "dndx_ratio", "log_nhi_centres", "cddf_ratio", "cddf_n_pairs"}
 _LF_KEYS = {"file", "sha256", "source"}
 _HR_KEYS = {"file", "sha256", "source", "groups_not_in_product"}
 _HR_ARRAYS = ("sim_name", "z", "params", "dndx", "cddf", "log_nhi_centres", "class_names")
@@ -178,8 +180,10 @@ def fit_tables(lf_snap, hr_snap, *, exclude_sims):
     whose f(N_HI) is not finite and non-negative; differing column-density bins.
 
     Returns ``(tables, train_sims, n_pairs)``: ``tables`` has ``z`` (Nz,), ``n_sims`` (Nz,) the number of pairs
-    behind each redshift's dN/dX mean, ``dndx_ratio`` (Nz, 3), ``log_nhi_centres`` (Nbin,) and ``cddf_ratio``
-    (Nz, Nbin).
+    behind each redshift's dN/dX mean, ``dndx_ratio`` (Nz, 3), ``log_nhi_centres`` (Nbin,), ``cddf_ratio``
+    (Nz, Nbin) and ``cddf_n_pairs`` (Nz, Nbin), the number of pairs behind each CDDF cell (those with both values
+    positive). A cell with no such pair holds the ratio 1, which means "no correction measured", not "measured to
+    be 1": ``cddf_n_pairs`` is what tells the two apart.
     """
     from collections import Counter
 
@@ -240,6 +244,10 @@ def fit_tables(lf_snap, hr_snap, *, exclude_sims):
         "dndx_ratio": np.asarray(dn["ratio"], dtype=np.float64),
         "log_nhi_centres": np.asarray(cd["log_nhi"], dtype=np.float64),
         "cddf_ratio": np.asarray(cd["ratio"], dtype=np.float64),
+        # a count, not an estimate: the pairs with both values positive, the cells build_cddf_res_corr averages
+        "cddf_n_pairs": np.array(
+            [np.sum((lf_f > 0) & (hr_f > 0) & (zr == zz)[:, None], axis=0) for zz in dn["z"]]
+        ),
     }
     return tables, train, len(pairs)
 
@@ -254,7 +262,8 @@ def _numbers(x, shape, where, what):
 
 def _check_tables(t, where):
     """The record's ``tables`` block: closed keys, plain finite numbers, consistent shapes, ascending redshifts and
-    bins, positive ratios, at least one pair per redshift. Returns the arrays (float64; ``n_sims`` int).
+    bins, positive ratios, at least one pair per redshift, the CDDF pair counts within the pairs of the redshift,
+    and the ratio 1 wherever a CDDF cell has no pair. Returns the arrays (float64; the two counts int).
     """
     _MR._keys(t, _TABLE_KEYS, f"{where}: tables")
     if not isinstance(t["z"], list) or not isinstance(t["log_nhi_centres"], list):
@@ -276,6 +285,25 @@ def _check_tables(t, where):
     if np.any(a["dndx_ratio"] <= 0) or np.any(a["cddf_ratio"] <= 0):
         raise MFRecordError(f"{where}: the ratios must be positive")
     a["n_sims"] = np.asarray(n, dtype=np.int64)
+    c = t["cddf_n_pairs"]
+    if (
+        not isinstance(c, list)
+        or len(c) != nz
+        or not all(
+            isinstance(row, list) and len(row) == nb and all(type(v) is int and v >= 0 for v in row)
+            for row in c
+        )
+    ):
+        raise MFRecordError(
+            f"{where}: tables.cddf_n_pairs must be {nz} rows of {nb} non-negative integers"
+        )
+    a["cddf_n_pairs"] = np.asarray(c, dtype=np.int64).reshape(nz, nb)
+    if np.any(a["cddf_n_pairs"] > a["n_sims"][:, None]):
+        raise MFRecordError(f"{where}: a CDDF cell has more pairs than its redshift has")
+    if np.any(a["cddf_ratio"][a["cddf_n_pairs"] == 0] != 1.0):
+        raise MFRecordError(
+            f"{where}: a CDDF cell with no pair must hold the ratio 1 (no correction measured)"
+        )
     return a
 
 
@@ -373,8 +401,8 @@ def write_record(
         "class_order": list(CLASS_ORDER),
         "tables": {
             k: (
-                [int(v) for v in np.asarray(tables[k]).ravel()]
-                if k == "n_sims"
+                np.asarray(tables[k]).astype(int).tolist()
+                if k in ("n_sims", "cddf_n_pairs")
                 else np.asarray(tables[k], dtype=np.float64).tolist()
             )
             for k in sorted(_TABLE_KEYS)
@@ -416,6 +444,9 @@ class IncidenceMF(NamedTuple):
     dndx_ratio: np.ndarray  # (Nz, 3)   LLS, subDLA, DLA
     log_nhi_centres: np.ndarray  # (Nbin,)
     cddf_ratio: np.ndarray  # (Nz, Nbin)
+    cddf_n_pairs: (
+        np.ndarray
+    )  # (Nz, Nbin) pairs behind each CDDF cell; 0: no correction measured (ratio 1)
     anchored: bool
     record_bytes: bytes = None
 
@@ -445,6 +476,35 @@ class IncidenceMF(NamedTuple):
             cddf_res_factor(self.cddf_table(), jnp.asarray(float(z))), dtype=np.float64
         )
 
+    def rows(self, z, tol=1e-9):
+        """The table rows a lookup at ``z`` rests on: one row at a tabulated redshift, the two neighbours between
+        two of them, the edge row beyond the table (where the historical lookups hold the edge value).
+        """
+        z = float(z)
+        hit = np.where(np.abs(self.z - z) <= tol)[0]
+        if hit.size:
+            return [int(hit[0])]
+        if z < self.z[0]:
+            return [0]
+        if z > self.z[-1]:
+            return [len(self.z) - 1]
+        i = int(np.searchsorted(self.z, z))
+        return [i - 1, i]
+
+    def single_pair(self, z):
+        """True when a row that the lookup at ``z`` rests on is the ratio of one simulation pair, not a mean."""
+        return bool(np.any(self.n_sims[self.rows(z)] == 1))
+
+    def cddf_never_supported(self):
+        """(Nbin,) bool: the bins with no pair at any tabulated redshift (for example a bin below the catalogue's
+        column-density threshold). Neither the LF model nor the table has anything there."""
+        return np.all(self.cddf_n_pairs == 0, axis=0)
+
+    def cddf_uncorrected(self, z):
+        """(Nbin,) bool: the bins in which a row that the lookup at ``z`` rests on has no pair, so that no
+        correction was measured there."""
+        return np.any(self.cddf_n_pairs[self.rows(z)] == 0, axis=0)
+
     def provenance(self):
         r = self.record
         return {
@@ -456,6 +516,7 @@ class IncidenceMF(NamedTuple):
             "n_pairs": r["n_pairs"],
             "z": [float(v) for v in self.z],
             "n_sims": [int(v) for v in self.n_sims],
+            "cddf_n_pairs": self.cddf_n_pairs.tolist(),
             "lf_cache": _MR.copy_json(r["lf_cache"]),
             "hr_incidence": _MR.copy_json(r["hr_incidence"]),
             "fit_code": _MR.copy_json(r["fit_code"]),
@@ -493,6 +554,7 @@ def parse_record(raw, where="<incidence MF record>", *, expected_sha256=None):
         a["dndx_ratio"],
         a["log_nhi_centres"],
         a["cddf_ratio"],
+        a["cddf_n_pairs"],
         expected_sha256 is not None,
         raw,
     )
@@ -551,7 +613,7 @@ def reverify(inc):
         and inc.record == new.record
         and all(
             np.array_equal(np.asarray(getattr(inc, k)), getattr(new, k))
-            for k in ("z", "n_sims", "dndx_ratio", "log_nhi_centres", "cddf_ratio")
+            for k in ("z", "n_sims", "dndx_ratio", "log_nhi_centres", "cddf_ratio", "cddf_n_pairs")
         )
     )
     if not same:

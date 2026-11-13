@@ -65,8 +65,17 @@ touched by it, so a mixed spectrum changes only through the fractions. An LF pre
 depend on the cosmological parameters or on the mean flux. At a redshift the table does not hold it is linear
 between its neighbours and flagged (``incidence_mf_z_interpolated``); beyond the table it is held constant and flagged
 (``incidence_mf_z_clamped``), where the P1D MF below its tables is refused. The w_c map was fitted on LF counts; that it holds for
-the corrected incidence is not validated. The record also stores the same kind of table for the column-density
-distribution; the predictor returns no CDDF, so that table is not applied here. A release of format 1 has no such
+the corrected incidence is not validated.
+
+**The column-density distribution.** With an incidence record a prediction also carries ``cddf``, the distribution
+f(N_HI) at the bin centres ``log_nhi`` that the record gives: the linear mean over the ensemble members of their
+CDDF output, and under LF+MF that mean times the record's second table R(z, N_HI), the mean HR/LF ratio per bin. A
+bin is NaN, never a number, where nothing supports it: where no simulation pair has absorbers at any tabulated
+redshift (the model was never trained there: the bin below the catalogue's column-density threshold), and, under
+LF+MF, where no pair has them at that redshift, so that no correction was measured (flag
+``cddf_bins_without_support``). A table row that rests on one simulation pair is flagged
+``incidence_mf_single_pair``. Without an incidence record ``cddf`` and ``log_nhi`` are None: the model files do not
+say what the bins are. A release of format 1 has no such
 record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition. No
 held-out error of the corrected incidence is shipped; ``labels["incidence_mf_error"]`` says how one is computed and
 what it covers.
@@ -530,7 +539,16 @@ def _members_forward(ens, pf, dn_mean, dn_std, x, tau):
     return P, dn
 
 
+def _members_cddf(ens, fn_mean, fn_std, x, tau):
+    """Per member: the physical column-density distribution f(N_HI) of the CDDF head, (M, Nbin). It is a second
+    evaluation of the members, used only when an incidence record gives the bins a meaning; the spectra and the
+    dN/dX of ``_members_forward`` are not touched by it."""
+    return jnp.stack([jnp.exp(m(x, tau)["f_nhi"] * fn_std + fn_mean) for m in ens.members])
+
+
 _forward_one = eqx.filter_jit(_members_forward)
+_cddf_one = eqx.filter_jit(_members_cddf)
+_cddf_many = eqx.filter_jit(eqx.filter_vmap(_members_cddf, in_axes=(None, None, None, 0, 0)))
 # the P1D MF label's statement about w_c; replaced when the incidence is corrected too
 _W_C_STAYS_LF = "w_c stays the LF backbone's"
 _mf_g = eqx.filter_jit(lambda mf, x, tau: mf(x, tau))  # the MF correction g (4, K) at one input
@@ -567,6 +585,8 @@ class Prediction:
         P_class       (4, K)      (n_z, 4, K)
         template      (3, K)      (n_z, 3, K)
         w_c, dndx     (3,)        (n_z, 3)
+        cddf          (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
+        log_nhi       (Nbin,)     (Nbin,)         only with an incidence record; else None
         member_std    (4, K)      (n_z, 4, K)
         tau_eff       float       (n_z,)
 
@@ -595,6 +615,14 @@ class Prediction:
         distance X), averaged over the members. In an LF+MF prediction of a release that carries
         an incidence MF record it is multiplied by that record's factor R_c(z), the HR/LF ratio
         of the incidence (flag ``incidence_mf_applied``; ``labels["incidence_mf"]``).
+    cddf : numpy.ndarray or None
+        Shape (Nbin,). The column-density distribution f(N_HI) of the absorbers, per unit column
+        density and absorption distance, at the bin centres ``log_nhi``. It exists only for a
+        release that carries an incidence MF record, which names the bins. The mean over the
+        members; in an LF+MF prediction multiplied by the record's HR/LF ratio per bin. A bin is
+        NaN where nothing supports it (``labels["cddf"]`` says which bins and why).
+    log_nhi : numpy.ndarray or None
+        Shape (Nbin,). The bin centres, log10 of N_HI in cm^-2, from the incidence record.
     member_std : numpy.ndarray or None
         Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
         members disagree. It is not a calibrated emulator error and not a covariance. None for a
@@ -659,6 +687,8 @@ class Prediction:
     labels: dict[str, Any]
     provenance: dict[str, Any]
     stacked: bool
+    cddf: np.ndarray | None = None
+    log_nhi: np.ndarray | None = None
 
 
 class _PredictorBase:
@@ -694,6 +724,12 @@ class _PredictorBase:
             jnp.asarray(np.asarray(n["dndx"]["mean"], dtype=np.float64)),
             jnp.asarray(np.asarray(n["dndx"]["std"], dtype=np.float64)),
         )
+        fn_mean = np.asarray(n["f_nhi"]["mean"], dtype=np.float64)
+        fn_std = np.asarray(n["f_nhi"]["std"], dtype=np.float64)
+        self._fn = (jnp.asarray(fn_mean), jnp.asarray(fn_std))
+        # a bin of the CDDF head that no training simulation ever populated keeps the placeholder normalisation
+        # (mean 0, std 1; data.fit_norm): the network's output there was never trained
+        self._fn_untrained = (fn_mean == 0.0) & (fn_std == 1.0)
         settings = (rb.lineage.get("cache") or {}).get("settings") or {}
         ar = settings.get("alpha_range")
         self._alpha_range = None if ar is None else (float(ar[0]), float(ar[1]))
@@ -936,12 +972,57 @@ class _PredictorBase:
                 f"the incidence MF record was fitted on the LF cache {inc.record['lf_cache']['sha256'][:12]}, "
                 f"not on this bundle's training cache {cache[:12]}"
             )
+        if inc.log_nhi_centres.size != self._fn_untrained.size:
+            raise _MR.MFRecordError(
+                f"the incidence MF record has {inc.log_nhi_centres.size} column-density bins, this "
+                f"model's CDDF head has {self._fn_untrained.size}"
+            )
+        never = np.array(inc.cddf_never_supported())
+        stray = np.where(self._fn_untrained & ~never)[0]
+        if stray.size:  # the record would give a meaning to a bin the model was never trained on
+            raise _MR.MFRecordError(
+                f"the incidence MF record has simulation pairs in column-density bins {stray.tolist()}, "
+                "which this model was never trained on: the record is not of this model's training data"
+            )
         self._inc = inc
-        # what is applied: immutable copies of the table, not the record's arrays
+        # what is applied: immutable copies of the tables, not the record's arrays
         self._inc_tab = {"z": jnp.asarray(inc.z), "ratio": jnp.asarray(inc.dndx_ratio)}
+        self._inc_cddf_tab = {
+            "z": jnp.asarray(inc.z),
+            "log_nhi": jnp.asarray(inc.log_nhi_centres),
+            "ratio": jnp.asarray(inc.cddf_ratio),
+        }
         self._inc_z = tuple(float(v) for v in inc.z)
+        self._inc_never = never | self._fn_untrained
 
-    def _incidence_flags(self, zs, use_mf):
+    def _cddf(self, ens, x, taus, zs, use_mf, single):
+        """The column-density distribution of a prediction, (n_z, Nbin), and whether a bin was left out because no
+        correction was measured there. The linear mean over the members of their CDDF; under LF+MF multiplied by
+        the incidence record's factor R(z, N_HI) (``multifidelity.cddf_res_factor``). A bin is NaN, never a
+        number, where nothing supports it: where no simulation pair has absorbers at any tabulated redshift (the
+        model was never trained there), and, under LF+MF, where no pair has them at this redshift (no correction
+        was measured, so the value would be the LF value under another name)."""
+        from .emulator.multifidelity import cddf_res_factor
+
+        if single:
+            f = np.asarray(_cddf_one(ens, *self._fn, jnp.asarray(x[0]), jnp.asarray(taus[0])))[None]
+        else:
+            f = np.asarray(_cddf_many(ens, *self._fn, jnp.asarray(x), jnp.asarray(taus)))
+        cddf = np.array(
+            f.mean(axis=1), dtype=np.float64
+        )  # (n_z, Nbin): the linear mean over the members
+        cddf[:, self._inc_never] = np.nan
+        gap_any = False
+        if use_mf:
+            for i, z in enumerate(zs):
+                fac = cddf_res_factor(self._inc_cddf_tab, jnp.asarray(float(z)))
+                cddf[i] = cddf[i] * np.asarray(fac, dtype=np.float64)
+                gap = np.array(self._inc.cddf_uncorrected(z)) & ~self._inc_never
+                cddf[i, gap] = np.nan
+                gap_any = gap_any or bool(gap.any())
+        return cddf, gap_any
+
+    def _incidence_flags(self, zs, use_mf, cddf_gap):
         z = self._inc_z
         clamped = [v < z[0] - Z_TOL or v > z[-1] + Z_TOL for v in zs]
         between = [not c and not any(abs(v - t) <= Z_TOL for t in z) for v, c in zip(zs, clamped)]
@@ -949,6 +1030,10 @@ class _PredictorBase:
             "incidence_mf_applied": bool(use_mf),
             "incidence_mf_z_clamped": bool(any(clamped)),
             "incidence_mf_z_interpolated": bool(any(between)),
+            # the table row used rests on one simulation pair: a ratio of one simulation, not a mean
+            "incidence_mf_single_pair": bool(use_mf and any(self._inc.single_pair(v) for v in zs)),
+            # an LF+MF CDDF bin is NaN because no correction was measured there at this redshift
+            "cddf_bins_without_support": bool(cddf_gap),
         }
 
     def _incidence_labels(self, labels, use_mf):
@@ -960,6 +1045,26 @@ class _PredictorBase:
             "incidence_mf_z_clamped); applied with the P1D MF correction, never to an LF prediction",
             "incidence_mf_error": _IM.HELDOUT_ERROR_STATEMENT,
         }
+        out["cddf"] = (
+            "the column-density distribution f(N_HI), per unit column density and absorption distance, at the "
+            "bin centres log_nhi (log10 of N_HI in cm^-2; from the incidence record): the linear mean over the "
+            "ensemble members"
+            + (
+                ", multiplied by the incidence record's factor R(z, N_HI), the mean over the matched HR "
+                "simulations of f_HR / f_LF in that bin"
+                if use_mf
+                else ""
+            )
+            + ". A bin is NaN where nothing supports it: where no simulation pair has absorbers at any "
+            "tabulated redshift (the model was never trained there)"
+            + (
+                ", and where no pair has them at this redshift, so that no correction was measured (flag "
+                "cddf_bins_without_support)"
+                if use_mf
+                else ""
+            )
+            + ". The number of pairs behind each bin and redshift is in provenance incidence_mf cddf_n_pairs"
+        )
         if use_mf:
             out["dndx"] = (
                 "the members' mean Head-A dN/dX, multiplied by the incidence MF factor R_c(z)"
@@ -1141,7 +1246,10 @@ class _PredictorBase:
         - With an incidence MF record: ``incidence_mf_applied``, ``dndx`` was multiplied by the
           HR/LF ratio of the incidence and ``w_c`` follows; ``incidence_mf_z_interpolated``, the
           table does not hold this redshift and the ratio is interpolated between its neighbours;
-          ``incidence_mf_z_clamped``, the ratio is held constant beyond its table.
+          ``incidence_mf_z_clamped``, the ratio is held constant beyond its table;
+          ``incidence_mf_single_pair``, the table row used rests on one simulation pair;
+          ``cddf_bins_without_support``, some bins of ``cddf`` are NaN because no correction was
+          measured there at this redshift.
 
         The first call for an input shape compiles the model with JAX; later calls reuse it.
 
@@ -1314,6 +1422,9 @@ class _PredictorBase:
             dmean = np.asarray(
                 apply_dndx_res_corr(self._inc_tab, jnp.asarray(dmean), zv), dtype=np.float64
             )
+        cddf, cddf_gap = (
+            (None, False) if self._inc is None else self._cddf(ens, x, taus, zs, use_mf, single)
+        )
         w4 = np.stack([self._rb.wc_map.w_c(dmean[i], z) for i, z in enumerate(zs)])
         template = Pm[:, 1:, :] / Pm[:, :1, :] - 1.0
         flags, labels, prov = self._flags(pv, th, zs, taus, kout), self.labels(), self.provenance
@@ -1321,7 +1432,7 @@ class _PredictorBase:
             flags.update(self._mf_flags(zs, taus, use_mf))
             labels.update(self._mf_labels(labels, use_mf))
         if self._inc is not None:
-            flags.update(self._incidence_flags(zs, use_mf))
+            flags.update(self._incidence_flags(zs, use_mf, cddf_gap))
             labels.update(self._incidence_labels(labels, use_mf))
         # a mean flux outside what the model covers is served, flagged, and said aloud: once per call
         if flags["mean_flux_off_ladder"]:
@@ -1343,6 +1454,8 @@ class _PredictorBase:
             labels=labels,
             provenance=prov,
             stacked=not single,
+            cddf=None if cddf is None else _frozen(sel(cddf)),
+            log_nhi=None if cddf is None else _frozen(self._inc.log_nhi_centres),
         )
 
     def _warn_off_ladder(self, zs, taus):

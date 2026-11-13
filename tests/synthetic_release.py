@@ -11,13 +11,31 @@ from pathlib import Path
 from hcd_analysis.emulator import release_manifest as RM
 from hcd_analysis.emulator import release_testing as RT
 
+
 # A plainly synthetic incidence table: round numbers that no simulation gives.
+def _cddf_tables(n_sims=(1, 2, 2), n_bins=30):
+    """The synthetic CDDF table: 30 bins like the model's CDDF head (centres 17.1, 17.3, ..., 22.9), and one of
+    each case a real table has. Bin 0: no pair at any redshift (the catalogue threshold). Bin 28: no pair at the
+    middle redshift only. Bin 29: fewer pairs than the redshift has. Every other bin: all the pairs.
+    """
+    ratio = [[2.0] * n_bins, [4.0] * n_bins, [4.0] * n_bins]
+    pairs = [[n] * n_bins for n in n_sims]
+    for i in range(3):
+        ratio[i][0], pairs[i][0] = 1.0, 0
+        ratio[i][29], pairs[i][29] = 0.25, 1
+    ratio[0][28] = ratio[2][28] = 0.5
+    ratio[1][28], pairs[1][28] = 1.0, 0
+    return [round(17.1 + 0.2 * i, 1) for i in range(n_bins)], ratio, pairs
+
+
+_LOG_NHI, _CDDF_RATIO, _CDDF_PAIRS = _cddf_tables()
 INCIDENCE_TABLES = {
     "z": [2.0, 3.0, 5.0],
     "n_sims": [1, 2, 2],
     "dndx_ratio": [[2.0, 3.0, 0.5], [4.0, 3.0, 0.5], [4.0, 5.0, 0.25]],
-    "log_nhi_centres": [17.5, 20.5],
-    "cddf_ratio": [[2.0, 0.5], [4.0, 0.5], [4.0, 0.25]],
+    "log_nhi_centres": _LOG_NHI,
+    "cddf_ratio": _CDDF_RATIO,
+    "cddf_n_pairs": _CDDF_PAIRS,
 }
 
 

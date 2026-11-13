@@ -394,8 +394,9 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   `R(z, N_HI)`, for the CDDF, with the bin centres. The tables do not depend on cosmology or on the mean flux.
 - **How it is used.** `dndx_MF = dndx_LF * R_c(z)`: linear in z between the tabulated redshifts, held constant beyond
   them. The predictor applies it to an LF+MF prediction before the map from dN/dX to sightline fractions, so `w_c`
-  follows; the class spectra are not touched. The predictor returns no CDDF, so the CDDF table is stored and not
-  applied.
+  follows; the class spectra are not touched. The predictor also returns the column-density distribution,
+  `pred.cddf`, at the record's bin centres (`pred.log_nhi`): the linear mean over the ensemble members, and under
+  LF+MF that mean times `R(z, N_HI)`.
 - **Where the numbers come from.** The tables are built and evaluated by the functions that have been in
   `hcd_analysis/emulator/multifidelity.py` since June 2026 (`build_dndx_res_corr`, `build_cddf_res_corr`,
   `dndx_res_factor`, `apply_dndx_res_corr`, `cddf_res_factor`); the record is their container.
@@ -409,7 +410,7 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
 {"format": "hcd_priya.incidence_mf_record/1", "version": "<text>", "model_form": "<the code's statement>",
  "class_order": ["LLS", "subDLA", "DLA"],
  "tables": {"z": [Nz], "n_sims": [Nz], "dndx_ratio": [[3] x Nz],
-            "log_nhi_centres": [Nbin], "cddf_ratio": [[Nbin] x Nz]},
+            "log_nhi_centres": [Nbin], "cddf_ratio": [[Nbin] x Nz], "cddf_n_pairs": [[Nbin] x Nz]},
  "lf_cache": {"file": "<name>", "sha256": "<64 hex>", "source": "<the code's statement>"},
  "hr_incidence": {"file": "<name>", "sha256": "<64 hex>", "source": "<the code's statement>",
                   "groups_not_in_product": ["<an HR snapshot group the product does not hold>", ...]},
@@ -417,6 +418,13 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
  "train_sims": [...], "n_pairs": N, "fit_code": {"commit": "<40 hex>", "dirty": false}}
 ```
 
+- **Bins without support are NaN, never a number.** `cddf_n_pairs` counts, for each redshift and bin, the pairs
+  with absorbers on both sides. A bin with no pair at any redshift (the first bin lies below the catalogue's
+  column-density threshold) was never trained on: the network's output there means nothing, and `pred.cddf` is NaN
+  there under both fidelities. A bin with no pair at one redshift holds the ratio 1 in the table, which means "no
+  correction measured"; under LF+MF `pred.cddf` is NaN there (flag `cddf_bins_without_support`), and under LF it
+  keeps the LF value. A bin with fewer pairs than its redshift keeps the mean over the pairs that exist. The loader
+  refuses a record whose bins are not the model's, or that claims pairs in a bin the model was never trained on.
 - `n_sims` is the number of matched pairs behind each redshift's dN/dX mean, and `n_pairs` their sum. The fit refuses
   a pair whose dN/dX is not finite and positive, so every pair counts in every class and no cell is filled in. A
   redshift with one pair is a ratio of one simulation, not a mean. A CDDF cell is the mean over the pairs with both
@@ -492,6 +500,7 @@ difference is visible:
 | `P_class` under LF+MF | LF times exp(g) | the same |
 | `dndx` under LF+MF | the LF model's | the LF model's times `R_c(z)` |
 | `w_c` under LF+MF | the map of the LF `dndx` | the map of the corrected `dndx` |
+| `cddf`, `log_nhi` | `None` | the CDDF at the record's bins (LF: the member mean; LF+MF: times `R(z, N_HI)`) |
 | anything under `fidelity="LF"` | the LF model's | the same |
 | flag `incidence_mf_applied` | absent | present |
 

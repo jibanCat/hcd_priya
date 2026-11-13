@@ -67,6 +67,7 @@ def test_the_fit_is_the_historical_functions_on_the_matched_pairs():
     np.testing.assert_allclose(t["dndx_ratio"], RATIO, rtol=1e-14)
     np.testing.assert_allclose(t["cddf_ratio"], CDDF_RATIO, rtol=1e-14)
     assert t["z"].tolist() == list(ZS) and t["log_nhi_centres"].tolist() == LOG_NHI.tolist()
+    assert t["cddf_n_pairs"].tolist() == [[3, 3]] * 3  # every pair has absorbers in both bins
     # the same numbers as the historical builders called by hand on the pairs
     pairs = MF.match_snap_hr_to_lf(lf, hr)
     h, l = np.array([p[0] for p in pairs]), np.array([p[1] for p in pairs])
@@ -136,6 +137,19 @@ def test_the_cddf_takes_empty_bins_and_refuses_bad_ones():
     ] = 0.0  # a bin that is empty in every HR snapshot: ratio 1, by the historical rule
     t, _, _ = IM.fit_tables(lf, hr, exclude_sims=[])
     assert t["cddf_ratio"][:, 1].tolist() == [1.0, 1.0, 1.0]
+    assert (
+        t["cddf_n_pairs"].tolist() == [[3, 0]] * 3
+    )  # the count says: no correction was measured in bin 1
+    lf, hr = snaps()
+    hr["f_nhi"][
+        (hr["sim"] == "synthsimA") & (hr["z"] == 3.0), 1
+    ] = 0.0  # one pair of one redshift only
+    assert IM.fit_tables(lf, hr, exclude_sims=[])[0]["cddf_n_pairs"].tolist() == [
+        [3, 3],
+        [3, 2],
+        [3, 3],
+    ]
+    lf, hr = snaps()
     np.testing.assert_allclose(t["cddf_ratio"][:, 0], CDDF_RATIO[:, 0], rtol=1e-14)
     np.testing.assert_allclose(
         t["dndx_ratio"], RATIO, rtol=1e-14
@@ -201,6 +215,7 @@ def test_a_record_round_trips_and_its_factor_is_the_historical_lookup(tmp_path):
     sha = write_incidence(tmp_path / "inc", cache=CACHE, tables=t, train_sims=train, n_pairs=n)
     inc = IM.load_record(tmp_path / "inc", expected_record_sha256=sha, lf_cache_sha256=CACHE)
     assert inc.anchored is True and inc.record_sha256 == sha
+    assert inc.cddf_n_pairs.tolist() == [[3, 3]] * 3 and not inc.cddf_n_pairs.flags.writeable
     for k in ("z", "dndx_ratio", "log_nhi_centres", "cddf_ratio"):
         assert getattr(inc, k).tobytes() == np.asarray(t[k], float).tobytes()  # bit for bit
         assert not getattr(inc, k).flags.writeable
@@ -300,6 +315,18 @@ def _set(path, value):
         ("missing_key", lambda d: d.pop("composition") and None, "missing \\['composition'\\]"),
         ("no_tables_key", lambda d: d["tables"].pop("n_sims") and None, "missing \\['n_sims'\\]"),
         ("cddf_shape", _set(["tables", "cddf_ratio"], [[2.0, 0.5, 1.0]] * 3), "cddf_ratio"),
+        ("pairs_shape", _set(["tables", "cddf_n_pairs"], [[1, 1]] * 3), "cddf_n_pairs"),
+        ("pairs_float", _set(["tables", "cddf_n_pairs"], [[1.0] * 30] * 3), "cddf_n_pairs"),
+        (
+            "pairs_many",
+            lambda d: d["tables"]["cddf_n_pairs"][0].__setitem__(3, 2),
+            "more pairs than",
+        ),
+        (
+            "no_pair_ratio",
+            lambda d: d["tables"]["cddf_ratio"][0].__setitem__(0, 2.0),
+            "must hold the ratio 1",
+        ),
         ("cddf_rows", _set(["tables", "cddf_ratio"], [[2.0, 0.5]] * 2), "cddf_ratio"),
         ("huge", _set(["tables", "z"], [2.0, 3.0, 10**400]), "tables.z"),
         ("nan", lambda d: json.dumps(dict(d, version=float("nan"))).encode(), "NaN|constant"),
@@ -523,8 +550,8 @@ def test_a_release_names_its_incidence_record_by_digest(rel, tmp_path):
     p = os.path.join(d, "incidence", IM.RECORD_FILE)  # one changed number in the table
     os.chmod(p, 0o644)
     raw = open(p, "rb").read()
-    assert raw.count(b"0.25") == 2
-    open(p, "wb").write(raw.replace(b"0.25", b"0.26"))
+    assert raw.count(b"0.25") >= 1
+    open(p, "wb").write(raw.replace(b"0.25", b"0.26", 1))  # one number of one table
     with pytest.raises(E, match="sha256 does not match"):
         hp.load_release(d, rs)
 
@@ -541,21 +568,129 @@ def test_the_record_is_applied_only_with_the_p1d_mf_record(rel, tmp_path):
     assert rel["one"]._inc is None  # a refused record is not attached
 
 
-def test_no_cddf_is_exposed_or_applied(rel):
-    """The record stores the CDDF table; the predictor returns no CDDF and applies none."""
-    import dataclasses
+def _member_mean_cddf(emu, z, tau):
+    """The linear mean over the members of their CDDF output, computed here from the members themselves."""
+    from tests.test_predictor_mf import _x
 
+    norm = emu._rb.norm["f_nhi"]
+    mean, std = np.asarray(norm["mean"], float), np.asarray(norm["std"], float)
+    outs = [m(jnp.asarray(_x(z)), jnp.asarray(tau)) for m in emu._rb.ensemble.members]
+    return np.mean([np.exp(np.asarray(o["f_nhi"]) * std + mean) for o in outs], axis=0)
+
+
+def test_the_cddf_is_the_member_mean_times_the_factor_and_nan_where_nothing_supports_it(rel):
+    """The synthetic table has one of each case: bin 0 has no pair at any redshift; bin 28 has none at z = 3.0;
+    bin 29 has fewer pairs than its redshift; the other bins have them all."""
     two = rel["two"]
+    assert two._inc.log_nhi_centres.size == 30
+    for z, factor, f28, f29, gap, single_pair in (
+        (3.0, 4.0, None, 0.25, True, False),  # a tabulated redshift whose bin 28 has no pair
+        (
+            2.6,
+            3.2,
+            None,
+            0.25,
+            True,
+            True,
+        ),  # between two rows: either without a pair leaves the bin out
+        (5.2, 4.0, 0.5, 0.25, False, False),  # beyond the table: the edge row, which has bin 28
+    ):
+        mean = _member_mean_cddf(two, z, 0.4)
+        assert np.all(np.isfinite(mean)) and np.all(mean > 0)
+        lf = two.predict(PARAMS, z, tau_eff=0.4, fidelity="LF")
+        mf = two.predict(PARAMS, z, tau_eff=0.4)
+        for p in (lf, mf):
+            assert p.cddf.shape == (30,) and p.log_nhi.tolist() == two._inc.log_nhi_centres.tolist()
+            assert not p.cddf.flags.writeable and not p.log_nhi.flags.writeable
+            assert np.isnan(p.cddf[0])  # never a number where the model was never trained
+        # LF: the member mean, in every bin but the never-supported one
+        np.testing.assert_allclose(lf.cddf[1:], mean[1:], rtol=1e-12)
+        assert lf.flags["cddf_bins_without_support"] is False
+        assert lf.flags["incidence_mf_single_pair"] is False
+        # LF+MF: the member mean times the record's factor
+        np.testing.assert_allclose(mf.cddf[1:28], factor * mean[1:28], rtol=1e-12)
+        np.testing.assert_allclose(
+            mf.cddf[29], f29 * mean[29], rtol=1e-12
+        )  # fewer pairs: kept, not masked
+        if f28 is None:
+            assert np.isnan(
+                mf.cddf[28]
+            )  # no correction measured at this redshift: not the LF value
+        else:
+            np.testing.assert_allclose(mf.cddf[28], f28 * mean[28], rtol=1e-12)
+        assert mf.flags["cddf_bins_without_support"] is gap
+        assert mf.flags["incidence_mf_single_pair"] is single_pair
+        assert "linear mean over the ensemble members" in mf.labels["cddf"]
+        assert ("cddf_bins_without_support" in mf.labels["cddf"]) and "R(z, N_HI)" in mf.labels[
+            "cddf"
+        ]
+        assert "R(z, N_HI)" not in lf.labels["cddf"]
+    pairs = mf.provenance["incidence_mf"]["cddf_n_pairs"]
+    assert pairs[1][0] == 0 and pairs[1][28] == 0 and pairs[1][29] == 1 and pairs[1][5] == 2
+
+
+def test_the_cddf_of_a_stack_and_of_a_release_without_the_record(rel):
+    two, one = rel["two"], rel["one"]
+    zs = [2.6, 3.0, 5.2]
+    s = two.predict_many(PARAMS, zs, tau_eff=0.4)
+    assert s.cddf.shape == (3, 30) and s.log_nhi.shape == (30,)
+    for i, z in enumerate(zs):
+        one_z = two.predict(PARAMS, z, tau_eff=0.4).cddf
+        assert np.array_equal(np.isnan(s.cddf[i]), np.isnan(one_z))  # the same bins are left out
+        np.testing.assert_allclose(s.cddf[i], one_z, rtol=1e-12, equal_nan=True)
+    assert (
+        s.flags["cddf_bins_without_support"] is True and s.flags["incidence_mf_single_pair"] is True
+    )
+    # a release of format 1 has no record, so nothing says what the bins are: no CDDF, and no CDDF flag or label
+    q = one.predict(PARAMS, 3.0, tau_eff=0.4)
+    assert q.cddf is None and q.log_nhi is None
+    assert "cddf_bins_without_support" not in q.flags and "cddf" not in q.labels
+    # the class spectra and the incidence are not touched by the second evaluation of the members
     p = two.predict(PARAMS, 3.0, tau_eff=0.4)
-    names = {f.name for f in dataclasses.fields(p)}
-    assert not [n for n in names if "cddf" in n.lower() or "nhi" in n.lower()]
-    text = json.dumps([sorted(p.flags), p.labels, p.provenance], default=str).lower()
-    assert "cddf_ratio" not in text and "log_nhi" not in text
-    assert not [k for k in p.flags if "cddf" in k.lower()]
-    assert two._inc.cddf_factor(3.0).tolist() == [
-        4.0,
-        0.5,
-    ]  # stored, and read by the historical lookup
+    assert p.P_class.tobytes() == q.P_class.tobytes()
+
+
+def test_no_cddf_element_can_be_the_exp_of_an_untrained_output(rel, tmp_path):
+    """A bin that no training simulation populated keeps the placeholder normalisation (mean 0, std 1), so the
+    exp of the network's output there is a number of order one, many orders above its neighbours. Such a bin is
+    NaN; and a record that claims simulation pairs in such a bin is not of this model's training data.
+    """
+    b, info = rel["info"]["bundle"], rel["info"]
+    cache = b.lineage["cache"]["sha256"]
+
+    def fresh(untrained_bin):
+        emu = hp.load_bundle(
+            b.bundle_dir,
+            b.manifest_sha256,
+            mf_dir=str(info["root"] / "mf"),
+            mf_record_sha256=info["mf_sha"],
+        )
+        m, s = (np.array(v) for v in emu._fn)
+        m[untrained_bin], s[untrained_bin] = 0.0, 1.0
+        emu._fn, emu._fn_untrained = (jnp.asarray(m), jnp.asarray(s)), (m == 0.0) & (s == 1.0)
+        return emu
+
+    sha = write_incidence(tmp_path / "inc", cache=cache)
+    inc = IM.load_record(tmp_path / "inc", expected_record_sha256=sha)
+    emu = fresh(
+        0
+    )  # the real case: the first bin lies below the catalogue's column-density threshold
+    emu._attach_incidence(inc)
+    for fidelity in ("LF", "LF+MF"):
+        p = emu.predict(PARAMS, 3.0, tau_eff=0.4, fidelity=fidelity)
+        assert np.isnan(p.cddf[0]) and np.all(np.isfinite(p.cddf[1:28]))
+    with pytest.raises(E, match="never trained on"):  # the record has pairs in bin 5
+        fresh(5)._attach_incidence(inc)
+    # a record with another number of bins than the model's CDDF head
+    lf, hr = snaps()
+    t, train, n = IM.fit_tables(lf, hr, exclude_sims=[])
+    sha2 = write_incidence(
+        tmp_path / "two_bins", cache=cache, tables=t, train_sims=train, n_pairs=n
+    )
+    with pytest.raises(E, match="2 column-density bins, this model's CDDF head has 30"):
+        fresh(0)._attach_incidence(
+            IM.load_record(tmp_path / "two_bins", expected_record_sha256=sha2)
+        )
 
 
 def test_what_is_applied_is_a_copy_of_the_table(rel):

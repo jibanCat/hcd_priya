@@ -36,8 +36,11 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   fixed HR/LF ratio of dN/dX per HCD class and redshift, built by the functions that `multifidelity.py` has held
   since June 2026 and by the new `scripts/build_incidence_mf.py`. With it, an LF+MF prediction's `dndx` is
   multiplied by that ratio and `w_c` follows through the shipped map (flag `incidence_mf_applied`). A release of
-  format `hcd_priya.release/1` loads and predicts as before. The record also stores the ratio per column-density
-  bin; the predictor returns no CDDF, so it is not applied. No such record is released yet.
+  format `hcd_priya.release/1` loads and predicts as before. No such record is released yet.
+- **The column-density distribution as an output.** With an incidence record a prediction carries `cddf` and
+  `log_nhi`: the CDDF at the record's bin centres, the linear mean over the ensemble members, and under LF+MF that
+  mean times the record's HR/LF ratio per bin. A bin where nothing was trained or measured is NaN, never a number.
+  Without an incidence record both are `None`.
 - **A documentation page on the class spectra against the per-class model of Rogers et al. (2018)**
   ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)): what was compared, the numbers, and what the
   comparison is not.
