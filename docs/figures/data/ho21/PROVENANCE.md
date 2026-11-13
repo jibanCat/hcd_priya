@@ -25,8 +25,8 @@ figure `docs/figures/dndx_vs_ho21.png` (`scripts/figures/fig_dndx_vs_ho21.py`).
   DR16Q with Gaussian processes", MNRAS, [doi:10.1093/mnras/stab2169](https://doi.org/10.1093/mnras/stab2169),
   [arXiv:2103.10964](https://arxiv.org/abs/2103.10964).
 - **Licence:** neither repository has a licence file (no licence file in the origin, and no licence file in the
-  fork). The files are used here at the direction of the first author of the paper, who owns the fork and maintains
-  this project.
+  fork). The files are redistributed here by decision of the project lead, who is the first author of the paper and
+  owns the fork.
 - **What the rows of the three CDDF files are,** read from the function `ho21_cddf` of `dla_data.py`, which is
   identical in the origin and in the fork at the commits above (the function was read, not run): each file has six rows of thirty numbers. Row 0: log10 of N_HI (N_HI in
   cm^-2). Row 1: f(N_HI). Rows 2 and 3: the lower and the upper limit of the 68 per cent interval. Rows 4 and 5: the
@@ -56,8 +56,8 @@ figure `docs/figures/dndx_vs_ho21.png` (`scripts/figures/fig_dndx_vs_ho21.py`).
     can show as a bar. The figure here does not draw these bins.
   - **The file for 3 <= z < 4.** `ho21_cddf` opens `ho21/cddf_z253.txt` for both 2.5 <= z < 3 and 3 <= z < 4, in
     the origin and in the fork. The figure here takes `ho21/cddf_z34.txt` for the bin 3 to 4, the file named for
-    that range; the two files hold different numbers. Whether the reader's choice is intended is being confirmed
-    with the paper's first author.
+    that range; the two files hold different numbers. The paper's first author confirmed on 2026-11-14 that
+    `cddf_z34.txt` is the table of the bin 3 to 4.
 - **What the rows of `dndx_all.txt` are.** Neither repository has a reader for this file. The first author of
   the paper, who owns the fork and maintains this project, confirmed the rows on 2026-11-13: six rows
   of eighteen numbers. Row 0: the redshift of the bin centre. Row 1: dN/dX of DLAs. Rows 2 and 3: the lower and the

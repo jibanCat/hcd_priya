@@ -104,28 +104,35 @@ python scripts/figures/fig_cddf_vs_ho21.py --published
 python scripts/figures/fig_cddf_vs_ho21.py --release RELEASE_DIR SHA256
 ```
 
-The band is drawn over the 60 design points of `docs/figures/data/priya_lf_design_60.csv`: the design of the PRIYA
-suite of Bird et al. (2023) together with the simulations added later in a widened parameter range (the last 12
-rows, which are the 12 points the predictor flags `outside_sampling_box`). `--design FILE` takes another table (one header line with the nine parameter names, one row
+The band is drawn over the 60 design points of `docs/figures/data/priya_lf_design_60.csv`: 48 simulations of Bird et al. (2023) and 12 added by Fernandez, Bird and Ho (2024), who describe them as extending alpha_q to 2.5-3.0 and n_P to 1.0-1.05; in the design table used here those 12 rows also reach beyond the original range in the two helium reionisation redshifts (the
+last 12 rows of the table, which are the 12 points the predictor flags `outside_sampling_box`). `--design FILE` takes another table (one header line with the nine parameter names, one row
 per point; read without a digest check), and `--no-band` draws the line and the points only.
 
 ## The class power ratio of the simulations against Rogers et al. (2018)
 
 ![The ratio of the P1D of each absorber class to that of the clean forest at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](figures/class_ratio_vs_rogers18.png)
 
-- **Simulations (points):** the ratio `P_class / P_clean` at z = 3.0 of the 60 low-resolution PRIYA training
-  simulations, with the filtered troughs restored: the mean and the standard deviation over the simulations, for
-  k < 0.03 s/km. The ratio is formed in each simulation mode by mode and then averaged; each point is plotted at
-  the mean wavenumber of its mode over the simulations (the boxes differ slightly in length in km/s). The file is
-  `docs/figures/data/class_ratio_z3p0_lf60.csv`; its header says how it was made.
-- **Template (line):** Eq. 6 of Rogers et al. (2018), from the public function
+- **Simulations (blue):** the ratio `P_class / P_clean` at z = 3.0 of the low-resolution PRIYA training
+  simulations with the filtered troughs restored, for k < 0.03 s/km. The lighter band is the range, minimum to
+  maximum, over the 60 simulations at all 20 mean-flux rungs; the darker band is the range over the 60 simulations
+  at the mean-flux rung nearest 1; the line is the median of that set. The 60 simulations differ in the nine
+  cosmological and astrophysical parameters, so the bands show how the ratio varies with them and with the mean
+  flux. The ratio is formed in each simulation mode by mode; each mode is plotted at its mean wavenumber over the
+  simulations (the boxes differ slightly in length in km/s). The file is
+  `docs/figures/data/class_ratio_ranges_z3p0_lf60.csv`; its header says how it was made.
+- **Template (orange line):** Eq. 6 of Rogers et al. (2018) as published, from the public function
   `hcd_analysis.hcd_template.class_ratio` at z = 3.0, for LLS, subDLA, small DLA and large DLA.
+- **Template (orange band):** c(z) + alpha x T(k, z) for alpha between 0.5 and 2, where T is the k-dependent term
+  of Eq. 6 and c its constant. In a fit Rogers et al. leave the amplitudes free and let a free normalisation absorb
+  c(z). The range 0.5 to 2 is this figure's choice, to show what a free amplitude does; it is not a prior from the
+  paper. An overlap of the two colours says that some amplitude in that range and some simulation agree at that k,
+  and no more.
 - **The shaded region:** wavenumbers below the lowest mode of the box of Rogers et al., 2 pi / 8000 km/s =
   7.85e-4 s/km (their box at z = 3.01). There the template is evaluated by extrapolation.
-- **Two redshifts.** The simulation points are at z = 3.0; the snapshot of Rogers et al. is at z = 3.01.
-- **No model in this figure.** The points are simulations, not emulator predictions. The emulator predicts the
+- **Two redshifts.** The simulations are at z = 3.0; the snapshot of Rogers et al. is at z = 3.01.
+- **No model in this figure.** The bands are simulations, not emulator predictions. The emulator predicts the
   filtered class spectra; its predictions with the troughs restored were not tested, and the public predictor cannot
-  produce these points.
+  produce these ratios.
 - **How to read it,** and what differs between the two sides: [the Rogers comparison page](rogers_comparison.md).
 
 To regenerate it (no model is needed):
@@ -135,6 +142,11 @@ python scripts/figures/fig_class_ratio_vs_rogers18.py
 ```
 
 ## References
+
+Fernandez, M. A., Bird, S., Ho, M.-F. 2024, "Cosmological constraints from the eBOSS Lyman-alpha forest using the
+PRIYA simulations", JCAP 2024 (07) 029,
+[doi:10.1088/1475-7516/2024/07/029](https://doi.org/10.1088/1475-7516/2024/07/029),
+[arXiv:2309.03943](https://arxiv.org/abs/2309.03943).
 
 Ho, M.-F., Bird, S., Garnett, R. 2021, "Damped Lyman-alpha absorbers from Sloan Digital Sky Survey DR16Q with
 Gaussian processes", MNRAS, [doi:10.1093/mnras/stab2169](https://doi.org/10.1093/mnras/stab2169),

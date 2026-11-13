@@ -210,14 +210,55 @@ def test_the_cddf_reader_maps_the_columns_as_the_collections_own_reader_does():
 
 def test_the_class_ratio_table_has_the_columns_the_figure_reads():
     ratio = _script("fig_class_ratio_vs_rogers18")
-    table = ratio.read_table(os.path.join(DATA, "class_ratio_z3p0_lf60.csv"))
+    table = ratio.read_table(os.path.join(DATA, ratio.RANGES_FILE))
     k = table["k_s_per_km"]
     assert np.all(np.diff(k) > 0) and k[-1] < 0.03
-    for _, stem, name in ratio.PANELS:
-        mean, sd = table[f"R_{stem}_addback_mean"], table[f"R_{stem}_addback_sd_over_sims"]
-        assert mean.shape == sd.shape == k.shape and np.all(mean > 0) and np.all(sd >= 0)
+    assert [s[0] for s in ratio.RANGE_SETS] == [
+        "sims60_allrungs",
+        "sims60_rung1",
+    ], "the wider set is drawn first"
+    for _, stem, _ in ratio.PANELS:
+        cols = {
+            (s, q): table[f"R_{stem}_{s}_{q}"]
+            for s, _, _ in ratio.RANGE_SETS
+            for q in ("min", "p16", "p50", "p84", "max")
+        }
+        for (
+            s,
+            _,
+            _,
+        ) in ratio.RANGE_SETS:  # each set is ordered: min <= p16 <= p50 <= p84 <= max, all positive
+            ordered = [cols[(s, q)] for q in ("min", "p16", "p50", "p84", "max")]
+            assert all(np.all(a <= b) for a, b in zip(ordered, ordered[1:])) and np.all(
+                ordered[0] > 0
+            )
+        # the 60 simulations at one rung are among the 60 simulations at all rungs: the wide range holds the narrow
+        assert np.all(cols[("sims60_allrungs", "min")] <= cols[("sims60_rung1", "min")])
+        assert np.all(cols[("sims60_rung1", "max")] <= cols[("sims60_allrungs", "max")])
     assert [name for _, _, name in ratio.PANELS] == ["LLS", "Sub-DLA", "Small-DLA", "Large-DLA"]
     assert ratio.ROGERS_KMIN == pytest.approx(2 * np.pi / 8000.0)
+
+
+def test_the_template_band_is_the_published_line_with_its_amplitude_scaled():
+    from hcd_analysis.hcd_template import class_ratio
+
+    ratio = _script("fig_class_ratio_vs_rogers18")
+    assert ratio.ALPHA_RANGE == (0.5, 2.0)
+    k = np.geomspace(5e-4, 0.03, 40)
+    published = class_ratio(k, ratio.Z)
+    constant = class_ratio(np.array([1.0]), ratio.Z)
+    for name, (line, lo, hi) in ratio.template_with_band(k, ratio.Z).items():
+        c = float(constant[name][0])
+        np.testing.assert_array_equal(
+            line, published[name]
+        )  # the line is Eq. 6 as published, untouched
+        term = published[name] - c
+        np.testing.assert_allclose(lo, c + 0.5 * term, rtol=1e-12)
+        np.testing.assert_allclose(hi, c + 2.0 * term, rtol=1e-12)
+        assert np.all(lo <= line) and np.all(line <= hi) and np.all(term > 0)
+        # far above the figure's range the ratio is the constant: the band closes onto it
+        far = ratio.template_with_band(np.array([0.5]), ratio.Z)[name]
+        assert far[1][0] == pytest.approx(c, rel=1e-6) and far[2][0] == pytest.approx(c, rel=1e-6)
 
 
 # ---- the scripts
@@ -231,41 +272,8 @@ def test_the_class_ratio_figure_needs_no_model(tmp_path):
     assert facts["z"] == 3.0 and facts["template_box_km_per_s"] == 8000.0
     assert facts["template_extrapolated_below_k_s_per_km"] == pytest.approx(7.85e-4, rel=1e-3)
     assert facts["model"].startswith("none")
-
-
-def test_the_class_ratio_figure_draws_bands_from_a_table_of_ranges(tmp_path):
-    ratio = _script("fig_class_ratio_vs_rogers18")
-    k = np.geomspace(5e-4, 0.029, 12)
-    names, cols = ["k_s_per_km"], [k]
-    for _, stem, _ in ratio.PANELS:  # synthetic ranges: nested, the wide set outside the narrow one
-        for infix, half in (("sims60_rung1", 0.1), ("sims60_allrungs", 0.3)):
-            for tag, shift in (
-                ("min", -half),
-                ("p16", -half / 2),
-                ("p50", 0.0),
-                ("p84", half / 2),
-                ("max", half),
-            ):
-                names.append(f"R_{stem}_{infix}_{tag}")
-                cols.append(1.5 + shift + 0.0 * k)
-    table = tmp_path / "ranges.csv"
-    table.write_text(
-        "# synthetic ranges\n# " + ",".join(names) + "\n"
-        + "\n".join(",".join(repr(float(v)) for v in row) for row in np.array(cols).T) + "\n",
-        encoding="utf-8",
-    )  # fmt: skip
-    assert [s[0] for s in ratio.RANGE_SETS] == [
-        "sims60_allrungs",
-        "sims60_rung1",
-    ], "the wider set is drawn first"
-    out = str(tmp_path / "ratio_bands.png")
-    assert ratio.main(["--ranges", str(table), "--out", out]) == 0
-    assert _facts(out)["points"].startswith("bands from a table of ranges supplied with --ranges")
-    # without the option the committed figure is drawn as before, from the digest-checked table of points
-    out2 = str(tmp_path / "ratio_points.png")
-    assert (
-        ratio.main(["--out", out2]) == 0 and "class_ratio_z3p0_lf60.csv" in _facts(out2)["points"]
-    )
+    assert facts["simulations"].startswith("docs/figures/data/class_ratio_ranges_z3p0_lf60.csv")
+    assert "this figure's choice" in facts["template_band"] and "0.5 to 2" in facts["template_band"]
 
 
 def test_the_cddf_figure_runs_on_a_model_with_an_incidence_record(

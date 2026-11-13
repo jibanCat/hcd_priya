@@ -16,7 +16,7 @@ the training simulations with and without the filter, which are not distributed.
 ## What was compared
 
 - **Simulations only.** No survey data enters, and no emulator prediction.
-- **The simulation side.** The ratio `R = P_class / P_clean` from the 60 low-resolution training simulations, taken
+- **The simulation side.** The ratio `R = P_class / P_clean` from the 60 low-resolution training simulations (48 simulations of Bird et al. (2023) and 12 added by Fernandez, Bird and Ho (2024), who describe them as extending alpha_q to 2.5-3.0 and n_P to 1.0-1.05; in the design table used here those 12 rows also reach beyond the original range in the two helium reionisation redshifts), taken
   on the mean over the simulations, at the mean-flux rung nearest a tau0 amplitude of 1, at redshifts 2.6 to 4.2 and
   wavenumbers k < 0.03 s/km.
 - **With the filtered troughs restored.** The class spectra that the predictor returns are PRIYA-filtered with
@@ -99,11 +99,23 @@ Three things to read with the table:
 
 ![The class power ratio at z = 3 of the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](figures/class_ratio_vs_rogers18.png)
 
-Points: the simulations with the troughs restored, the mean and the standard deviation over the 60 simulations, at
-z = 3.0. For this figure the DLA sightlines of the simulations are split into small and large at log10 N_HI = 21, as
-in Rogers et al.; the table above compares one DLA class with a mix of the two templates. Line: Eq. 6 of Rogers et
-al. (2018) from `hcd_template.class_ratio`, evaluated at z = 3.0; their snapshot is at z = 3.01. Shaded: below 2 pi / 8000 km/s = 7.85e-4 s/km, the
-lowest mode of their box, where the template is evaluated by extrapolation. The figure holds no emulator prediction.
+Blue: the simulations with the troughs restored, at z = 3.0. The lighter band is the range, from minimum to
+maximum, over the 60 simulations at all 20 mean-flux rungs; the darker band is the range over the 60 simulations at
+the mean-flux rung nearest 1, and the line is its median. The 60 simulations differ in the nine cosmological and
+astrophysical parameters, so the bands show how far the ratio moves with them and with the mean flux. For this figure
+the DLA sightlines of the simulations are split into small and large at log10 N_HI = 21, as in Rogers et al.; the
+table above compares one DLA class with a mix of the two templates.
+
+Orange: the line is Eq. 6 of Rogers et al. (2018) as published, from `hcd_template.class_ratio`, evaluated at
+z = 3.0; their snapshot is at z = 3.01. The band is c(z) + alpha x T(k, z) for alpha between 0.5 and 2, where T is
+the k-dependent term of Eq. 6. In a fit Rogers et al. leave the amplitudes free and let a free normalisation absorb
+c(z) (their Section 6, quoted above), so the published line is one member of a family. The range 0.5 to 2 is this
+figure's choice, to show what a free amplitude does; it is not a prior from the paper. Where the two colours
+overlap, some amplitude in that range and some simulation agree; the figure does not say that the template with a
+fitted amplitude reproduces the simulations at every k.
+
+Shaded: below 2 pi / 8000 km/s = 7.85e-4 s/km, the lowest mode of their box, where the template is evaluated by
+extrapolation. The figure holds no emulator prediction.
 Its script and data: [the figures page](model_figures.md).
 
 ## What "restoring the troughs" means
@@ -158,8 +170,8 @@ Its script and data: [the figures page](model_figures.md).
 
 Only the model side runs from the public package. The simulation side needs the training cache of the simulations
 (the per-class spectra of the 60 simulations, filtered and unfiltered, at each mean-flux rung), which is not
-distributed. The ratios at z = 3 are in the repository as the table of the figure above
-(`docs/figures/data/class_ratio_z3p0_lf60.csv`).
+distributed. The ranges of the ratios at z = 3 are in the repository as the table of the figure above
+(`docs/figures/data/class_ratio_ranges_z3p0_lf60.csv`).
 
 ```python
 import numpy as np
@@ -192,13 +204,18 @@ The four constants are those of the published coefficients; they are not simulat
 
 The per-class template is that of Rogers et al. (2018), fitted to Illustris-1 (Vogelsberger et al. 2014a, 2014b;
 Nelson et al. 2015), which was run with AREPO (Springel 2010). The simulation side uses the PRIYA simulations (Bird
-et al. 2023), with spectra computed by fake_spectra (Bird 2017; `docs/fake_spectra_integration.md`). The mean-flux
+et al. 2023; Fernandez, Bird and Ho 2024), with spectra computed by fake_spectra (Bird 2017; `docs/fake_spectra_integration.md`). The mean-flux
 reference, a tau0 amplitude of 1, is the power law of Kim et al. (2007) in the parametrisation of Bird et al. (2023).
 
 ## References
 
 Bird, S. 2017, "FSFE: Fake Spectra Flux Extractor", Astrophysics Source Code Library,
 [ascl:1710.012](https://ascl.net/1710.012), https://github.com/sbird/fake_spectra.
+
+Fernandez, M. A., Bird, S., Ho, M.-F. 2024, "Cosmological constraints from the eBOSS Lyman-alpha forest using the
+PRIYA simulations", JCAP 2024 (07) 029,
+[doi:10.1088/1475-7516/2024/07/029](https://doi.org/10.1088/1475-7516/2024/07/029),
+[arXiv:2309.03943](https://arxiv.org/abs/2309.03943).
 
 Kim, T.-S., Bolton, J. S., Viel, M., Haehnelt, M. G., Carswell, R. F. 2007, MNRAS, 382, 1657,
 [doi:10.1111/j.1365-2966.2007.12406.x](https://doi.org/10.1111/j.1365-2966.2007.12406.x),

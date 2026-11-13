@@ -257,12 +257,16 @@ carries it per bin (`pred.cddf_err`).
 
 ![The class power ratio at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](docs/figures/class_ratio_vs_rogers18.png)
 
-**The class power ratio P_class / P_clean at z = 3.** Points: the 60 low-resolution PRIYA training simulations with
-the filtered troughs restored (mean and standard deviation over the simulations, z = 3.0). Line: Eq. 6 of Rogers et
-al. (2018, [arXiv:1706.08532](https://arxiv.org/abs/1706.08532)), from `hcd_analysis.hcd_template.class_ratio` at
-z = 3.0 (their snapshot is at z = 3.01). Shaded: below 7.85e-4 s/km, the lowest mode of their 8000 km/s box, where the
-template is evaluated by extrapolation. This figure holds no emulator prediction: the emulator predicts the filtered
-class spectra and was not tested with the troughs restored ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)).
+**The class power ratio P_class / P_clean at z = 3.** Blue: the low-resolution PRIYA training simulations with the
+filtered troughs restored (z = 3.0): the range over the 60 simulations at all mean-flux rungs (lighter), the range
+over the 60 simulations at the rung nearest 1 (darker) and its median (line). Orange line: Eq. 6 of Rogers et al.
+(2018, [arXiv:1706.08532](https://arxiv.org/abs/1706.08532)) as published, from
+`hcd_analysis.hcd_template.class_ratio` at z = 3.0 (their snapshot is at z = 3.01). Orange band: the same with the
+amplitude of its k-dependent term between 0.5 and 2 times; a fit leaves that amplitude free, and the range is this
+figure's choice, not a prior from the paper. Shaded: below 7.85e-4 s/km, the lowest mode of their 8000 km/s box, where
+the template is evaluated by extrapolation. This figure holds no emulator prediction: the emulator predicts the
+filtered class spectra and was not tested with the troughs restored
+([`docs/rogers_comparison.md`](docs/rogers_comparison.md)).
 
 ---
 
