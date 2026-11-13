@@ -17,6 +17,18 @@ from hcd_analysis.emulator.release_manifest import ReleaseManifestError
 from tests.synthetic_release import make_release, model_package, use_model_package
 
 SWITCH = "HCD_PRIYA_ALLOW_SYNTHETIC"
+# the nine parameters, written out: the midpoint of each parameter's training range
+PARAMS = {
+    "ns": 0.925,
+    "Ap": 1.9e-9,
+    "herei": 4.0,
+    "heref": 2.7,
+    "alphaq": 2.15,
+    "hub": 0.70,
+    "omegamh2": 0.143,
+    "hireionz": 7.25,
+    "bhfeedback": 0.05,
+}
 
 
 @pytest.fixture(scope="module")
@@ -50,8 +62,8 @@ def test_a_pinned_model_loads_and_is_the_release_it_was_built_from(release, tmp_
         emu = hp.load_published("lfmf")
         assert type(hp.load_published()) is hp.Bundle  # "lfmf" is the default
     ref = hp.load_release(str(release["root"]), release["sha"])
-    p = emu.predict(hp.example_params(), 3.0, tau0_amp=1.0, dtau0=0.0)
-    q = ref.predict(hp.example_params(), 3.0, tau0_amp=1.0, dtau0=0.0)
+    p = emu.predict(PARAMS, 3.0, tau0_amp=1.0, dtau0=0.0)
+    q = ref.predict(PARAMS, 3.0, tau0_amp=1.0, dtau0=0.0)
     assert type(emu) is hp.Bundle and p.labels["product"] == "LF+MF"
     np.testing.assert_array_equal(p.P_class, q.P_class)
     assert emu.provenance["release"]["release_sha256"] == release["sha"]
@@ -237,7 +249,7 @@ def test_the_synthetic_route_still_checks_the_files_and_marks_the_model(
     use_model_package(monkeypatch, tmp_path / "ok")
     with pytest.warns(UserWarning, match="synthetic test build"):
         emu = hp.load_published("lfmf")
-    pred = emu.predict(hp.example_params(), 3.0, tau0_amp=1.0, dtau0=0.0)
+    pred = emu.predict(PARAMS, 3.0, tau0_amp=1.0, dtau0=0.0)
     assert emu.provenance["release"]["synthetic_build"] is True
     assert pred.provenance["release"]["synthetic_build"] is True
     ref = hp.load_release(str(release["root"]), release["sha"])
@@ -281,7 +293,7 @@ def test_the_installed_model_package_loads(monkeypatch):
             emu = hp.load_published("lfmf")
     else:
         emu = hp.load_published("lfmf")
-    pred = emu.predict(hp.example_params(), z=3.0, tau0_amp=1.0, dtau0=0.0)
+    pred = emu.predict(PARAMS, z=3.0, tau0_amp=1.0, dtau0=0.0)
     assert pred.P_class.shape[0] == 4 and np.all(np.isfinite(pred.P_class))
 
 
@@ -308,9 +320,46 @@ def test_no_model_is_pinned_yet():
     assert PM.MODELS == [] and hp.published_models() == []
 
 
-def test_example_params_is_the_box_centre_by_name():
+def test_example_params_is_the_midpoint_and_says_so_with_its_values(capsys):
     p = hp.example_params()
+    out = capsys.readouterr().out
     assert list(p) == list(hp.PARAM_NAMES) and all(type(v) is float for v in p.values())
     np.testing.assert_allclose(
         hp.params_vector(p), np.mean(np.asarray(hp.PARAM_LIMITS), axis=1), rtol=1e-15
     )
+    # the values are never hidden: the call prints what the point is, and every value
+    assert "the midpoint of the training range" in out
+    assert "not a fiducial cosmology, not a best fit and not a simulation" in out
+    assert [ln.strip() for ln in out.splitlines()[2:]] == [f"{n} = {v:g}" for n, v in p.items()]
+    quiet = hp.example_params(verbose=False)
+    assert capsys.readouterr().out == "" and quiet == p
+    with pytest.raises(TypeError):
+        hp.example_params(False)  # keyword only: a bare False would read as a value
+    # the values the README and the docstrings write out are this point
+    np.testing.assert_allclose(hp.params_vector(PARAMS), hp.params_vector(p), rtol=1e-12)
+
+
+def test_the_model_loads_without_a_name_and_under_any_spelling_of_it(
+    release, tmp_path, monkeypatch
+):
+    model_package(tmp_path, release, version="7.0.0", synthetic=False)
+    use_model_package(monkeypatch, tmp_path)
+    monkeypatch.setattr(PM, "MODELS", [_pin(release, "7.0.0")])
+    assert hp.DEFAULT_MODEL == "LF+MF"
+    ref = hp.load_published().manifest_sha256  # no name: the LF+MF model
+    for name in ("LF+MF", "lf+mf", "LF-MF", "lf_mf", "LFMF", "lfmf", " LF + MF "):
+        assert hp.load_published(name).manifest_sha256 == ref, name
+    for name in ("LF", "MF", "lfmf2", "", "fold-0"):
+        with pytest.raises(hp.NoPublishedModelError, match=r"\(it holds: lfmf\)"):
+            hp.load_published(name)
+
+
+def test_two_names_that_read_alike_in_one_package_are_refused(release, tmp_path, monkeypatch):
+    pkg = model_package(tmp_path, release, version="7.0.0", synthetic=False)
+    doc = json.loads((pkg / "data" / "models.json").read_text())
+    doc["models"].append(dict(doc["models"][0], name="LF+MF"))
+    (pkg / "data" / "models.json").write_text(json.dumps(doc))
+    use_model_package(monkeypatch, tmp_path)
+    monkeypatch.setattr(PM, "MODELS", [_pin(release, "7.0.0")])
+    with pytest.raises(hp.NoPublishedModelError, match="holds no model 'lfmf'"):
+        hp.load_published("lfmf")

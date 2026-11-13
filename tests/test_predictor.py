@@ -350,9 +350,10 @@ def test_flags_and_labels(emu):
     ] == ["ns"]
     assert emu.predict(dict(PARAMS, ns=1.1), 3.0, tau_eff=0.4).flags["outside_training_box"]
     assert emu.predict(dict(PARAMS, herei=4.3), 3.0, tau_eff=0.4).flags["outside_sampling_box"]
-    assert emu.predict(PARAMS, 3.0, tau_eff=2.0 * float(kim_tau0(3.0))).flags[
-        "mean_flux_off_ladder"
-    ]
+    with pytest.warns(hp.MeanFluxRangeWarning):
+        assert emu.predict(PARAMS, 3.0, tau_eff=2.0 * float(kim_tau0(3.0))).flags[
+            "mean_flux_off_ladder"
+        ]
     lo = emu.predict(PARAMS, 2.0, tau_eff=0.2).flags
     assert lo["z_downweighted"] and lo["w_c_xbar_extrapolated"] and lo["k_downweighted"]
     lab = p.labels
@@ -650,3 +651,30 @@ def test_the_research_predictions_record_the_callers_purpose(research):  # R2 m2
     assert (
         pred.provenance["load_purpose"] == "why this load happened" == rp.provenance["load_purpose"]
     )
+
+
+def test_a_mean_flux_outside_the_trained_range_warns_and_is_still_predicted(emu):
+    """The warning has the condition of the flag mean_flux_off_ladder: tau_eff / tau_Kim(z) outside the range
+    recorded with the model (0.66 to 1.33 for the synthetic bundle). Both ways of giving the mean flux count.
+    """
+    import warnings
+
+    kim = float(kim_tau0(3.0))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # inside the range, and at its two edges: no warning
+        for a in (0.66, 1.0, 1.33):
+            assert not emu.predict(PARAMS, 3.0, tau_eff=a * kim).flags["mean_flux_off_ladder"]
+        assert not emu.predict(PARAMS, 3.0, tau0_amp=1.0, dtau0=0.0).flags["mean_flux_off_ladder"]
+    for kw in ({"tau_eff": 0.5 * kim}, {"tau_eff": 2.0 * kim}, {"tau0_amp": 2.0, "dtau0": 0.0}):
+        with pytest.warns(hp.MeanFluxRangeWarning) as caught:
+            p = emu.predict(PARAMS, 3.0, **kw)
+        assert len(caught) == 1 and p.flags["mean_flux_off_ladder"] is True
+        assert np.all(np.isfinite(p.P_class))  # returned, not refused
+        msg = str(caught[0].message)
+        assert "at z = 3" in msg and "0.66 to 1.33 times the fit of Kim et al. (2007)" in msg
+        assert f"[{0.66 * kim:.4g}, {1.33 * kim:.4g}]" in msg and "mean_flux_off_ladder" in msg
+        assert caught[0].filename == __file__  # the warning points at the caller's line
+    assert issubclass(hp.MeanFluxRangeWarning, UserWarning)
+    with pytest.warns(hp.MeanFluxRangeWarning, match="and at 1 more of the redshifts") as caught:
+        s = emu.predict_many(PARAMS, [2.6, 3.0, 3.4], tau_eff=[2.0, float(kim_tau0(3.0)), 3.0])
+    assert len(caught) == 1 and s.flags["mean_flux_off_ladder"] is True  # one warning per call

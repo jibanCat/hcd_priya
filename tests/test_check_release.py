@@ -144,6 +144,12 @@ def test_a_published_model_is_checked_from_the_installed_model_package(run):
     assert "synthetic test build" in refused.stdout and "PASSED" not in refused.stdout
     out = run("--published", "lfmf", switch=True)
     assert out.returncode == 0, out.stdout + out.stderr
+    # the parameter point is stated with its values, and no name is needed for the LF+MF model
+    assert "parameters: the midpoint of the training range of each parameter" in out.stdout
+    assert "ns = 0.925, Ap = 1.9e-09" in out.stdout and "bhfeedback = 0.05" in out.stdout
+    assert "example_params()" not in out.stdout  # the check prints its own line, once
+    unnamed = run("--published", switch=True)
+    assert unnamed.returncode == 0 and unnamed.stdout == out.stdout
     last = out.stdout.rstrip().splitlines()[-1]
     assert last.startswith("PASSED (synthetic build") and "SYNTHETIC BUILD" in out.stdout
     assert last != "PASSED"  # a synthetic build is never reported as the check of a model

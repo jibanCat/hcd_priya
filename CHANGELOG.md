@@ -23,8 +23,13 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - **The trained models come in a companion package, `hcd-priya-models`** (`model_package/`; data only, MIT
   licence), which `hcd-priya` now requires. **`load_published`** (`hcd_analysis.predictor`) loads a model by name
   from the installed model package, only against the sha256 listed in `hcd_analysis/published_models.py`.
-  **`example_params`** gives the centre of the parameter box. No model is published yet, so the list is empty; tests
+  With no argument it loads the LF+MF model; a name is compared without case and punctuation. The examples write
+  the nine parameters out; `example_params` gives the midpoint of the training range of each parameter and prints
+  that statement and the values when it is called. No model is published yet, so the list is empty; tests
   and CI use a model package built with a synthetic bundle.
+- **A warning for a mean flux outside the trained range.** A prediction whose `tau_eff` lies outside the range of
+  mean flux the model was trained on raises `MeanFluxRangeWarning`, which gives the range. The prediction is still
+  returned, with the flag `mean_flux_off_ladder` as before.
 - **`python -m hcd_analysis.check_release`**: loads a model from a fresh install, predicts, and compares with
   reference predictions.
 - **Examples in the docstrings of the user entry points**, run by a test; type annotations on the loaders,

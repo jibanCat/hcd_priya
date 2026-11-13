@@ -37,15 +37,15 @@ FLAT_SIGMA_MULT = 20.0
 # Becker+2013 (arXiv:1208.2584) τ_eff(z) — the DLA-MASKED + metal-corrected effective-
 # optical-depth curve, the field-standard ⟨F⟩(z) anchor the DESI/KS pipelines use:
 #   τ_eff(z) = BECKER13_TAU0·((1+z)/(1+BECKER13_ZREF))^BECKER13_BETA + BECKER13_C
-# (the +C "metal/continuum offset" term of Becker+2013 Eq. 6; C = −0.132).
+# (the +C "metal/continuum offset" term of Becker+2013, Eq. 5 of arXiv:1208.2584v2; C = −0.132).
 BECKER13_TAU0 = 0.751
 BECKER13_BETA = 2.90
 BECKER13_C = -0.132
-BECKER13_ZREF = 3.5  # the pivot (1+z)/(1+3.5) = (1+z)/4.5 in Becker+2013 Eq. 6
+BECKER13_ZREF = 3.5  # the pivot (1+z)/(1+3.5) = (1+z)/4.5 in Becker+2013 Eq. 5 (arXiv v2)
 
 
 def becker13_tau0(z):
-    """Becker+2013 (1208.2584 Eq. 6) τ_eff(z) = 0.751·((1+z)/4.5)^2.90 − 0.132.
+    """Becker+2013 (Eq. 5 of arXiv:1208.2584v2) τ_eff(z) = 0.751·((1+z)/4.5)^2.90 − 0.132.
 
     The DLA-masked + metal-corrected effective-optical-depth curve — the observational
     ⟨F⟩(z) anchor (production ``center="becker13"`` choice). Differentiable in z."""
@@ -122,7 +122,7 @@ def meanflux_tau0_prior(z, *, frac_sigma=DEFAULT_FRAC_SIGMA, flat=False, center=
     """Per-z mean-flux prior ``(tau0_mu, tau0_sigma)`` in τ₀ units.
 
     ``center="kim"`` (default, MVP): μ_z = Kim07 ⟨τ_eff⟩(z) — matched to the cache τ₀
-    ladder (α=τ₀/Kim(z)=1 at centre).  ``center="becker13"``: μ_z = Becker+2013 Eq. 6
+    ladder (α=τ₀/Kim(z)=1 at centre).  ``center="becker13"``: μ_z = Becker+2013 Eq. 5
     (the DLA-masked + metal-corrected curve the DESI/KS pipelines use) — the production
     anchor.  σ_z = frac_sigma·μ_z (the measurement width; Becker+2013 reports ~3–8%
     z-dependent — pass a per-z ``frac_sigma`` array for the production budget).

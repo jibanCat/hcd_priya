@@ -5,7 +5,7 @@ site-packages out of the import path, so a source tree lying around cannot stand
 
     python -I -m hcd_analysis.check_release RELEASE_DIR RELEASE_SHA256
     python -I -m hcd_analysis.check_release RELEASE_DIR RELEASE_SHA256 --reference reference_predictions.json
-    python -I -m hcd_analysis.check_release --published lfmf            # the model of the installed model package
+    python -I -m hcd_analysis.check_release --published                 # the LF+MF model of the installed model package
 
 What it does, in order: reports where ``hcd_analysis`` was imported from; loads the release (``load_release``, or
 ``load_published`` with ``--published``, which takes the files from the installed ``hcd-priya-models``), which
@@ -42,7 +42,11 @@ def predictions(emu: Any, zs: Sequence[float]) -> list[dict[str, Any]]:
     """The cases compared: the box centre at each redshift, at every fidelity the model serves there."""
     import hcd_analysis.predictor as hp
 
-    params = hp.example_params()
+    params = hp.example_params(verbose=False)
+    print(
+        "parameters: the midpoint of the training range of each parameter (not a fiducial cosmology): "
+        + ", ".join(f"{n} = {v:g}" for n, v in params.items())
+    )
     cases = []
     for z in zs:
         for fidelity in hp.FIDELITIES:
@@ -110,7 +114,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument(
         "--published",
         metavar="NAME",
-        help="load NAME from the installed model package (hcd-priya-models) instead",
+        nargs="?",
+        const="LF+MF",
+        help="load a model from the installed model package (hcd-priya-models) instead; NAME is "
+        "optional, and the LF+MF model is loaded without it",
     )
     ap.add_argument(
         "--z",

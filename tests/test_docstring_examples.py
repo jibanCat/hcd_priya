@@ -47,7 +47,17 @@ def names(tmp_path_factory):
     rel = make_release(tmp_path_factory.mktemp("rel") / "release")
     research = RT.write_synthetic_research_bundle(str(tmp_path_factory.mktemp("res") / "research"))
     emu = hp.load_release(str(rel["root"]), rel["sha"])
-    params = {n: 0.5 * (lo + hi) for n, (lo, hi) in zip(hp.PARAM_NAMES, hp.PARAM_LIMITS)}
+    params = {  # written out, as in the examples themselves: the midpoint of each training range
+        "ns": 0.925,
+        "Ap": 1.9e-9,
+        "herei": 4.0,
+        "heref": 2.7,
+        "alphaq": 2.15,
+        "hub": 0.70,
+        "omegamh2": 0.143,
+        "hireionz": 7.25,
+        "bhfeedback": 0.05,
+    }
     return {
         "hp": hp,
         "np": np,
