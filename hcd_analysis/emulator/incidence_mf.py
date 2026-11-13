@@ -71,7 +71,7 @@ LF_SOURCE = (
 )
 # The place for a held-out error of the corrected incidence. No number is shipped with a record of this format; this
 # text says how such a number is computed and what it covers, so that one published later can be read. It is shown
-# with every prediction the correction is applied to (labels["incidence_mf_error"]).
+# with every prediction the correction is applied to (labels["incidence_mf_error"], through heldout_error_label).
 HELDOUT_ERROR_STATEMENT = (
     "No held-out error of the corrected dN/dX or CDDF is shipped with this record. How such an error is computed: "
     "for each HR simulation s the table is rebuilt without s; an LF model trained without the LF partner of s (a "
@@ -83,6 +83,20 @@ HELDOUT_ERROR_STATEMENT = (
     "is left out; the form of the table, one ratio per class and redshift, was chosen with every HR simulation in "
     "view; a redshift with a single pair has no held-out value."
 )
+
+
+def heldout_error_label(n_table_sims: int) -> str:
+    """``HELDOUT_ERROR_STATEMENT`` followed by the clause that links it to one record: the statement speaks of the
+    six fold models, and a record's table may be the mean over fewer HR simulations than that (those its composition
+    names). The number comes from the record, not from this text."""
+    return (
+        HELDOUT_ERROR_STATEMENT
+        + " The six fold models are those of the six LF simulations that have an HR partner; the correction table "
+        f"of this record is the mean over the {int(n_table_sims)} HR simulations named in its composition "
+        "(provenance incidence_mf train_sims), which need not be all six."
+    )
+
+
 RECORD_KEYS = {
     "format",
     "version",

@@ -1049,7 +1049,7 @@ class _PredictorBase:
             "redshift (theta-independent; at a redshift the table does not hold it is linear in z between its "
             "neighbours, flagged incidence_mf_z_interpolated, and beyond the table held constant, flagged "
             "incidence_mf_z_clamped); applied with the P1D MF correction, never to an LF prediction",
-            "incidence_mf_error": _IM.HELDOUT_ERROR_STATEMENT,
+            "incidence_mf_error": _IM.heldout_error_label(len(self._inc.record["train_sims"])),
         }
         out["cddf"] = (
             "the column-density distribution f(N_HI), per unit column density and absorption distance, at the "

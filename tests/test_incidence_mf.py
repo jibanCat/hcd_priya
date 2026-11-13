@@ -507,11 +507,13 @@ def test_labels_and_provenance_say_what_was_applied(rel):
     assert "before the map" in p.labels["w_c"] and "fitted on LF counts" in p.labels["w_c"]
     assert "w_c stays the LF backbone's" not in p.labels["mf"] and "incidence MF" in p.labels["mf"]
     # no held-out error is shipped; the text that says how one is computed comes with the prediction
-    assert p.labels["incidence_mf_error"] == IM.HELDOUT_ERROR_STATEMENT
-    assert (
-        "No held-out error" in p.labels["incidence_mf_error"]
-        and "six of sixty" in p.labels["incidence_mf_error"]
-    )
+    # and it says how many HR simulations this record's table is the mean over (the synthetic record names two)
+    label = p.labels["incidence_mf_error"]
+    assert label == IM.heldout_error_label(2) and label.startswith(IM.HELDOUT_ERROR_STATEMENT)
+    assert "No held-out error" in label and "six of sixty" in label
+    assert "is the mean over the 2 HR simulations named in its composition" in label
+    assert "the mean over the 5 HR simulations" in IM.heldout_error_label(5)
+    assert len(p.provenance["incidence_mf"]["train_sims"]) == 2
     assert p.provenance["incidence_mf"]["heldout_error"] is None
     prov = p.provenance["incidence_mf"]
     assert prov["record_sha256"] == info["incidence_sha"]

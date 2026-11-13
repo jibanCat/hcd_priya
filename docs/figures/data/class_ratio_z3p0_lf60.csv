@@ -2,6 +2,9 @@
 # mean-flux rung nearest the Kim et al. 2007 fit (factor 1.0112), k < 0.03 s/km (angular convention). 'addback' = PRIYA-filtered class power plus the
 # filtered troughs restored; 'filtered' = as the emulator is trained. Classes by the strongest absorber on the sightline: LLS 17.2-19.0,
 # subDLA 19.0-20.3, small DLA 20.3-21.0, large DLA above 21.0 (log10 N_HI). All classes share one global mean flux.
+# k is the mean over the 60 simulations of the wavenumber of each box mode: the boxes have slightly different lengths in km/s, so the
+# ratio is formed in each simulation at fixed mode number and then averaged over simulations mode by mode (largest relative standard
+# deviation of k over the simulations: 3.92e-02).
 # k_s_per_km,R_LLS_addback_mean,R_LLS_addback_sd_over_sims,R_LLS_filtered_mean,R_LLS_filtered_sd_over_sims,R_subDLA_addback_mean,R_subDLA_addback_sd_over_sims,R_subDLA_filtered_mean,R_subDLA_filtered_sd_over_sims,R_smallDLA_addback_mean,R_smallDLA_addback_sd_over_sims,R_smallDLA_filtered_mean,R_smallDLA_filtered_sd_over_sims,R_largeDLA_addback_mean,R_largeDLA_addback_sd_over_sims,R_largeDLA_filtered_mean,R_largeDLA_filtered_sd_over_sims
 4.75397849e-04,1.30255319e+00,1.40053227e-02,1.30255319e+00,1.40053227e-02,3.22797625e+00,1.63747485e-01,1.46010212e+00,5.73790184e-02,1.01281552e+01,6.28422152e-01,7.46610082e-01,3.34533940e-02,1.48633422e+01,1.76346540e+00,1.05425396e+00,1.46686555e-01
 9.50795697e-04,1.27389488e+00,1.21435448e-02,1.27389488e+00,1.21435448e-02,2.52351002e+00,6.52502318e-02,1.31491215e+00,2.12874651e-02,4.21069575e+00,3.66820849e-01,9.47232784e-01,4.27586563e-02,1.85855436e+00,4.97942004e-01,8.59629141e-01,8.95540429e-02

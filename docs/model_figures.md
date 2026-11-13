@@ -63,7 +63,9 @@ row per point). That table is not in the repository. Without it the script draws
 
 - **Simulations (points):** the ratio `P_class / P_clean` at z = 3.0 of the 60 low-resolution PRIYA training
   simulations, with the filtered troughs restored: the mean and the standard deviation over the simulations, for
-  k < 0.03 s/km. The file is `docs/figures/data/class_ratio_z3p0_lf60.csv`; its header says how it was made.
+  k < 0.03 s/km. The ratio is formed in each simulation mode by mode and then averaged; each point is plotted at
+  the mean wavenumber of its mode over the simulations (the boxes differ slightly in length in km/s). The file is
+  `docs/figures/data/class_ratio_z3p0_lf60.csv`; its header says how it was made.
 - **Template (line):** Eq. 6 of Rogers et al. (2018), from the public function
   `hcd_analysis.hcd_template.class_ratio` at z = 3.0, for LLS, subDLA, small DLA and large DLA.
 - **The shaded region:** wavenumbers below the lowest mode of the box of Rogers et al., 2 pi / 8000 km/s =
