@@ -208,6 +208,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         print(f"reference: {len(cases)} cases agree with {args.reference} to {args.rtol:g}")
     print(
+        "what was checked: every file of the release verifies against its digest, the model loads, and its "
+        "predictions are finite"
+        + (
+            " and equal to the reference"
+            if args.reference
+            else "; no reference was given, so no number was compared"
+        )
+        + ". This is a check of the installation, not a scientific validation of the model."
+    )
+    print(
         "PASSED (synthetic build: the installation was checked, not a model)"
         if synthetic
         else "PASSED"

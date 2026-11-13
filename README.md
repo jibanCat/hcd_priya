@@ -117,7 +117,8 @@ print("flags that are set (read them before you use the numbers):", sorted(n for
 ```
 
 With the trained LF+MF model this prints (the model has 172 wavenumbers; no spectrum value is shown here). The
-stand-in model of today's install prints other shapes and flags:
+stand-in model of today's install has another number of wavenumbers, and its predictions carry one more flag,
+`synthetic_build`:
 
 ```text
 model: LF+MF
@@ -131,8 +132,10 @@ The two flags say that the multi-fidelity correction was applied, and that some 
 below 1e-3 s/km, where training gave less weight.
 
 - **What "LF+MF" is.** The emulator trained on the low-fidelity (low-resolution) PRIYA simulations, with the
-  multi-fidelity correction that calibrates it to the high-resolution simulations. It is the model this package
-  publishes, and `hp.load_published()` loads it without a name.
+  multi-fidelity correction that calibrates its class spectra to the high-resolution simulations. The validation of
+  that correction is under review and its results are not public yet
+  ([`docs/models_and_data.md`](docs/models_and_data.md)). It is the model this package publishes, and
+  `hp.load_published()` loads it without a name.
 - **Where the model comes from.** The trained model is in a companion package, `hcd-priya-models`, which `hcd-priya`
   requires. Nothing is downloaded when you load it. **Neither package is published yet**: [Install](#install) says
   what works today, and [Models and data](#models-and-data) what `load_published` checks. With a release's files
@@ -149,10 +152,20 @@ What goes in and what comes out:
 - **Redshift.** `z` is one of the PRIYA snapshot redshifts 2.0, 2.2, ..., 5.4; `emu.predict_many` takes several.
 - **Mean flux.** Give either `tau0_amp` and `dtau0` (PRIYA's model), or `tau_eff` from any other mean-flux model
   (`help(hp.tau_eff_priya)` shows how, with a published fit as the example). A mean flux outside the range the model
-  was trained on is predicted with a warning and a flag.
-- **Result.** `pred.k` (s/km), `pred.P_class` (clean, LLS, subDLA, DLA), `pred.w_c` and `pred.dndx` (the model's
-  sightline fractions and incidence of the three HCD classes). `hp.add_hcd(pred, pred.w_c)` mixes the classes into one
-  P1D. **Read `pred.flags` before using the numbers**: a parameter outside the training box, or an LF+MF prediction
+  was trained on is predicted with a warning and a flag. The warning checks the range only. A `tau_eff` of your own
+  must be that of the PRIYA-filtered forest, the quantity the model was trained on: a measurement made with
+  another treatment of metals or of DLAs is another quantity, and nothing in the package can tell.
+- **Result.** `pred.k`, `pred.P_class` (clean, LLS, subDLA, DLA), `pred.w_c` and `pred.dndx` (the model's
+  sightline fractions and incidence of the three HCD classes). `hp.add_hcd(pred, pred.w_c)` mixes the class spectra
+  with those fractions. **That mixture is not the full P1D of a sightline sample.** Under LF+MF the class spectra
+  carry the multi-fidelity correction, while `pred.dndx` and `pred.w_c` are those of the low-fidelity model; and the
+  mixture leaves out two contributions that the filter removed, the power of the subDLA cores and the DLA
+  damping-wing core (`pred.labels["omissions"]`).
+- **Conventions.** `pred.k` is the angular wavenumber, 2 pi divided by the wavelength in velocity, in s/km.
+  `pred.P_class` is the power spectrum of F / <F> - 1, with <F> the mean flux of the whole sample, in km/s
+  ([`docs/p1d_definition.md`](docs/p1d_definition.md)). A spectrum in the other common convention, with k as one
+  over the wavelength, differs by a factor of 2 pi in both k and P.
+- **Read `pred.flags` before using the numbers**: a parameter outside the training box, or an LF+MF prediction
   above z 4.6, is returned and flagged, not refused.
 
 Without any model file, the same calls run on a synthetic bundle (untrained networks, so it shows the interface and

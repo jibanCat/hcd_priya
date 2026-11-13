@@ -14,6 +14,8 @@ duplicates; they remain only so the historical analyses reproduce, and the publi
 from __future__ import annotations
 from typing import NamedTuple
 
+import warnings
+
 import jax
 import numpy as np
 import jax.numpy as jnp
@@ -138,6 +140,12 @@ def delta_c(z, delta_map=None):
     return zz @ jnp.asarray(m.coeffs).T  # (...,4)
 
 
+class HistoricalMapWarning(UserWarning):
+    """``w_c_corrected`` was called without a map and fell back on the historical one, which does not reproduce a
+    released model's own class fractions. Old analyses that mean to use it can silence this category.
+    """
+
+
 def w_c_corrected(
     dndx: jax.Array | np.ndarray,
     Xbar: jax.Array | np.ndarray,
@@ -187,6 +195,15 @@ def w_c_corrected(
     >>> bool(np.allclose(w, w_c_from_mu(dndx * Xbar)))
     True
     """
+    if delta_map is None:
+        warnings.warn(
+            HistoricalMapWarning(
+                "w_c_corrected was called without delta_map and uses the HISTORICAL map, fitted to counts made "
+                "before a catalogue fix: it does not reproduce a released model's own w_c. For a released model "
+                "call emu.wc_map.w_c(dndx, z), or pass delta_map=emu.wc_map.delta_c_map()."
+            ),
+            stacklevel=2,
+        )
     w0 = w_c_from_mu(mu_from_dndx(dndx, Xbar))  # (...,4)
     w = w0 * (1.0 + delta_c(z, delta_map))
     return w / jnp.sum(w, axis=-1, keepdims=True)

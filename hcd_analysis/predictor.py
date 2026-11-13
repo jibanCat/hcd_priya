@@ -562,18 +562,22 @@ class Prediction:
         The snapshot redshift, or the redshifts of a stack, shape (n_z,).
     k : numpy.ndarray
         The wavenumbers in s/km, shape (K,): the simulation's own modes, or the ``k`` asked for.
+        They are angular wavenumbers, 2 pi divided by the wavelength in velocity.
     P_class : numpy.ndarray
-        Shape (4, K). The one-dimensional flux power spectrum (P1D, in km/s) of each class, in the
+        Shape (4, K). The one-dimensional flux power spectrum (P1D, in km/s; the power of
+        F / <F> - 1 with <F> the mean flux of the whole sample) of each class, in the
         order clean, LLS, subDLA, DLA. It is the PRIYA-filtered spectrum (pixels with optical depth
         above 1e6 are filled), averaged over the ensemble members.
     template : numpy.ndarray
         Shape (3, K): P_c / P_clean - 1 for LLS, subDLA and DLA.
     w_c : numpy.ndarray
         Shape (3,). The model's estimate of each HCD class's sightline fraction at these
-        parameters and redshift, from ``dndx`` through the w_c map of the bundle.
+        parameters and redshift, from ``dndx`` through the w_c map of the bundle. Under LF+MF it
+        is still the low-fidelity model's: the multi-fidelity correction acts on ``P_class``
+        only, so ``add_hcd(pred, pred.w_c)`` mixes corrected class spectra with LF fractions.
     dndx : numpy.ndarray
         Shape (3,). The predicted incidence dN/dX of each HCD class (absorbers per unit absorption
-        distance X), averaged over the members.
+        distance X), averaged over the members. Under LF+MF it is the low-fidelity model's.
     member_std : numpy.ndarray or None
         Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
         members disagree. It is not a calibrated emulator error and not a covariance. None for a
@@ -676,6 +680,17 @@ class _PredictorBase:
         settings = (rb.lineage.get("cache") or {}).get("settings") or {}
         ar = settings.get("alpha_range")
         self._alpha_range = None if ar is None else (float(ar[0]), float(ar[1]))
+        if (
+            ar is None
+        ):  # said once, at load: no prediction of this model can warn about its mean flux
+            warnings.warn(
+                MeanFluxRangeWarning(
+                    "this model records no trained mean-flux range: the flag mean_flux_off_ladder will be None "
+                    "on every prediction, and no prediction will warn when its mean flux is far from what the "
+                    "model was trained on"
+                ),
+                stacklevel=2,
+            )
         self._fidelity = str(settings.get("fidelity", "")).upper() or None
 
     # ------------------------------------------------------------------ what was loaded
@@ -931,8 +946,9 @@ class _PredictorBase:
         above = bool(use_mf) and any(z > _MR.VALIDATED_Z_MAX + Z_TOL for z in zs)
         return {
             "mf_applied": bool(use_mf),
-            "mf_z_clamped": bool(any(zc)),
-            "mf_tau0_clamped": bool(any(tc)),
+            # how the tables were looked up: only when they were applied (an LF prediction applies nothing)
+            "mf_z_clamped": bool(use_mf and any(zc)),
+            "mf_tau0_clamped": bool(use_mf and any(tc)),
             "mf_z_above_validated": bool(above),
         }
 
@@ -1220,6 +1236,13 @@ class _PredictorBase:
         w4 = np.stack([self._rb.wc_map.w_c(dmean[i], z) for i, z in enumerate(zs)])
         template = Pm[:, 1:, :] / Pm[:, :1, :] - 1.0
         flags, labels, prov = self._flags(pv, th, zs, taus, kout), self.labels(), self.provenance
+        if (self._release or {}).get(
+            "synthetic_build"
+        ):  # untrained networks: said where a user looks first
+            flags["synthetic_build"] = True
+            labels["synthetic_build"] = (
+                "SYNTHETIC TEST BUILD: the networks are untrained; these numbers are not a model of anything"
+            )
         if self._mf is not None:
             flags.update(self._mf_flags(zs, taus, use_mf))
             labels.update(self._mf_labels(labels, use_mf))
@@ -2069,8 +2092,11 @@ def add_hcd(pred: Prediction, A: ArrayLike) -> np.ndarray:
     """Add the HCD classes to the clean P1D, with the given amplitudes.
 
     Returns P_clean + sum_c A_c (P_c - P_clean), where c runs over LLS, subDLA and DLA, and A_c is
-    the effective sightline fraction of class c. With ``A = pred.w_c`` this is the model's
-    estimate of the full-sample P1D, to the accuracy of the w_c map.
+    the effective sightline fraction of class c. With ``A = pred.w_c`` this is the model's mixture
+    of its class spectra, to the accuracy of the w_c map. It is NOT the full P1D of a sightline
+    sample: the class spectra are PRIYA-filtered, so the power of the subDLA cores and the DLA
+    damping-wing core are left out (``pred.labels["omissions"]``); and under LF+MF the class
+    spectra carry the multi-fidelity correction while ``pred.w_c`` is the low-fidelity model's.
 
     Parameters
     ----------

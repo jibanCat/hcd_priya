@@ -252,8 +252,19 @@ def test_the_synthetic_route_still_checks_the_files_and_marks_the_model(
     pred = emu.predict(PARAMS, 3.0, tau0_amp=1.0, dtau0=0.0)
     assert emu.provenance["release"]["synthetic_build"] is True
     assert pred.provenance["release"]["synthetic_build"] is True
+    # and where a user looks first: a flag that is True, and a label
+    assert pred.flags["synthetic_build"] is True
+    assert pred.labels["synthetic_build"].startswith(
+        "SYNTHETIC TEST BUILD: the networks are untrained"
+    )
+    stack = emu.predict_many(PARAMS, [2.6, 3.0], tau0_amp=1.0, dtau0=0.0)
+    assert stack.flags["synthetic_build"] is True and "synthetic_build" in stack.labels
     ref = hp.load_release(str(release["root"]), release["sha"])
     assert "synthetic_build" not in ref.provenance["release"]
+    plain = ref.predict(
+        PARAMS, 3.0, tau0_amp=1.0, dtau0=0.0
+    )  # the same files loaded as a release: no mark
+    assert "synthetic_build" not in plain.flags and "synthetic_build" not in plain.labels
     # a changed file, and a wrong stated digest, are refused on this route too
     target = pkg / "data" / "lfmf" / "mf" / "mf_record.json"
     os.chmod(target, 0o644)
