@@ -7,12 +7,21 @@ high-column-density absorber classes. This package holds data only. `hcd-priya` 
 ```python
 import hcd_analysis.predictor as hp
 
-emu = hp.load_published("lfmf")
-pred = emu.predict(hp.example_params(), z=3.0, tau0_amp=1.0, dtau0=0.0)
-pred.P_class        # (4, K): the P1D of clean, LLS, subDLA, DLA
+emu = hp.load_published()          # the LF+MF model
+# the nine PRIYA parameters; these values are the midpoint of each parameter's training range,
+# which is not a fiducial cosmology: put your own here
+params = {"ns": 0.925, "Ap": 1.9e-9, "herei": 4.0, "heref": 2.7, "alphaq": 2.15,
+          "hub": 0.70, "omegamh2": 0.143, "hireionz": 7.25, "bhfeedback": 0.05}
+pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+print("shape of pred.P_class, the P1D of clean, LLS, subDLA, DLA:", pred.P_class.shape)
 ```
 
-- **What it holds.** The LF+MF release of the emulator (`lfmf`): the low-fidelity backbone bundle, the
+```text
+shape of pred.P_class, the P1D of clean, LLS, subDLA, DLA: (4, 172)
+```
+
+- **What it holds.** The LF+MF release of the emulator (its name in this package is `lfmf`; `load_published()`
+  loads it without a name): the low-fidelity backbone bundle, the
   multi-fidelity record and `release.json`, in the pickle-free format described in the hcd_priya documentation.
 - **How it is checked.** `hcd-priya` pins the sha256 of the release it accepts. `load_published` loads the files of
   this package only if they verify against that digest, file by file. This package loads nothing itself.

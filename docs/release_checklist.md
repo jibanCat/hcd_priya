@@ -84,9 +84,9 @@ disabled until then.
 - [ ] The model wheel and source archive are built (`python -m build --outdir <folder> model_package`), and
       `python tools/ci/check_dist_content.py <folder> --release` reports 0 findings.
 - [ ] **Blocking: the fresh install.** In a new environment that holds only the two built wheels (no clone on the
-      import path), with `HCD_PRIYA_ALLOW_SYNTHETIC` unset: `python -I tools/ci/readme_three_lines.py README.md`
-      passes (the three lines of the README, as written), and `python -I -m hcd_analysis.check_release --published
-      lfmf --reference reference_predictions.json` ends in the plain line `PASSED` (every file verifies; the
+      import path), with `HCD_PRIYA_ALLOW_SYNTHETIC` unset: `python -I tools/ci/readme_first_example.py README.md`
+      passes (the first example of the README, as written), and `python -I -m hcd_analysis.check_release --published
+      --reference reference_predictions.json` ends in the plain line `PASSED` (every file verifies; the
       predictions agree with the reference predictions published beside the release). A run that ends in
       "PASSED (synthetic build ...)" is not this check. The reference is written once, on the supported
       environment, with `--write-reference`.

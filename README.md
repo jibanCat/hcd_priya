@@ -16,35 +16,137 @@ It is built on the PRIYA suite of cosmological hydrodynamic simulations.
 
 ---
 
+## Install
+
+<!-- docs:install:start -->
+`hcd-priya` installs the Python package `hcd_analysis` and the command `hcd`. It requires `hcd-priya-models`, a
+data-only package that holds the trained models. It needs Python 3.11 or later on Linux (x86-64).
+
+**What works today: an install from a clone.** Neither package is on a package index yet. Install from a clone of
+this repository, and give the wheel of the model package as a file (given as a file, it is never looked up on an
+index):
+
+```bash
+git clone https://github.com/jibanCat/hcd_priya && cd hcd_priya
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install . <path to the hcd_priya_models wheel>
+python -c "import hcd_analysis; print(hcd_analysis.__version__)"
+hcd --help
+```
+
+- **Which model wheel.** No trained model is published yet. The only model wheel that someone outside the project
+  can build today is a stand-in with a synthetic bundle: untrained networks, which show that the installation
+  works and whose numbers are not science. The model wheel is built in this repository
+  ([`model_package/`](model_package/README.md)); `tools/ci/install_with_synthetic_models.sh` builds the stand-in and
+  installs it ([`CONTRIBUTING.md`](CONTRIBUTING.md) has the commands). With the stand-in, the first example of the
+  README runs only with `HCD_PRIYA_ALLOW_SYNTHETIC=1` set, and with a warning.
+- **The supported install** pins every dependency to the versions the test suite is developed and run with
+  ([`tools/ci/constraints-devenv.txt`](tools/ci/constraints-devenv.txt)), on CPython 3.11:
+
+  ```bash
+  pip install -c tools/ci/constraints-devenv.txt ".[test]" <path to the hcd_priya_models wheel>
+  ```
+
+**What will work after publication (not available yet).** Once both packages are published, the whole install will
+be one line. It does not work today:
+
+```bash
+pip install hcd-priya        # NOT AVAILABLE YET: neither package is on a package index
+```
+
+It will install the code and the trained LF+MF model together, and the first example of the README will then run as
+written, with no switch and no warning.
+
+**Notes.**
+
+- Newer dependency versions and Python 3.12 are tested in continuous integration but not supported yet; macOS and
+  Windows are not tested. [`docs/compatibility.md`](docs/compatibility.md) lists what is tested and what is not.
+- **Extras:** `test` (pytest), `tutorials` (jupyter, nbformat) and `dev`. `pyproject.toml` declares the
+  dependencies; `requirements.txt` only points to the install above.
+- **Working in a clone.** To run the scripts or the pipeline from the clone, install it editable (add `-e` before
+  `".[test]"` in the supported install). The pipeline records the clone's commit, and only
+  an editable install makes that commit the code that runs (with your changes committed); a plain install runs the
+  copy made when it was installed. The scripts under `scripts/` are not part of the installed package; run them from
+  the repository root.
+- **JAX on the CPU, in double precision.** Importing `hcd_analysis.emulator` enables float64, which several
+  structural identities of the model need: they hold only to bit-level accuracy and break under JAX's default
+  float32. Run scripts with `JAX_PLATFORMS=cpu python <your_script.py>`.
+- **The simulation side** (building absorber catalogs and P1D from raw spectra) also needs `fake_spectra`, installed
+  separately ([`docs/fake_spectra_integration.md`](docs/fake_spectra_integration.md)); the predictor does not. On
+  the Great Lakes cluster, `bash scripts/install_greatlakes.sh` creates a conda environment with both.
+<!-- docs:install:end -->
+
+---
+
 ## Quickstart
 
-Load a model and predict the per-class P1D, in three lines:
+Load the LF+MF model and predict the P1D of each class of sightlines at one redshift. The nine parameters of the
+model are written out, so that you see which point the prediction is for:
 
 ```python
 import hcd_analysis.predictor as hp
 
-emu = hp.load_published("lfmf")     # the LF+MF model, from the installed model package
-pred = emu.predict(hp.example_params(), z=3.0, tau0_amp=1.0, dtau0=0.0)
-pred.P_class                        # (4, 172): the P1D in km/s of clean, LLS, subDLA, DLA at pred.k (s/km)
+emu = hp.load_published()        # the LF+MF model, from the installed model package
+
+# The nine PRIYA parameters, by name. These values are the midpoint of the range each parameter
+# was trained on: a point to try the model at. It is not a fiducial cosmology, not a best fit
+# and not a simulation. Put your own values here.
+params = {
+    "ns": 0.925,           # slope of the primordial power spectrum at k = 0.78 / Mpc
+    "Ap": 1.9e-9,          # its amplitude at the same wavenumber
+    "herei": 4.0,          # redshift at which helium reionization starts
+    "heref": 2.7,          # redshift at which helium reionization ends
+    "alphaq": 2.15,        # quasar spectral index, which sets the heating of helium reionization
+    "hub": 0.70,           # dimensionless Hubble parameter h
+    "omegamh2": 0.143,     # Omega_m h^2
+    "hireionz": 7.25,      # redshift of hydrogen reionization
+    "bhfeedback": 0.05,    # black-hole feedback strength
+}
+
+# z is a PRIYA snapshot redshift. The mean flux is PRIYA's model at its centre:
+# tau0_amp = 1 and dtau0 = 0 give the fit of Kim et al. (2007).
+pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+
+print("model:", pred.labels["product"])
+print("classes, in the order of P_class:", hp.CLASSES)
+print("shape of pred.P_class, the P1D in km/s of each class:", pred.P_class.shape)
+print("shape of pred.k, the wavenumbers in s/km:", pred.k.shape)
+print("flags that are set (read them before you use the numbers):", sorted(n for n, v in pred.flags.items() if v is True))
 ```
 
-The trained model comes in a companion package, `hcd-priya-models`, which `hcd-priya` requires: installing
-`hcd-priya` installs the model too, and nothing is downloaded when you load it. **Neither package is published
-yet**; [Install](#install) says how to install from a clone today, and [Models and data](#models-and-data) what
-`load_published` checks. With a release's files in hand, the same model loads from its directory and the sha256
-published with it:
+With the LF+MF model this prints (the model has 172 wavenumbers; no spectrum value is shown here):
 
-```python
-emu = hp.load_release("path/to/release", "<published release sha256>")
+```text
+model: LF+MF
+classes, in the order of P_class: ('clean', 'LLS', 'subDLA', 'DLA')
+shape of pred.P_class, the P1D in km/s of each class: (4, 172)
+shape of pred.k, the wavenumbers in s/km: (172,)
+flags that are set (read them before you use the numbers): ['k_downweighted', 'mf_applied']
 ```
+
+The two flags say that the multi-fidelity correction was applied, and that some of the model's own wavenumbers lie
+below 1e-3 s/km, where training gave less weight.
+
+- **What "LF+MF" is.** The emulator trained on the low-fidelity (low-resolution) PRIYA simulations, with the
+  multi-fidelity correction that calibrates it to the high-resolution simulations. It is the model this package
+  publishes, and `hp.load_published()` loads it without a name.
+- **Where the model comes from.** The trained model is in a companion package, `hcd-priya-models`, which `hcd-priya`
+  requires. Nothing is downloaded when you load it. **Neither package is published yet**: [Install](#install) says
+  what works today, and [Models and data](#models-and-data) what `load_published` checks. With a release's files
+  in hand, the same model loads from its directory and the sha256 published with it:
+
+  ```python
+  emu = hp.load_release("path/to/release", "<published release sha256>")
+  ```
 
 What goes in and what comes out:
 
-- **Parameters.** `params` is a dict of the nine PRIYA parameters by name (`hp.PARAM_NAMES`); `hp.example_params()`
-  is the centre of the parameter box, a synthetic point for a first call.
+- **Parameters.** `params` is a dict of the nine PRIYA parameters by name (`hp.PARAM_NAMES`), as above. A value
+  outside the range the model was trained on (`hp.PARAM_LIMITS`) is predicted and flagged, not refused.
 - **Redshift.** `z` is one of the PRIYA snapshot redshifts 2.0, 2.2, ..., 5.4; `emu.predict_many` takes several.
 - **Mean flux.** Give either `tau0_amp` and `dtau0` (PRIYA's model), or `tau_eff` from any other mean-flux model
-  (`hp.tau_eff_priya` shows how).
+  (`help(hp.tau_eff_priya)` shows how, with a published fit as the example). A mean flux outside the range the model
+  was trained on is predicted with a warning and a flag.
 - **Result.** `pred.k` (s/km), `pred.P_class` (clean, LLS, subDLA, DLA), `pred.w_c` and `pred.dndx` (the model's
   sightline fractions and incidence of the three HCD classes). `hp.add_hcd(pred, pred.w_c)` mixes the classes into one
   P1D. **Read `pred.flags` before using the numbers**: a parameter outside the training box, or an LF+MF prediction
@@ -120,57 +222,6 @@ Not in this release:
 
 ---
 
-## Install
-
-<!-- docs:install:start -->
-`hcd-priya` installs the Python package `hcd_analysis` and the command `hcd`. It requires `hcd-priya-models`, a
-data-only package that holds the trained models. It needs Python 3.11 or later on Linux (x86-64).
-
-**Neither package is on PyPI yet.** Once they are, the whole install is `pip install hcd-priya`. Until then, install
-from a clone of this repository and give the wheel of the model package as a file (given as a file, it is never
-looked up on an index):
-
-```bash
-git clone https://github.com/jibanCat/hcd_priya && cd hcd_priya
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install . <path to the hcd_priya_models wheel>
-python -c "import hcd_analysis; print(hcd_analysis.__version__)"
-hcd --help
-```
-
-The model wheel is built in this repository ([`model_package/`](model_package/README.md)). **No model is published
-yet, so today the only model wheel anyone can build is a stand-in with a synthetic bundle** (untrained networks, not
-for science): `tools/ci/install_with_synthetic_models.sh` builds and installs it
-([`CONTRIBUTING.md`](CONTRIBUTING.md) has the commands), and the three lines of the Quickstart then run only with
-`HCD_PRIYA_ALLOW_SYNTHETIC=1` set, with a warning.
-
-**The supported install** pins every dependency to the versions the test suite is developed and run with
-([`tools/ci/constraints-devenv.txt`](tools/ci/constraints-devenv.txt)), on CPython 3.11:
-
-```bash
-pip install -c tools/ci/constraints-devenv.txt ".[test]" <path to the hcd_priya_models wheel>
-```
-
-Newer dependency versions and Python 3.12 are tested in continuous integration but not supported yet; macOS and
-Windows are not tested. [`docs/compatibility.md`](docs/compatibility.md) lists what is tested and what is not.
-
-- **Extras:** `test` (pytest), `tutorials` (jupyter, nbformat) and `dev`. `pyproject.toml` declares the
-  dependencies; `requirements.txt` only points to the install above.
-- **Working in a clone.** To run the scripts or the pipeline from the clone, install it editable (add `-e` before
-  `".[test]"` in the command above). The pipeline records the clone's commit, and only
-  an editable install makes that commit the code that runs (with your changes committed); a plain install runs the
-  copy made when it was installed. The scripts under `scripts/` are not part of the installed package; run them from
-  the repository root.
-- **JAX on the CPU, in double precision.** Importing `hcd_analysis.emulator` enables float64, which several
-  structural identities of the model need: they hold only to bit-level accuracy and break under JAX's default
-  float32. Run scripts with `JAX_PLATFORMS=cpu python <your_script.py>`.
-- **The simulation side** (building absorber catalogs and P1D from raw spectra) also needs `fake_spectra`, installed
-  separately ([`docs/fake_spectra_integration.md`](docs/fake_spectra_integration.md)); the predictor does not. On
-  the Great Lakes cluster, `bash scripts/install_greatlakes.sh` creates a conda environment with both.
-<!-- docs:install:end -->
-
----
-
 ## Models and data
 
 <!-- docs:data:start -->
@@ -183,12 +234,12 @@ repository, and their release is planned but not yet available.
 <!-- docs:data:end -->
 
 **Trained models.** They come in the companion package `hcd-priya-models` (data only, MIT licence), which
-`hcd-priya` requires. `hp.load_published(name)` finds the model in the installed package and loads it only against
+`hcd-priya` requires. `hp.load_published()` finds the model in the installed package and loads it only against
 the sha256 that `hcd-priya` itself lists for that model version (`hcd_analysis/published_models.py`): for a
 published model the digest comes from the code package, never from the model package, so changed model files are
 refused, and so is a model version this version of the code does not list. No model is published yet, and that list is empty.
 `hp.load_release(release_dir, sha256)` loads a release whose files you hold yourself. To check a model from a fresh
-install, run `python -I -m hcd_analysis.check_release --published lfmf`, or with `RELEASE_DIR SHA256` for a release
+install, run `python -I -m hcd_analysis.check_release --published`, or with `RELEASE_DIR SHA256` for a release
 directory (`-I` keeps a clone in the current directory out of the import path, so the installation is what is
 tested).
 

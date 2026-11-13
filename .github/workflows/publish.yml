@@ -103,9 +103,9 @@ jobs:
           "$RUNNER_TEMP/fresh/bin/python" -m pip install -c tools/ci/constraints-devenv.txt \
             "$(ls "$RUNNER_TEMP"/code/*.whl)" "$(ls dist/*.whl)"
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/fresh/bin/python" -I "$GITHUB_WORKSPACE/tools/ci/readme_three_lines.py" \
+          "$RUNNER_TEMP/fresh/bin/python" -I "$GITHUB_WORKSPACE/tools/ci/readme_first_example.py" \
             "$GITHUB_WORKSPACE/README.md"
-          "$RUNNER_TEMP/fresh/bin/python" -I -m hcd_analysis.check_release --published lfmf
+          "$RUNNER_TEMP/fresh/bin/python" -I -m hcd_analysis.check_release --published
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ inputs.package }}

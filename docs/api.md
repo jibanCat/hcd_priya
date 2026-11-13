@@ -129,7 +129,7 @@ The trained models come in the companion package `hcd-priya-models`, which `hcd-
 
 ## Checking a release from a fresh install
 
-`python -I -m hcd_analysis.check_release --published lfmf` (or `RELEASE_DIR RELEASE_SHA256` for a release directory)
+`python -I -m hcd_analysis.check_release --published` (or `RELEASE_DIR RELEASE_SHA256` for a release directory)
 loads a model in an environment that has only the installed packages, predicts, and compares with reference
 predictions published beside the release.
 
