@@ -2,7 +2,7 @@
 """Figure: the column-density distribution f(N_HI) the model predicts, against Ho, Bird and Garnett (2021).
 
     python scripts/figures/fig_cddf_vs_ho21.py (--published | --release RELEASE_DIR SHA256) \\
-        [--design DESIGN.csv] [--out docs/figures/cddf_vs_ho21.png]
+        [--design OTHER_DESIGN.csv | --no-band] [--out docs/figures/cddf_vs_ho21.png]
 
 What is drawn, in three panels (one per redshift bin of the measurement):
 
@@ -10,7 +10,8 @@ What is drawn, in three panels (one per redshift bin of the measurement):
   parameter values written out in ``figures_common.MIDPOINT`` (the midpoint of each parameter's training range: not
   a fiducial cosmology), with ``tau0_amp = 1`` and ``dtau0 = 0``. A bin the model does not support is NaN and is
   simply absent: the line and the band break there. The flags of each drawn prediction go into the side file;
-- band (only with ``--design``): the lowest and the highest ``pred.cddf`` over the design points of the file, each
+- band: the lowest and the highest ``pred.cddf`` over the 60 design points of the PRIYA suite
+  (``docs/figures/data/priya_lf_design_60.csv``; another table with ``--design``, none with ``--no-band``), each
   evaluated in the same way. The script reports every design point that the predictor refuses, and every one for
   which it sets a flag that the drawn line does not have;
 - points: f(N_HI) of Ho, Bird and Garnett (2021) with the limits of their 68 per cent interval, from
@@ -57,10 +58,7 @@ def main(argv=None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     C.add_model_arguments(ap)
-    ap.add_argument(
-        "--design",
-        help="a table of design points (nine columns named like the parameters) for the band",
-    )
+    C.add_design_arguments(ap)
     ap.add_argument("--out", default=os.path.join(C.FIGURES, "cddf_vs_ho21.png"))
     args = ap.parse_args(argv)
     import matplotlib
@@ -75,7 +73,7 @@ def main(argv=None) -> int:
         raise SystemExit(
             "this model has no incidence MF record, so it returns no CDDF: nothing to draw"
         )
-    design = C.read_design(args.design, hp.PARAM_NAMES) if args.design else None
+    design = C.design_points(args, hp.PARAM_NAMES)
     C.style(plt)
     fig, axes = plt.subplots(
         1, 3, figsize=(10.0, 3.4), sharex=True, sharey=True, constrained_layout=True

@@ -3,9 +3,10 @@ against the digest recorded beside it, the parameters every model curve is drawn
 look of the figures.
 
 Each figure script draws one figure from the installed package, the data files committed under
-``docs/figures/data`` and, for the two model figures, a model that holds an incidence record. Two more inputs are
-optional files that you supply; they are not in the repository and are read without a digest check: a table of
-design points for the bands (``--design``) and, for the dN/dX figure, the measurement's table (``--ho21-dndx``).
+``docs/figures/data`` and, for the two model figures, a model that holds an incidence record. The bands are drawn
+over the 60 design points of the committed table ``priya_lf_design_60.csv``. Two more inputs are optional files
+that you supply; they are read without a digest check: another table of design points (``--design``) and, for the
+dN/dX figure, the measurement's table (``--ho21-dndx``).
 """
 
 from __future__ import annotations
@@ -91,6 +92,30 @@ def load_model(args):
     if what["incidence_record"]:
         what["incidence_hr_simulations"] = len(emu.provenance["incidence_mf"]["train_sims"])
     return emu, what
+
+
+DESIGN_FILE = "priya_lf_design_60.csv"  # the 60 low-resolution design points of the PRIYA suite
+
+
+def add_design_arguments(parser) -> None:
+    parser.add_argument(
+        "--design",
+        help="another table of design points for the band (nine columns named like the parameters), in place of "
+        f"docs/figures/data/{DESIGN_FILE}; it is read without a digest check",
+    )
+    parser.add_argument(
+        "--no-band", action="store_true", help="draw no band over the design points"
+    )
+
+
+def design_points(args, names):
+    """The design points of the band: None with ``--no-band``; those of ``--design FILE`` if given; otherwise the 60
+    points of the committed table, after its digest check."""
+    if args.no_band:
+        if args.design:
+            raise SystemExit("--no-band and --design contradict each other")
+        return None
+    return read_design(args.design if args.design else data_file(DESIGN_FILE), names)
 
 
 def read_design(path: str, names) -> list[dict]:

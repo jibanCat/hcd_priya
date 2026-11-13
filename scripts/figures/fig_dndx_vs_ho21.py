@@ -3,7 +3,8 @@
 Garnett (2021).
 
     python scripts/figures/fig_dndx_vs_ho21.py (--published | --release RELEASE_DIR SHA256) \\
-        [--design DESIGN.csv] [--ho21-dndx FILE --ho21-dndx-rows-are-centre-and-intervals] [--out ...]
+        [--design OTHER_DESIGN.csv | --no-band] [--ho21-dndx FILE --ho21-dndx-rows-are-centre-and-intervals] \\
+        [--out ...]
 
 What is drawn, on one axis:
 
@@ -12,7 +13,8 @@ What is drawn, on one axis:
   parameter's training range: not a fiducial cosmology), with ``tau0_amp = 1`` and ``dtau0 = 0``. The curves end at
   z = 4.6: above it the multi-fidelity correction is outside the redshift range it is validated on, and below 2.2
   the model refuses an LF+MF prediction;
-- bands (only with ``--design``): the lowest and the highest value over the design points of the file;
+- bands: the lowest and the highest value over the 60 design points of the PRIYA suite
+  (``docs/figures/data/priya_lf_design_60.csv``; another table with ``--design``, none with ``--no-band``);
 - points (only with ``--ho21-dndx``): the DLA dN/dX of Ho, Bird and Garnett (2021).
 
 **The measurement's table has no reader in its source repository.** The file is six rows of eighteen numbers. This
@@ -43,10 +45,7 @@ def main(argv=None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     C.add_model_arguments(ap)
-    ap.add_argument(
-        "--design",
-        help="a table of design points (nine columns named like the parameters) for the bands",
-    )
+    C.add_design_arguments(ap)
     ap.add_argument("--ho21-dndx", help="the dN/dX table of Ho, Bird and Garnett (2021), six rows")
     ap.add_argument(
         "--ho21-dndx-rows-are-centre-and-intervals",
@@ -73,7 +72,7 @@ def main(argv=None) -> int:
             "this model has no incidence MF record: its dN/dX under LF+MF is the LF model's, which is not what "
             "this figure is labelled as"
         )
-    design = C.read_design(args.design, hp.PARAM_NAMES) if args.design else None
+    design = C.design_points(args, hp.PARAM_NAMES)
     stack = emu.predict_many(C.MIDPOINT, z=list(REDSHIFTS), tau0_amp=1.0, dtau0=0.0)
     facts = dict(
         what, figure="dN/dX against redshift", parameters=C.MIDPOINT, redshifts=list(REDSHIFTS)

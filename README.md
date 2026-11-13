@@ -206,8 +206,8 @@ power spectra", JCAP 2026 (07) 094
 
 Drawn by the scripts in [`scripts/figures/`](scripts/figures/); the data files are in
 [`docs/figures/data/`](docs/figures/data/). The class-ratio figure regenerates from the repository alone. The CDDF
-figure needs a model with an incidence record (none is published yet) and, for its band, a table of the training
-design points that is not distributed. The full captions and what each figure does not test:
+figure needs a model with an incidence record (none is published yet); its measured points and the 60 design points
+of its band are in the repository. The full captions and what each figure does not test:
 [`docs/model_figures.md`](docs/model_figures.md).
 
 ![The column-density distribution of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/cddf_vs_ho21.png)

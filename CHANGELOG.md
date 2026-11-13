@@ -31,8 +31,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   column-density distribution against the DLA measurement of Ho, Bird and Garnett (2021), and the class power ratio
   of the training simulations against Eq. 6 of Rogers et al. (2018). `scripts/figures/` draws them; the data files
   are in `docs/figures/data/`, each with its origin and sha256. The class-ratio figure regenerates from the
-  repository alone. The CDDF figure needs a model with an incidence record (none is published yet) and, for its
-  band, a table of the training design points that is not distributed. A third script, for dN/dX against
+  repository alone. The CDDF figure needs a model with an incidence record (none is published yet); its measured
+  points and the 60 PRIYA design points of its band are committed figure data. A third script, for dN/dX against
   redshift, is ready; its figure waits for the meaning of the measurement's table to be confirmed.
 - **A warning for a mean flux outside the trained range.** A prediction whose `tau_eff` lies outside the range of
   mean flux the model was trained on, or outside the tables of the multi-fidelity correction, emits a

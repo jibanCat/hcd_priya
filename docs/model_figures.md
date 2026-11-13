@@ -2,7 +2,7 @@
 
 Two figures, each drawn by one script of `scripts/figures/`. The data files they read are committed under
 `docs/figures/data`. The class-ratio figure regenerates from the repository alone. The CDDF figure needs a model
-that holds an incidence record, and its band needs a table of the training design points that is not distributed.
+that holds an incidence record; its measured points and the 60 design points of its band are in the repository.
 A third script is ready and its figure is not drawn yet (last section).
 
 **What the model figure is drawn from.** No model is published yet. The model figure below was drawn from the
@@ -54,8 +54,9 @@ python scripts/figures/fig_cddf_vs_ho21.py --published
 python scripts/figures/fig_cddf_vs_ho21.py --release RELEASE_DIR SHA256
 ```
 
-The band needs a table of the design points (`--design FILE`: one header line with the nine parameter names, one
-row per point). That table is not in the repository. Without it the script draws the line and the points.
+The band is drawn over the 60 design points of `docs/figures/data/priya_lf_design_60.csv` (the design of the PRIYA
+suite, Bird et al. 2023). `--design FILE` takes another table (one header line with the nine parameter names, one row
+per point; read without a digest check), and `--no-band` draws the line and the points only.
 
 ## The class power ratio of the simulations against Rogers et al. (2018)
 

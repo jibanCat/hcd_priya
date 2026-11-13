@@ -276,6 +276,37 @@ def test_an_absent_bin_breaks_the_line_and_the_band():
     plt.close(fig)
 
 
+def test_the_band_is_drawn_over_the_committed_design_points_unless_told_otherwise(tmp_path):
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    C.add_design_arguments(ap)
+    committed = C.design_points(ap.parse_args([]), hp.PARAM_NAMES)
+    assert len(committed) == 60 and all(list(point) == list(hp.PARAM_NAMES) for point in committed)
+    assert len({tuple(point.values()) for point in committed}) == 60, "sixty different points"
+    assert C.design_points(ap.parse_args(["--no-band"]), hp.PARAM_NAMES) is None
+    other = tmp_path / "other.csv"
+    other.write_text(
+        ",".join(hp.PARAM_NAMES)
+        + "\n"
+        + ",".join(repr(float(v)) for v in C.MIDPOINT.values())
+        + "\n",
+        encoding="utf-8",
+    )
+    assert C.design_points(ap.parse_args(["--design", str(other)]), hp.PARAM_NAMES) == [C.MIDPOINT]
+    with pytest.raises(SystemExit, match="contradict"):
+        C.design_points(ap.parse_args(["--no-band", "--design", str(other)]), hp.PARAM_NAMES)
+
+
+def test_no_band_draws_the_line_and_the_points_only(tmp_path, release, monkeypatch):
+    cddf = _script("fig_cddf_vs_ho21")
+    moved = tuple((label, name, z) for (label, name, _), z in zip(cddf.PANELS, SYNTHETIC_Z))
+    monkeypatch.setattr(cddf, "PANELS", moved)
+    out = str(tmp_path / "cddf.png")
+    assert cddf.main(_args(release) + ["--no-band", "--out", out]) == 0
+    assert all("design_points" not in panel for panel in _facts(out)["panels"])
+
+
 def test_a_design_table_with_another_header_is_refused(tmp_path):
     path = tmp_path / "design.csv"
     path.write_text("a,b\n1,2\n", encoding="utf-8")
