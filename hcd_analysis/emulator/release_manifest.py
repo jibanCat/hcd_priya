@@ -1,4 +1,4 @@
-"""The release manifest ``release.json`` (formats ``hcd_priya.release/1`` and ``hcd_priya.release/2``;
+"""The release manifest ``release.json`` (format ``hcd_priya.release/1``;
 docs/release_format_h5.md, section "The release manifest"): one small closed JSON object naming the parts of an LF+MF
 release and their published digests, so that ONE published digest anchors the whole release.
 
@@ -9,14 +9,15 @@ release and their published digests, so that ONE published digest anchors the wh
       <backbone dir>/  the hcd_priya.h5/2 production bundle, whose manifest hashes to manifest_sha256
       <mf dir>/        the hcd_priya.mf_record/1 record, whose mf_record.json hashes to record_sha256
 
-Format ``hcd_priya.release/2`` is format 1 plus at least one of the optional parts of ``OPTIONAL_PARTS``, each a
-directory with the digest of its record:
+The two parts above are required. A release may also name optional parts, from the closed list ``OPTIONAL_PARTS``,
+each a directory with the digest of its record:
 
       release.json     {..., "incidence": {"dir": "<name>", "record_sha256": "<64 hex>"}}
       <incidence dir>/ the hcd_priya.incidence_mf_record/1 record (incidence_mf.py): the MF correction of dN/dX
 
-A release without an optional part is written in format 1, so each release has one representation. Format 1 keeps
-loading as before.
+There is one format. A manifest without an optional part is byte for byte what it was before optional parts
+existed. A part outside the list is refused, so a reader that does not know a part never ignores it: a reader from
+before optional parts existed refuses a manifest that names one.
 
 The anchor is the sha256 of ``release.json``. Each ``dir`` is one plain path segment inside the release directory
 (never a path, ``..`` or a symlink). The MF part is required: an LF-only bundle is not a release of this format (PI
@@ -34,12 +35,10 @@ import re
 from . import safe_io as S
 
 FORMAT = "hcd_priya.release/1"
-FORMAT_2 = "hcd_priya.release/2"
-FORMATS = (FORMAT, FORMAT_2)
 FILE = "release.json"
 KEYS = {"format", "release_version", "backbone", "mf"}
 PARTS = {"backbone": ("dir", "manifest_sha256"), "mf": ("dir", "record_sha256")}
-# The optional parts of format 2 (a closed list; a later part is added here).
+# The optional parts a release may name (a closed list; a later part is added here).
 OPTIONAL_PARTS = {"incidence": ("dir", "record_sha256")}
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _PLAIN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*\Z")
@@ -51,26 +50,19 @@ class ReleaseManifestError(ValueError):
 
 def check_release_manifest(m):
     """Validate a manifest dict: closed keys, the format, every part with a plain directory name and a digest.
-    Format 1 holds exactly the two required parts; format 2 holds them and at least one optional part.
+    The keys are the four required ones and any of the optional parts of ``OPTIONAL_PARTS``; any other key is
+    refused.
     """
     got = set(m) if isinstance(m, dict) else set()
     fmt = m.get("format") if isinstance(m, dict) else None
-    optional = set(OPTIONAL_PARTS) if fmt == FORMAT_2 else set()
+    optional = set(OPTIONAL_PARTS)
     if not KEYS <= got or got - KEYS - optional:
         raise ReleaseManifestError(
-            f"release manifest keys must be exactly {sorted(KEYS)}"
-            + (f", with optional parts among {sorted(optional)}" if optional else "")
-            + f" (missing {sorted(KEYS - got)}, unknown {sorted(got - KEYS - optional)})"
+            f"release manifest keys must be {sorted(KEYS)}, with optional parts among {sorted(optional)} "
+            f"(missing {sorted(KEYS - got)}, unknown {sorted(got - KEYS - optional)})"
         )
-    if fmt not in FORMATS:
-        raise ReleaseManifestError(
-            f"release manifest format {fmt!r}, expected {FORMAT} or {FORMAT_2}"
-        )
-    if fmt == FORMAT_2 and not got & set(OPTIONAL_PARTS):
-        raise ReleaseManifestError(
-            f"a {FORMAT_2} manifest names at least one optional part ({sorted(OPTIONAL_PARTS)}); a release "
-            f"without one is written in {FORMAT}"
-        )
+    if fmt != FORMAT:
+        raise ReleaseManifestError(f"release manifest format {fmt!r}, expected {FORMAT}")
     if not isinstance(m["release_version"], str) or not m["release_version"].strip():
         raise ReleaseManifestError("release_version must be a non-empty string")
     if m["mf"] is None:
@@ -163,14 +155,14 @@ def write_release_manifest(
 ):
     """Write ``release.json`` ONCE (an existing one is refused) into ``release_dir``, which already holds every part
     under the given directory names. With ``incidence_dir`` and ``incidence_record_sha256`` (both or neither) the
-    manifest is format 2 and names the incidence MF record; without them it is format 1, as before. Returns (path,
-    sha256: the anchor to publish)."""
+    manifest also names the incidence MF record, an optional part; without them it is byte for byte what it was
+    before optional parts existed. Returns (path, sha256: the anchor to publish)."""
     if (incidence_dir is None) != (incidence_record_sha256 is None):
         raise ReleaseManifestError(
             "give both incidence_dir and incidence_record_sha256, or neither"
         )
     m = {
-        "format": FORMAT if incidence_dir is None else FORMAT_2,
+        "format": FORMAT,
         "release_version": release_version,
         "backbone": {"dir": backbone_dir, "manifest_sha256": backbone_manifest_sha256},
         "mf": {"dir": mf_dir, "record_sha256": mf_record_sha256},

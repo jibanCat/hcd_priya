@@ -31,27 +31,27 @@ def prepare():
 
 
 def test_a_release_that_loads_as_its_manifest_says_passes(prepare):
-    loaded = {"release_version": "synthetic-release-1", "format": "hcd_priya.release/2", "more": 1}
-    assert prepare.check_loaded(loaded, "synthetic-release-1", "hcd_priya.release/2") is None
+    loaded = {"release_version": "synthetic-release-1", "format": "hcd_priya.release/1", "more": 1}
+    assert prepare.check_loaded(loaded, "synthetic-release-1", "hcd_priya.release/1") is None
 
 
 @pytest.mark.parametrize(
     "loaded, names",
     [
         (
-            {"release_version": "another", "format": "hcd_priya.release/2"},
+            {"release_version": "another", "format": "hcd_priya.release/1"},
             "release_version 'another'",
         ),
         (
-            {"release_version": "synthetic-release-1", "format": "hcd_priya.release/1"},
-            "format 'hcd_priya.release/1'",
+            {"release_version": "synthetic-release-1", "format": "another.format/1"},
+            "format 'another.format/1'",
         ),
         ({"release_version": "synthetic-release-1"}, "format None"),
     ],
 )
 def test_another_version_or_format_stops_before_an_entry_is_written(prepare, loaded, names):
     with pytest.raises(SystemExit) as stop:
-        prepare.check_loaded(loaded, "synthetic-release-1", "hcd_priya.release/2")
+        prepare.check_loaded(loaded, "synthetic-release-1", "hcd_priya.release/1")
     assert names in str(stop.value.code) and "no package entry was written" in str(stop.value.code)
 
 

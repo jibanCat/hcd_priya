@@ -65,8 +65,8 @@ def write_incidence(path, *, cache, tables=None, **over):
 
 def make_release(root, *, version="synthetic-release-1", n_members=2, incidence=False):
     """Write the release under ``root`` (created). Returns {"root": Path, "sha": the sha256 of release.json,
-    "bundle": the backbone's SyntheticBundle, "mf_sha": the MF record's sha256}. With ``incidence`` the release is of
-    format 2 and also holds a synthetic incidence MF record ("incidence_sha": its sha256)."""
+    "bundle": the backbone's SyntheticBundle, "mf_sha": the MF record's sha256}. With ``incidence`` the release
+    also names a synthetic incidence MF record, the optional part ("incidence_sha": its sha256)."""
     from tests.test_predictor_mf import write_mf
 
     root = Path(root)

@@ -459,7 +459,7 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
 - **Not validated here:** the w_c map was fitted on LF counts. That it still holds when dN/dX is scaled to the HR
   incidence has not been tested.
 
-## The release manifest (`hcd_priya.release/1` and `hcd_priya.release/2`)
+## The release manifest (`hcd_priya.release/1`)
 
 An LF+MF release is published under ONE digest, the sha256 of a small `release.json` in the release directory
 (`hcd_analysis/emulator/release_manifest.py`):
@@ -483,24 +483,27 @@ format, the release version and the release sha256. `release_manifest.write_rele
 into a directory that already holds both parts. The two-digest call (`load_bundle` with `mf_dir` and
 `mf_record_sha256`) keeps working.
 
-**Format 2** is format 1 plus at least one optional part from a closed list. Today the list has one entry, the
-incidence MF record:
+**Optional parts.** Beside the two required parts a manifest may name optional parts from a closed list. Today the
+list has one entry, the incidence MF record:
 
 ```json
-{"format": "hcd_priya.release/2", "release_version": "<text>",
+{"format": "hcd_priya.release/1", "release_version": "<text>",
  "backbone": {"dir": "<name>", "manifest_sha256": "<64 hex>"},
  "mf": {"dir": "<name>", "record_sha256": "<64 hex>"},
  "incidence": {"dir": "<name>", "record_sha256": "<64 hex>"}}
 ```
 
+There is one release format. A manifest without an optional part is byte for byte what it was before optional parts
+existed. A part outside the list is refused; so a reader that does not know a part never ignores it, and a reader
+from before optional parts existed refuses a release that names one.
+
 `load_release` loads the incidence record against the digest the manifest gives and binds it to the backbone's
 training cache; an LF+MF prediction of such a release has its `dndx` multiplied by `R_c(z)` (flag
 `incidence_mf_applied`, `provenance["incidence_mf"]`). Only `load_release` applies it: the two-digest call
-(`load_bundle` with `mf_dir`) on the parts of a format-2 release does not read the incidence record, and returns
-the LF `dndx` and `w_c` with no incidence flag. The two formats behave differently on purpose, and the
-difference is visible:
+(`load_bundle` with `mf_dir`) on the parts of a release with an incidence record does not read that record, and
+returns the LF `dndx` and `w_c` with no incidence flag. What a release gives with and without the part:
 
-| | format 1 | format 2 with an incidence record |
+| | without an incidence record | with an incidence record |
 |---|---|---|
 | `P_class` under LF+MF | LF times exp(g) | the same |
 | `dndx` under LF+MF | the LF model's | the LF model's times `R_c(z)` |
@@ -508,9 +511,6 @@ difference is visible:
 | `cddf`, `log_nhi` | `None` | the CDDF at the record's bins (LF: the member mean; LF+MF: times `R(z, N_HI)`) |
 | `P_class`, `dndx`, `w_c` under `fidelity="LF"` | the LF model's | the same |
 | flag `incidence_mf_applied` | absent | present |
-
-A release without an optional part is written in format 1, so a release has one representation. A manifest of
-format 1 that names an optional part, a manifest of format 2 that names none, and a part outside the list are refused.
 
 ## What the loader guarantees
 

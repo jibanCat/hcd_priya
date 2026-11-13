@@ -56,7 +56,7 @@ fold's held-out LF and MF predictions at cache inputs from the same object. ``ba
 record must declare about a backbone, derived from its member metas; ``lf_P_filt_at`` and ``native_modes`` serve the
 MF builder. These are module functions, so the public surface of ``Bundle`` is unchanged.
 
-**The MF correction of the incidence.** A release of format ``hcd_priya.release/2`` also names an incidence MF record
+**The MF correction of the incidence.** A release may also name an incidence MF record, an optional part of its manifest
 (format ``hcd_priya.incidence_mf_record/1``, ``emulator.incidence_mf``): a fixed table R_c(z), the mean over the matched
 HR simulations of (dN/dX)_HR / (dN/dX)_LF per HCD class and redshift. ``load_release`` loads it, anchored on the digest
 the manifest gives, and refuses one fitted on another LF cache than the backbone's training cache. An LF+MF prediction
@@ -77,7 +77,7 @@ correction was measured (flag ``cddf_bins_without_support``). Under LF the suppo
 each redshift is not checked. The dN/dX table row that rests on one simulation pair is flagged
 ``incidence_mf_single_pair`` (the pairs behind each CDDF bin are in the provenance, ``cddf_n_pairs``). Without an
 incidence record ``cddf`` and ``log_nhi`` are None: the model files do not
-say what the bins are. A release of format 1 has no such
+say what the bins are. A release without that part has no such
 record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition. No
 held-out error of the corrected incidence is shipped; ``labels["incidence_mf_error"]`` says how one is computed and
 what it covers.
@@ -1820,11 +1820,10 @@ def load_release(release_dir: str | os.PathLike[str], expected_release_sha256: s
 
     A release directory holds ``release.json`` (format ``hcd_priya.release/1``) and the two parts
     it names with their sha256: the backbone bundle and the MF record. The one published sha256,
-    that of ``release.json``, anchors the whole release. A release of format
-    ``hcd_priya.release/2`` names a third part, the incidence MF record: with it, an LF+MF
-    prediction's ``dndx`` is multiplied by the HR/LF ratio of the incidence, R_c(z), and ``w_c``
-    follows through the w_c map. A release of format 1 has no such record: its ``dndx`` and
-    ``w_c`` are the LF model's.
+    that of ``release.json``, anchors the whole release. A release may name an optional third
+    part, the incidence MF record: with it, an LF+MF prediction's ``dndx`` is multiplied by the
+    HR/LF ratio of the incidence, R_c(z), and ``w_c`` follows through the w_c map. A release
+    without that part has no such record: its ``dndx`` and ``w_c`` are the LF model's.
 
     Parameters
     ----------
@@ -1883,7 +1882,7 @@ def load_release(release_dir: str | os.PathLike[str], expected_release_sha256: s
         mf_dir=parts["mf"],
         mf_record_sha256=m["mf"]["record_sha256"],
     )
-    if "incidence" in parts:  # format 2: the MF correction of the incidence
+    if "incidence" in parts:  # the optional part: the MF correction of the incidence
         b._attach_incidence(
             _IM.load_record(
                 parts["incidence"], expected_record_sha256=m["incidence"]["record_sha256"]
@@ -2246,9 +2245,7 @@ def load_published(name: str = DEFAULT_MODEL) -> Bundle:
         )
 
     # 3. Only an LF+MF release directory loads here; another format has its own loader.
-    from .emulator.release_manifest import FORMATS as _RELEASE_FORMATS
-
-    if fmt not in _RELEASE_FORMATS:
+    if fmt != "hcd_priya.release/1":
         raise ModelPackageError(f"{name!r}: the format {fmt!r} is not one load_published loads")
 
     # 4. Find the files inside the installed model package. A package whose list names files it

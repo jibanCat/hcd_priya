@@ -18,7 +18,7 @@ What is drawn, in three panels (one per redshift bin of the measurement):
   ``docs/figures/data/ho21`` (see PROVENANCE.md there). A bin in which the measured f is zero is not drawn, also
   where the table gives an upper limit for it.
 
-The model needs an incidence MF record (a release of format 2): without one it returns no CDDF. The measurement bin
+The model needs an incidence MF record (an optional part of a release): without one it returns no CDDF. The measurement bin
 from z = 4 to 5 is left out: it reaches beyond z 4.6, the upper edge of the grouped-validation domain of the
 multi-fidelity correction of the P1D. The correction of the CDDF that is drawn here is not validated at any
 redshift.

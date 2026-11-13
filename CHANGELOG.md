@@ -39,7 +39,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   `MeanFluxRangeWarning` that gives the range. The prediction is still
   returned, with the flag `mean_flux_off_ladder` as before.
 - **The multi-fidelity correction of the incidence.** A release can carry an incidence MF record
-  (`hcd_priya.incidence_mf_record/1`, named by a release manifest of the new format `hcd_priya.release/2`): the
+  (`hcd_priya.incidence_mf_record/1`, an optional named part of the release manifest; the manifest keeps its one
+  format, `hcd_priya.release/1`, and a manifest without the part is unchanged): the
   fixed HR/LF ratio of dN/dX per HCD class and redshift, built by the functions that `multifidelity.py` has held
   since June 2026 and by the new `scripts/build_incidence_mf.py`. With it, an LF+MF prediction's `dndx` is
   multiplied by that ratio and `w_c` follows through the shipped map (flag `incidence_mf_applied`). A release of

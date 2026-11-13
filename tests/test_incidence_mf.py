@@ -1,5 +1,5 @@
 """The MF correction of the incidence (hcd_analysis/emulator/incidence_mf.py): the fit is the historical functions of
-multifidelity.py on the matched pairs; the record round-trips and is strict; a release of format 2 names it; and an
+multifidelity.py on the matched pairs; the record round-trips and is strict; a release names it as an optional part; and an
 LF+MF prediction's dN/dX is multiplied by the record's factor before the w_c map. Synthetic values only: the ratios
 are round numbers that no simulation gives."""
 
@@ -386,38 +386,61 @@ def test_only_a_sealed_unchanged_record_is_applied(tmp_path):
 
 
 # ----------------------------------------------------------------------------------------------- the manifest
-def test_format_2_is_format_1_plus_a_named_optional_part():
-    one = {
+def test_one_format_with_a_closed_list_of_optional_parts():
+    plain = {
         "format": RM.FORMAT,
         "release_version": "v",
         "backbone": {"dir": "backbone", "manifest_sha256": "a" * 64},
         "mf": {"dir": "mf", "record_sha256": "b" * 64},
     }
     inc = {"dir": "incidence", "record_sha256": "c" * 64}
-    two = dict(one, format=RM.FORMAT_2, incidence=inc)
-    assert (
-        RM.check_release_manifest(dict(one)) == one and RM.check_release_manifest(dict(two)) == two
-    )
+    full = dict(plain, incidence=inc)
+    assert RM.check_release_manifest(dict(plain)) == plain
+    assert RM.check_release_manifest(dict(full)) == full and full["format"] == RM.FORMAT
+    assert set(RM.OPTIONAL_PARTS) == {"incidence"} and not hasattr(RM, "FORMAT_2")
     for bad, why in (
-        (dict(one, incidence=inc), "unknown \\['incidence'\\]"),  # format 1 has exactly two parts
-        (dict(one, format=RM.FORMAT_2), "at least one optional part"),
-        (dict(two, error={"dir": "error", "record_sha256": "d" * 64}), "unknown \\['error'\\]"),
-        (dict(two, incidence=dict(inc, dir="mf")), "two different directories"),
-        (dict(two, incidence=dict(inc, dir="../incidence")), "plain path segment"),
-        (dict(two, incidence=dict(inc, record_sha256="C" * 64)), "64 lowercase hex"),
-        (dict(two, incidence=dict(inc, note="x")), "incidence: keys"),
-        (dict(two, incidence=None), "incidence: keys"),
-        (dict(two, format="hcd_priya.release/3"), "format"),
+        (dict(full, error={"dir": "error", "record_sha256": "d" * 64}), "unknown \\['error'\\]"),
+        (dict(full, incidence=dict(inc, dir="mf")), "two different directories"),
+        (dict(full, incidence=dict(inc, dir="../incidence")), "plain path segment"),
+        (dict(full, incidence=dict(inc, record_sha256="C" * 64)), "64 lowercase hex"),
+        (dict(full, incidence=dict(inc, note="x")), "incidence: keys"),
+        (dict(full, incidence=None), "incidence: keys"),
+        (
+            dict(full, format="hcd_priya.release/2"),
+            "format 'hcd_priya.release/2', expected hcd_priya.release/1",
+        ),
+        (dict(plain, format="hcd_priya.release/2"), "expected hcd_priya.release/1"),
     ):
         with pytest.raises(RM.ReleaseManifestError, match=why):
             RM.check_release_manifest(bad)
 
 
+def test_a_reader_from_before_optional_parts_refuses_a_manifest_that_names_one():
+    """The check of the reader as it was before optional parts existed, kept here word for word in its two
+    conditions: exactly four keys, then the format. A manifest with the incidence part fails the first, so such a
+    reader refuses the release and never ignores the record."""
+    old_keys = {"format", "release_version", "backbone", "mf"}
+
+    def old_reader_accepts(m):
+        return isinstance(m, dict) and set(m) == old_keys and m["format"] == "hcd_priya.release/1"
+
+    plain = {
+        "format": RM.FORMAT,
+        "release_version": "v",
+        "backbone": {"dir": "backbone", "manifest_sha256": "a" * 64},
+        "mf": {"dir": "mf", "record_sha256": "b" * 64},
+    }
+    assert RM.KEYS == old_keys and old_reader_accepts(plain)
+    assert not old_reader_accepts(
+        dict(plain, incidence={"dir": "incidence", "record_sha256": "c" * 64})
+    )
+
+
 # ----------------------------------------------------------------------------------------------- the predictor
 @pytest.fixture(scope="module")
 def rel(tmp_path_factory):
-    """One synthetic backbone and MF record, as a release of format 2 (with the incidence record) and, from copies of
-    the same two parts, as a release of format 1."""
+    """One synthetic backbone and MF record, as a release with the incidence record and, from copies of the same
+    two parts, as a release without it."""
     root = tmp_path_factory.mktemp("incidence")
     two = make_release(root / "two", incidence=True)
     one = root / "one"
@@ -543,14 +566,14 @@ def test_labels_and_provenance_say_what_was_applied(rel):
     assert prov["record_sha256"] == info["incidence_sha"]
     assert prov["lf_cache"]["sha256"] == info["bundle"].lineage["cache"]["sha256"]
     assert prov["composition"]["id"] == "synthetic-composition" and prov["n_sims"] == [1, 2, 2]
-    assert p.provenance["release"]["format"] == RM.FORMAT_2
+    assert p.provenance["release"]["format"] == RM.FORMAT  # one format, with or without the part
     q = rel["one"].predict(PARAMS, 3.0, tau_eff=0.4)
     assert "incidence_mf" not in q.provenance and q.provenance["release"]["format"] == RM.FORMAT
     assert "w_c stays the LF backbone's" in q.labels["mf"]
 
 
 def _release_with(rel, tmp_path, name, write):
-    """A format-2 release from copies of the fixture's backbone and MF record, with the incidence record that
+    """A release from copies of the fixture's backbone and MF record, with the incidence record that
     ``write(path)`` writes (it returns the record's sha256)."""
     src, d = rel["info"]["root"], tmp_path / name
     d.mkdir()
@@ -674,7 +697,7 @@ def test_the_cddf_of_a_stack_and_of_a_release_without_the_record(rel):
     assert (
         s.flags["cddf_bins_without_support"] is True and s.flags["incidence_mf_single_pair"] is True
     )
-    # a release of format 1 has no record, so nothing says what the bins are: no CDDF, and no CDDF flag or label
+    # a release without the part has no record, so nothing says what the bins are: no CDDF, and no CDDF flag or label
     q = one.predict(PARAMS, 3.0, tau_eff=0.4)
     assert q.cddf is None and q.log_nhi is None
     assert "cddf_bins_without_support" not in q.flags and "cddf" not in q.labels
@@ -732,7 +755,7 @@ def test_what_is_applied_is_a_copy_of_the_table(rel):
     assert not two._inc.dndx_ratio.flags.writeable
 
 
-def test_a_format_1_manifest_is_written_byte_for_byte_as_before(tmp_path):
+def test_a_manifest_without_an_optional_part_is_written_byte_for_byte_as_before(tmp_path):
     for part in ("backbone", "mf"):
         (tmp_path / part).mkdir()
     path, sha = RM.write_release_manifest(

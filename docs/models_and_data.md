@@ -128,11 +128,11 @@ refused (`MFRangeError`); ask for `fidelity="LF"` there. A bundle loaded without
 raises `MFUnavailableError`. Details: `docs/release_format_h5.md`, sections "The multi-fidelity record" and "The
 release manifest".
 
-**The incidence.** The record above corrects the class spectra. A release of format `hcd_priya.release/2` also names
-an incidence MF record: a fixed table `R_c(z)`, the mean HR/LF ratio of dN/dX per HCD class and redshift over the
+**The incidence.** The record above corrects the class spectra. A release may also name, as an optional part of its
+manifest, an incidence MF record: a fixed table `R_c(z)`, the mean HR/LF ratio of dN/dX per HCD class and redshift over the
 matched simulation pairs. With it, an LF+MF prediction returns `dndx = dndx_LF * R_c(z)`, and `w_c` is the shipped
 map of that corrected `dndx`; `pred.flags["incidence_mf_applied"]` is then True and `provenance["incidence_mf"]`
-names the record, its two inputs and the HR simulations it was fitted on. A release of format 1 has no such record:
+names the record, its two inputs and the HR simulations it was fitted on. A release without that part has no such record:
 its `dndx` and `w_c` are the LF model's, as before, and it has no `cddf`. With the record a prediction also
 carries the column-density distribution `pred.cddf` at the bin centres `pred.log_nhi`, with NaN in every bin where
 no HR/LF simulation pair has absorbers at any tabulated redshift and, under LF+MF, where none has them at the
