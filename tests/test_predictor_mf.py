@@ -233,6 +233,16 @@ def test_mf_domain_flags(emu_mf):
     assert emu_mf.predict(PARAMS, 4.2, tau_eff=0.4).flags["mf_z_clamped"] is True
     with pytest.warns(hp.MeanFluxRangeWarning):
         assert emu_mf.predict(PARAMS, 3.0, tau_eff=3.0).flags["mf_tau0_clamped"] is True
+    # an LF prediction applies no correction, so neither lookup flag is set, where the LF+MF one above is
+    lf_hi = emu_mf.predict(PARAMS, 4.2, tau_eff=0.4, fidelity="LF")
+    assert lf_hi.flags["mf_applied"] is False and lf_hi.flags["mf_z_clamped"] is False
+    with pytest.warns(
+        hp.MeanFluxRangeWarning
+    ):  # the trained ladder still warns; the MF tables do not
+        lf_tau = emu_mf.predict(PARAMS, 3.0, tau_eff=3.0, fidelity="LF")
+    assert lf_tau.flags["mf_tau0_clamped"] is False
+    stack = emu_mf.predict_many(PARAMS, [3.0, 4.2], tau_eff=0.4, fidelity="LF")
+    assert stack.flags["mf_z_clamped"] is False and stack.flags["mf_tau0_clamped"] is False
 
 
 def test_a_mean_flux_outside_the_mf_tables_warns_once_whichever_range_it_leaves(emu_mf):

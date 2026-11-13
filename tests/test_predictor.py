@@ -695,6 +695,29 @@ def test_a_model_without_a_recorded_mean_flux_range_does_not_warn(info):
     assert p.flags["mean_flux_off_ladder"] is None
 
 
+def test_a_model_without_a_recorded_mean_flux_range_says_so_once_at_load(info, monkeypatch):
+    """The flag None is easy to miss, so the missing range is said aloud when the model is loaded."""
+    import warnings
+
+    with (
+        warnings.catch_warnings()
+    ):  # the synthetic bundle records its range: loading it warns of nothing
+        warnings.simplefilter("error", hp.MeanFluxRangeWarning)
+        hp.load_bundle(info.bundle_dir, info.manifest_sha256)
+    real = hp._PredictorBase._setup
+
+    def without_range(self, rb):
+        rb.lineage["cache"]["settings"].pop("alpha_range", None)
+        return real(self, rb)
+
+    monkeypatch.setattr(hp._PredictorBase, "_setup", without_range)
+    with pytest.warns(
+        hp.MeanFluxRangeWarning, match="records no trained mean-flux range"
+    ) as caught:
+        emu = hp.load_bundle(info.bundle_dir, info.manifest_sha256)
+    assert len(caught) == 1 and emu._alpha_range is None
+
+
 def test_a_research_model_warns_in_the_same_way(research):
     rp = hp.load_research_bundle(
         research.bundle_dir, research.manifest_sha256, purpose="synthetic fold (predictor tests)"
