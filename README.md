@@ -202,6 +202,24 @@ power spectra", JCAP 2026 (07) 094
 
 ---
 
+## How the HCD catalogues are built
+
+The emulator is trained on the products of a catalogue pipeline that is part of this repository. It is research
+code: it needs the raw PRIYA sightlines, which are not distributed, and it is not needed to use the predictor.
+
+- **In:** the optical-depth (τ) sightlines of every PRIYA simulation and snapshot, produced by `fake_spectra`.
+- **Finding the absorbers:** on each sightline, connected velocity regions where τ exceeds a detection threshold are
+  located, and regions closer than a velocity gap are merged into one system (`hcd_analysis/catalog.py`).
+- **Column densities and classes:** the column density N_HI of each system is estimated (a sum-rule inversion in
+  production; a Voigt fit is the alternative), and the system is classed as LLS, subDLA or DLA by the boundaries
+  given above.
+- **Out:** the absorber catalogue of every simulation and redshift, and from it the column-density distribution
+  function and the P1D of each class of sightlines, which are what the emulator is trained on.
+
+The details, the commands and the checks of the catalogue are in [`docs/pipeline.md`](docs/pipeline.md).
+
+---
+
 ## Scope and limitations of this release
 
 The supported public interface of this release is the predictor (`hcd_analysis.predictor`): the per-class P1D
