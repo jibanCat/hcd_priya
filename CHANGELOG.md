@@ -38,6 +38,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   multiplied by that ratio and `w_c` follows through the shipped map (flag `incidence_mf_applied`). A release of
   format `hcd_priya.release/1` loads and predicts as before. The record also stores the ratio per column-density
   bin; the predictor returns no CDDF, so it is not applied. No such record is released yet.
+- **A documentation page on the class spectra against the per-class model of Rogers et al. (2018)**
+  ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)): what was compared, the numbers, and what the
+  comparison is not.
 - **`python -m hcd_analysis.check_release`**: loads a model from a fresh install, predicts, and compares with
   reference predictions.
 - **Examples in the docstrings of the user entry points**, run by a test; type annotations on the loaders,

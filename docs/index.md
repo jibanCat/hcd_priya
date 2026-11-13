@@ -13,6 +13,7 @@ install
 data
 compatibility
 release_format_h5
+rogers_comparison
 tutorials/production_and_research_bundles
 api
 ```
