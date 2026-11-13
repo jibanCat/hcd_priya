@@ -215,8 +215,8 @@ from the candidate LF+MF release (staged, not yet public). The full captions and
 
 **The incidence dN/dX against redshift.** Lines: the LF+MF model (`pred.dndx`) for DLAs, subDLAs and LLS at the
 midpoint of each parameter's training range (the nine values are written in the script; nothing is fitted), at the
-snapshots from z = 2.2 to 4.6, the redshift range on which the model's P1D correction is validated (the correction
-of the incidence drawn here is not validated at any redshift). Bands: the lowest and the
+snapshots from z = 2.2 to 4.6, the range that the grouped validation of the model's P1D correction covers (the
+correction of the incidence drawn here is not validated at any redshift). Bands: the lowest and the
 highest value over the 60 design points of the training simulations; they are not an uncertainty. Points: the DLAs
 of Ho, Bird and Garnett (2021, [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals.
 The measurement covers DLAs only. The model's held-out error is not shown.
@@ -230,8 +230,8 @@ not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
 [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) in three redshift bins, with 68 per cent intervals (bins
 where the measured value is zero are not drawn). One
 snapshot stands beside each bin (z = 3.4 for the bin 3 to 4). The bin 4 to 5 is left out because it reaches beyond
-z = 4.6, the edge of the range on which the model's P1D correction is validated; the correction of the CDDF itself
-is not validated at any redshift. The model's held-out error is not shown.
+z = 4.6, the edge of the range that the grouped validation of the model's P1D correction covers; the correction of
+the CDDF itself is not validated at any redshift. The model's held-out error is not shown.
 
 ![The class power ratio at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](docs/figures/class_ratio_vs_rogers18.png)
 

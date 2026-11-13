@@ -443,8 +443,9 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
 - The predictor applies a record only when its `lf_cache.sha256` equals the training cache of the backbone, as
   re-derived from the member metas, and only together with the P1D MF record.
 - **Redshifts outside the table.** At a snapshot redshift the table does not hold, the factor is interpolated
-  between the neighbouring rows and the prediction is flagged `incidence_mf_z_interpolated`; beyond the table it is
-  held at the edge row and flagged `incidence_mf_z_clamped`. This differs from the P1D record, which is refused
+  between the neighbouring rows and the LF+MF prediction is flagged `incidence_mf_z_interpolated`; beyond the table
+  it is held at the edge row and flagged `incidence_mf_z_clamped`. An LF prediction applies no table and has both
+  flags False. This differs from the P1D record, which is refused
   below its tables.
 - **No error is shipped.** A record of this format carries no held-out error of the corrected dN/dX or CDDF, and
   `provenance["incidence_mf"]["heldout_error"]` is `None`. Every prediction the correction is applied to carries the

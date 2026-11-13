@@ -19,7 +19,14 @@ PREPARE = os.path.join(REPO, "model_package", "prepare.py")
 def prepare():
     spec = importlib.util.spec_from_file_location("model_package_prepare", PREPARE)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    before, sys.dont_write_bytecode = (
+        sys.dont_write_bytecode,
+        True,
+    )  # leave no bytecode beside the script
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = before
     return module
 
 
@@ -48,7 +55,7 @@ def test_another_version_or_format_stops_before_an_entry_is_written(prepare, loa
     assert names in str(stop.value.code) and "no package entry was written" in str(stop.value.code)
 
 
-def test_the_check_is_not_an_assert_that_python_O_would_skip():
+def test_the_check_is_not_an_assert_that_python_O_would_skip(tmp_path):
     code = (
         "import importlib.util, sys\n"
         f"spec = importlib.util.spec_from_file_location('p', {PREPARE!r})\n"
@@ -59,9 +66,10 @@ def test_the_check_is_not_an_assert_that_python_O_would_skip():
         [sys.executable, "-O", "-B", "-c", code],
         capture_output=True,
         text=True,
-        cwd=os.path.dirname(REPO),
+        cwd=str(tmp_path),
     )
     assert run.returncode != 0 and "no package entry was written" in run.stderr
     with open(PREPARE, encoding="utf-8") as fh:
         body = fh.read().split("def add_release(")[1].split("\ndef ")[0]
     assert "assert " not in body, "add_release checks with explicit refusals, not with assert"
+    assert 'check_loaded(emu.provenance["release"], version, fmt)' in body, "and it calls the check"

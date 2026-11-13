@@ -1255,7 +1255,8 @@ class _PredictorBase:
           HR/LF ratio of the incidence and ``w_c`` follows; ``incidence_mf_z_interpolated``, the
           table does not hold this redshift and the ratio is interpolated between its neighbours;
           ``incidence_mf_z_clamped``, the ratio is held constant beyond its table;
-          ``incidence_mf_single_pair``, the dN/dX table row used rests on one simulation pair;
+          ``incidence_mf_single_pair``, the dN/dX table row used rests on one simulation pair
+          (these three say how the table was looked up, so they are False on an LF prediction);
           ``cddf_bins_without_support``, some bins of ``cddf`` are NaN because no correction was
           measured there at this redshift.
 

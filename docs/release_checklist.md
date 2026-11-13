@@ -7,6 +7,11 @@ code release (see the last section).
 - [ ] `hcd_analysis.__version__` is the new version; `pyproject.toml` reads it from there.
 - [ ] `CHANGELOG.md` has a dated section for the version.
 - [ ] `CITATION.cff` has the new `version` and a `date-released`.
+- [ ] In the commit to be tagged, the three figure images of `README.md` point to absolute URLs at the release tag.
+      The README is the long description of the code package, the images are relative links, and the package index
+      page shows a relative link as broken; an upload cannot be amended. The README's other relative links (to
+      `docs/`, `scripts/` and `tests/`) do not resolve on that page either: they are made absolute too, or left
+      knowingly.
 
 ## 2. Tests and continuous integration
 - [ ] The supported CI job ("Python 3.11, pinned (supported)") passes on the release commit on GitHub.
@@ -92,7 +97,5 @@ disabled until then.
       environment, with `--write-reference`.
 - [ ] A dry run on the test index, then the model package on the index, then the code package, by the manual
       workflow. A synthetic build (version `0+synthetic`) cannot be uploaded: the index refuses a local version.
-- [ ] The images of `README.md` are relative links, and the README is the package's long description: before the
-      upload they point to absolute URLs at the release tag, or the package index page shows them as broken.
 - [ ] After publication: the statements "not published yet" in `README.md`, `model_package/README.md` and the
       docstrings are updated, and the install commands become `pip install hcd-priya`.

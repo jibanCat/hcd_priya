@@ -10,9 +10,9 @@ What is drawn, on one axis:
 - lines: ``pred.dndx`` of the LF+MF model for DLAs (the heavier line), subDLAs and LLS, at the snapshot redshifts
   from 2.2 to 4.6, at the nine parameter values written out in ``figures_common.MIDPOINT`` (the midpoint of each
   parameter's training range: not a fiducial cosmology), with ``tau0_amp = 1`` and ``dtau0 = 0``. The curves end at
-  z = 4.6: above it the multi-fidelity correction of the P1D is outside the redshift range it is validated on, and
-  below 2.2 the model refuses an LF+MF prediction. The correction of dN/dX that is drawn here is not validated at
-  any redshift;
+  z = 4.6: above it the multi-fidelity correction of the P1D is outside its grouped-validation domain, and below
+  2.2 the model refuses an LF+MF prediction. The correction of dN/dX that is drawn here is not validated at any
+  redshift;
 - bands: the lowest and the highest value over the 60 design points of the PRIYA suite
   (``docs/figures/data/priya_lf_design_60.csv``; another table with ``--design``, none with ``--no-band``);
 - points: the DLA dN/dX of Ho, Bird and Garnett (2021) in eighteen redshift bins, with the limits of the 68 per cent
@@ -35,8 +35,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import figures_common as C  # noqa: E402
 
-# the snapshot redshifts inside the range on which the LF+MF model's P1D correction is served and validated (the
-# correction of the incidence, which this figure draws, is not validated at any redshift)
+# the snapshot redshifts inside the grouped-validation domain of the LF+MF model's P1D correction (the correction
+# of the incidence, which this figure draws, is not validated at any redshift)
 REDSHIFTS = tuple(round(2.2 + 0.2 * i, 1) for i in range(13))  # 2.2, 2.4, ..., 4.6
 CLASSES = (("DLA", 2, "BLUE", 2.2), ("subDLA", 1, "ORANGE", 1.3), ("LLS", 0, "AQUA", 1.3))
 

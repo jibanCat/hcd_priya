@@ -6,8 +6,9 @@ Illustris simulation. This page records one comparison of the PRIYA simulations 
 
 **In one sentence:** with the filtered troughs restored, the per-class ratios of the PRIYA simulations agree with the
 per-class model of Rogers et al. (2018, their Eq. 6) over most of k < 0.03 s/km: to 0.4% to 1.3% for LLS, 0.6% to
-2.2% for subDLA, and 1.0% to 8.9% for DLA depending on how the two DLA templates are mixed (the median over k; the
-table below); the amplitudes at the lowest wavenumbers differ.
+2.2% for subDLA, and 1.0% to 3.3% or 2.8% to 8.9% for DLA, for the two ways of mixing the two DLA templates (the
+median over k, as a range over the redshifts 2.6 to 4.2; the table below); the amplitudes at the lowest wavenumbers
+differ.
 
 ## What was compared
 

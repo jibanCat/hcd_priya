@@ -24,11 +24,12 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
 ![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS against redshift, with the DLA measurement of Ho, Bird and Garnett (2021)](figures/dndx_vs_ho21.png)
 
 - **Model (lines):** `pred.dndx` of the LF+MF model at the parameters above, for DLAs (the heavier line), subDLAs
-  and LLS, at the snapshots from z = 2.2 to 4.6. The curves end at 4.6, the upper edge of the redshift range on
-  which the model's multi-fidelity correction of the P1D is validated; below 2.2 the model refuses an LF+MF
-  prediction. The correction of dN/dX that is drawn here has its own table, which runs over every snapshot, and is
-  not validated at any redshift: the choice of 4.6 keeps the figure inside the range where the rest of the LF+MF
-  prediction is validated, and says nothing about the accuracy of the corrected dN/dX.
+  and LLS, at the snapshots from z = 2.2 to 4.6. The curves end at 4.6, the upper edge of the grouped-validation
+  domain of the model's multi-fidelity correction of the P1D (z 2.2 to 4.6; a domain edge, not a statement that a
+  validation was passed); below 2.2 the model refuses an LF+MF prediction. The correction of dN/dX that is drawn
+  here has its own table, which is not limited to that range, and is not validated at any redshift: the choice of
+  4.6 keeps the figure inside the grouped-validation domain of the P1D correction, and says nothing about the
+  accuracy of the corrected dN/dX.
 - **Model (bands):** the lowest and the highest value over the 60 design points of the low-resolution training
   simulations. They show how far the prediction moves across the training set. They are not an uncertainty. For 12
   of the 60 points the predictor sets a flag that the drawn lines do not have (`outside_sampling_box` for the 12,
@@ -75,9 +76,9 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
   `docs/figures/data/ho21/PROVENANCE.md` in the repository.
 - **One snapshot against one bin.** Each panel sets one snapshot beside a measurement over a range of redshifts. In
   the third panel the model is at the single redshift 3.4 inside a bin one unit wide.
-- **The bin 4 to 5 is left out.** It reaches beyond z = 4.6, the upper edge of the redshift range on which the
-  model's multi-fidelity correction of the P1D is validated. The correction of the CDDF that is drawn here is not
-  validated at any redshift.
+- **The bin 4 to 5 is left out.** It reaches beyond z = 4.6, the upper edge of the grouped-validation domain of the
+  model's multi-fidelity correction of the P1D. The correction of the CDDF that is drawn here is not validated at
+  any redshift.
 - **Not shown and not tested here.** The held-out error of the model's CDDF is not shown. The measurement's tables
   start at log10 N_HI = 20.05; below it the model has no measured point in this figure. The simulations and the
   survey define and find absorbers differently; that difference was not assessed.
