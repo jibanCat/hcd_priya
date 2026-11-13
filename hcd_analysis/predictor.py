@@ -1,5 +1,5 @@
 """The public predictor: PRIYA-filtered per-class P1D from an approved, clean-lineage model bundle, with free HCD
-amplitudes and no prior.
+amplitudes and no prior. In short::
 
     import hcd_analysis.predictor as hp
     emu = hp.load_bundle(bundle_dir, "<the published manifest sha256>")     # None is refused
