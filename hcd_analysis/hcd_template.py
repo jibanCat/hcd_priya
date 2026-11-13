@@ -1,7 +1,7 @@
 """
 Rogers+2018 HCD contamination template for P1D (arXiv:1706.08532).
 
-Two forms from Rogers, Bird, Peiris, Pontzen (2018), *MNRAS* 474(3), 3032-3042
+Two forms from Rogers, Bird, Peiris, Pontzen, Font-Ribera, Leistedt (2018), *MNRAS* 474(3), 3032-3042
 (arXiv:1706.08532, the 1D template paper; NOT the 3D companion MNRAS 476, 3716) (coeffs Table 2):
 
   • `template_factor` — the MULTI-CLASS model (their Eq. 8) with FLOATING amplitudes:
