@@ -205,10 +205,20 @@ power spectra", JCAP 2026 (07) 094
 ## Figures
 
 Drawn by the scripts in [`scripts/figures/`](scripts/figures/); the data files are in
-[`docs/figures/data/`](docs/figures/data/). The class-ratio figure regenerates from the repository alone. The CDDF
-figure needs a model with an incidence record (none is published yet); its measured points and the 60 design points
-of its band are in the repository. The full captions and what each figure does not test:
+[`docs/figures/data/`](docs/figures/data/). The class-ratio figure regenerates from the repository alone. The dN/dX
+and CDDF figures need a model with an incidence record; their measured points and the 60
+design points of their bands are in the repository. No model is published yet: the two model figures were drawn
+from the candidate LF+MF release (staged, not yet public). The full captions and what each figure does not test:
 [`docs/model_figures.md`](docs/model_figures.md).
+
+![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS against redshift, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/dndx_vs_ho21.png)
+
+**The incidence dN/dX against redshift.** Lines: the LF+MF model (`pred.dndx`) for DLAs, subDLAs and LLS at the
+midpoint of each parameter's training range (the nine values are written in the script; nothing is fitted), at the
+snapshots from z = 2.2 to 4.6, where the validated range of the model's correction ends. Bands: the lowest and the
+highest value over the 60 design points of the training simulations; they are not an uncertainty. Points: the DLAs
+of Ho, Bird and Garnett (2021, [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals.
+The measurement covers DLAs only. The model's held-out error is not shown.
 
 ![The column-density distribution of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/cddf_vs_ho21.png)
 
@@ -219,8 +229,7 @@ not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
 [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) in three redshift bins, with 68 per cent intervals (bins
 where the measured value is zero are not drawn). One
 snapshot stands beside each bin (z = 3.4 for the bin 3 to 4). The bin 4 to 5 is left out because it reaches beyond
-the validated range of the model's correction. The model's held-out error is not shown. No model is published yet:
-this figure was drawn from the candidate LF+MF release (staged, not yet public).
+the validated range of the model's correction. The model's held-out error is not shown.
 
 ![The class power ratio at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](docs/figures/class_ratio_vs_rogers18.png)
 

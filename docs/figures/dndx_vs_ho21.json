@@ -1,0 +1,48 @@
+{
+ "design_point_flags": {
+  "ns_ridge": 3,
+  "outside_sampling_box": 12
+ },
+ "design_points": 60,
+ "design_points_flagged": 12,
+ "design_points_in_band_at_every_redshift": 60,
+ "design_points_refused": 0,
+ "figure": "dN/dX against redshift",
+ "flags_set": [
+  "cddf_bins_without_support",
+  "incidence_mf_applied",
+  "k_downweighted",
+  "mf_applied"
+ ],
+ "incidence_hr_simulations": 5,
+ "incidence_record": true,
+ "measurement": "DLA dN/dX of Ho, Bird and Garnett (2021), 68 per cent interval: docs/figures/data/ho21/dndx_all.txt, 18 redshift bins",
+ "parameters": {
+  "Ap": 1.9e-09,
+  "alphaq": 2.15,
+  "bhfeedback": 0.05,
+  "heref": 2.7,
+  "herei": 4.0,
+  "hireionz": 7.25,
+  "hub": 0.7,
+  "ns": 0.925,
+  "omegamh2": 0.143
+ },
+ "redshifts": [
+  2.2,
+  2.4,
+  2.6,
+  2.8,
+  3.0,
+  3.2,
+  3.4,
+  3.6,
+  3.8,
+  4.0,
+  4.2,
+  4.4,
+  4.6
+ ],
+ "release_format": "hcd_priya.release/2",
+ "synthetic_build": false
+}

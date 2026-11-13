@@ -99,7 +99,13 @@ def test_the_ho21_provenance_names_each_file_with_its_digest_and_the_commit():
     with open(os.path.join(DATA, "ho21", "PROVENANCE.md"), encoding="utf-8") as fh:
         text = fh.read()
     ho21 = {n: d for n, d in _sums().items() if n.startswith("ho21/")}
-    assert sorted(ho21) == ["ho21/cddf_z225.txt", "ho21/cddf_z253.txt", "ho21/cddf_z34.txt"]
+    assert sorted(ho21) == [
+        "ho21/cddf_z225.txt",
+        "ho21/cddf_z253.txt",
+        "ho21/cddf_z34.txt",
+        "ho21/dndx_all.txt",
+    ]
+    assert "confirmed the rows on 2026-11-13" in text
     for name, digest in ho21.items():
         assert os.path.basename(name) in text and digest in text, name
     for needed in ("github.com/jibanCat/DLA_data", "10.1093/mnras/stab2169", "no licence file"):
@@ -219,33 +225,54 @@ def test_the_cddf_figure_refuses_a_model_without_an_incidence_record(tmp_path):
     assert not (tmp_path / "cddf.png").exists()
 
 
-def test_the_dndx_figure_draws_no_measurement_unless_told_what_its_rows_are(
-    tmp_path, release, design, capsys, monkeypatch
+def test_the_ho21_dndx_table_reads_as_centre_value_and_68_per_cent_limits():
+    dndx = _script("fig_dndx_vs_ho21")
+    path = os.path.join(DATA, "ho21", "dndx_all.txt")
+    z, value, lo, hi = dndx.read_ho21_dndx(path)
+    table = np.loadtxt(path)
+    assert table.shape == (6, 18)
+    assert np.array_equal(z, table[0]) and np.array_equal(value, table[1])
+    assert np.array_equal(lo, table[2]), "row 2: the lower 68 per cent limit, not a 95 per cent row"
+    assert np.array_equal(hi, table[3]), "row 3: the upper 68 per cent limit, not a 95 per cent row"
+    assert np.all(np.diff(z) > 0) and 2.0 < z[0] and z[-1] < 5.0
+    # the order the rows were confirmed in: the 95 per cent interval holds the 68 per cent one, which holds the value
+    assert (
+        np.all(table[4] <= lo)
+        and np.all(lo <= value)
+        and np.all(value <= hi)
+        and np.all(hi <= table[5])
+    )
+
+
+def test_a_dndx_table_that_is_not_six_rows_is_refused(tmp_path):
+    dndx = _script("fig_dndx_vs_ho21")
+    short = tmp_path / "short.txt"
+    np.savetxt(short, [[2.25, 2.75], [0.05, 0.06], [0.04, 0.05]])
+    with pytest.raises(SystemExit, match="expected six rows"):
+        dndx.read_ho21_dndx(str(short))
+
+
+def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
+    tmp_path, release, design, monkeypatch
 ):
     dndx = _script("fig_dndx_vs_ho21")
     assert dndx.REDSHIFTS[0] == 2.2 and dndx.REDSHIFTS[-1] == 4.6 and len(dndx.REDSHIFTS) == 13
+    assert [(name, column) for name, column, _, _ in dndx.CLASSES] == [
+        ("DLA", 2),
+        ("subDLA", 1),
+        ("LLS", 0),
+    ]
+    assert hp.HCD_CLASSES == ("LLS", "subDLA", "DLA"), "the columns of pred.dndx the script indexes"
     monkeypatch.setattr(dndx, "REDSHIFTS", SYNTHETIC_Z)
     out = str(tmp_path / "dndx.png")
     assert dndx.main(_args(release) + ["--design", design, "--out", out]) == 0
     facts = _facts(out)
-    assert facts["measurement"].startswith("not drawn")
+    assert (
+        "68 per cent interval" in facts["measurement"]
+        and "18 redshift bins" in facts["measurement"]
+    )
     assert facts["design_points"] == 3 and facts["design_points_refused"] == 0
     assert facts["redshifts"] == list(dndx.REDSHIFTS) and facts["parameters"] == C.MIDPOINT
-    capsys.readouterr()
-
-    table = tmp_path / "dndx_table.txt"  # synthetic: six rows of four numbers
-    centre = np.array([0.05, 0.06, 0.07, 0.08])
-    np.savetxt(
-        table,
-        [[2.25, 2.75, 3.25, 3.75], centre, 0.9 * centre, 1.1 * centre, 0.8 * centre, 1.2 * centre],
-    )
-    with pytest.raises(SystemExit) as refused:
-        dndx.main(_args(release) + ["--ho21-dndx", str(table), "--out", out])
-    assert refused.value.code == 2
-    assert "the meaning of its rows is not recorded" in capsys.readouterr().err
-    told = ["--ho21-dndx", str(table), "--ho21-dndx-rows-are-centre-and-intervals"]
-    assert dndx.main(_args(release) + told + ["--out", out]) == 0
-    assert "rows read as centre and intervals" in _facts(out)["measurement"]
 
 
 def test_the_dndx_figure_refuses_a_model_without_an_incidence_record(tmp_path):

@@ -4,9 +4,8 @@ look of the figures.
 
 Each figure script draws one figure from the installed package, the data files committed under
 ``docs/figures/data`` and, for the two model figures, a model that holds an incidence record. The bands are drawn
-over the 60 design points of the committed table ``priya_lf_design_60.csv``. Two more inputs are optional files
-that you supply; they are read without a digest check: another table of design points (``--design``) and, for the
-dN/dX figure, the measurement's table (``--ho21-dndx``).
+over the 60 design points of the committed table ``priya_lf_design_60.csv``. One more input is an optional file
+that you supply, read without a digest check: another table of design points (``--design``).
 """
 
 from __future__ import annotations

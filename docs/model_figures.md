@@ -1,11 +1,11 @@
 # Figures: the model and the simulations against published work
 
-Two figures, each drawn by one script of `scripts/figures/`. The data files they read are committed under
-`docs/figures/data`. The class-ratio figure regenerates from the repository alone. The CDDF figure needs a model
-that holds an incidence record; its measured points and the 60 design points of its band are in the repository.
-A third script is ready and its figure is not drawn yet (last section).
+Three figures, each drawn by one script of `scripts/figures/`. The data files they read are committed under
+`docs/figures/data`. The class-ratio figure regenerates from the repository alone. The dN/dX and CDDF figures need a
+model that holds an incidence record; their measured points and the 60 design points of their bands are in the
+repository.
 
-**What the model figure is drawn from.** No model is published yet. The model figure below was drawn from the
+**What the model figures are drawn from.** No model is published yet. The two model figures below were drawn from the
 candidate LF+MF release (staged, not yet public) with the multi-fidelity correction of the incidence built from
 five high-resolution simulations. It will be redrawn from the published model.
 
@@ -18,6 +18,37 @@ bhfeedback = 0.05, with tau0_amp = 1 and dtau0 = 0
 
 These are the midpoint of the range each parameter was trained on. They are not a fiducial cosmology, not a best
 fit and not a simulation. Nothing in these figures was fitted to the measurements.
+
+## The incidence dN/dX against Ho, Bird and Garnett (2021)
+
+![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS against redshift, with the DLA measurement of Ho, Bird and Garnett (2021)](figures/dndx_vs_ho21.png)
+
+- **Model (lines):** `pred.dndx` of the LF+MF model at the parameters above, for DLAs (the heavier line), subDLAs
+  and LLS, at the snapshots from z = 2.2 to 4.6. The curves end at 4.6, the upper edge of the redshift range on
+  which the model's multi-fidelity correction is validated; below 2.2 the model refuses an LF+MF prediction.
+- **Model (bands):** the lowest and the highest value over the 60 design points of the low-resolution training
+  simulations. They show how far the prediction moves across the training set. They are not an uncertainty. For 12
+  of the 60 points the predictor sets a flag that the drawn lines do not have (`outside_sampling_box` for the 12,
+  `ns_ridge` for 3 of them); it refuses none, and all 60 are in the bands.
+- **The flags of the drawn lines** are in the side file `docs/figures/dndx_vs_ho21.json`. None says that the
+  correction rests on one simulation pair, or that its redshift is interpolated or held constant beyond the table.
+- **Data (points):** the incidence of DLAs that Ho, Bird and Garnett (2021) measured in SDSS DR16Q, in eighteen
+  redshift bins with centres from 2.08 to 4.92, with the 68 per cent interval. The meaning of the table's rows was
+  confirmed by the paper's first author on 2026-11-13. The file and its origin:
+  `docs/figures/data/ho21/PROVENANCE.md` in the repository.
+- **Snapshots against bins.** The model is drawn at snapshot redshifts 0.2 apart; the measurement is in bins one
+  sixth of a unit wide. The three measured points above z = 4.6 have no model curve beside them, and neither has
+  the one below 2.2.
+- **Not shown and not tested here.** The held-out error of the model's dN/dX is not shown. Nothing was fitted. The
+  measurement covers DLAs only: the subDLA and LLS curves have no measured point in this figure. The simulations and
+  the survey define and find absorbers differently; that difference was not assessed.
+
+To regenerate it (the second form when you hold the files of a release):
+
+```text
+python scripts/figures/fig_dndx_vs_ho21.py --published
+python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
+```
 
 ## The column-density distribution against Ho, Bird and Garnett (2021)
 
@@ -82,14 +113,6 @@ To regenerate it (no model is needed):
 ```text
 python scripts/figures/fig_class_ratio_vs_rogers18.py
 ```
-
-## Not drawn yet: the incidence dN/dX against redshift
-
-`scripts/figures/fig_dndx_vs_ho21.py` draws `pred.dndx` of the LF+MF model for DLAs, subDLAs and LLS at the
-snapshots from z = 2.2 to 4.6 (the curves end at 4.6, the upper edge of the validated range), with the DLA
-measurement of Ho, Bird and Garnett (2021). The measurement's table has no reader in its source repository, so the
-script draws its points only when it is told what the rows are, and the table is not among the committed figure
-data. The figure will be added when the authors have confirmed the meaning of the rows.
 
 ## References
 

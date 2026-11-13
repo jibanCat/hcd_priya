@@ -3,8 +3,7 @@
 Garnett (2021).
 
     python scripts/figures/fig_dndx_vs_ho21.py (--published | --release RELEASE_DIR SHA256) \\
-        [--design OTHER_DESIGN.csv | --no-band] [--ho21-dndx FILE --ho21-dndx-rows-are-centre-and-intervals] \\
-        [--out ...]
+        [--design OTHER_DESIGN.csv | --no-band] [--out docs/figures/dndx_vs_ho21.png]
 
 What is drawn, on one axis:
 
@@ -15,13 +14,13 @@ What is drawn, on one axis:
   the model refuses an LF+MF prediction;
 - bands: the lowest and the highest value over the 60 design points of the PRIYA suite
   (``docs/figures/data/priya_lf_design_60.csv``; another table with ``--design``, none with ``--no-band``);
-- points (only with ``--ho21-dndx``): the DLA dN/dX of Ho, Bird and Garnett (2021).
+- points: the DLA dN/dX of Ho, Bird and Garnett (2021) in eighteen redshift bins, with the limits of the 68 per cent
+  interval, from ``docs/figures/data/ho21/dndx_all.txt``.
 
-**The measurement's table has no reader in its source repository.** The file is six rows of eighteen numbers. This
-script draws it only when it is told, with ``--ho21-dndx-rows-are-centre-and-intervals``, that row 0 is the redshift
-of the bin centre, row 1 the central dN/dX, rows 2 and 3 the limits of the 68 per cent interval and rows 4 and 5
-those of the 95 per cent interval. Until that reading is confirmed by the paper's authors the points are not drawn
-and the file is not among the committed figure data.
+**The rows of the measurement's table.** Its source repository has no reader for it. The first author of the paper
+confirmed the rows on 2026-11-13 (see PROVENANCE.md beside the file): row 0 the redshift of the bin centre, row 1
+dN/dX of DLAs, rows 2 and 3 the lower and the upper limit of the 68 per cent interval, rows 4 and 5 those of the 95
+per cent interval. The figure shows the 68 per cent interval.
 """
 
 from __future__ import annotations
@@ -40,24 +39,23 @@ REDSHIFTS = tuple(round(2.2 + 0.2 * i, 1) for i in range(13))  # 2.2, 2.4, ..., 
 CLASSES = (("DLA", 2, "BLUE", 2.2), ("subDLA", 1, "ORANGE", 1.3), ("LLS", 0, "AQUA", 1.3))
 
 
+def read_ho21_dndx(path: str):
+    """The table of Ho, Bird and Garnett (2021): (redshift of the bin centre, dN/dX of DLAs, lower and upper limit
+    of the 68 per cent interval). Rows 4 and 5, the 95 per cent interval, are not returned."""
+    a = np.loadtxt(path)
+    if a.ndim != 2 or a.shape[0] != 6:
+        raise SystemExit(f"{path}: expected six rows, found shape {a.shape}")
+    return a[0], a[1], a[2], a[3]
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     C.add_model_arguments(ap)
     C.add_design_arguments(ap)
-    ap.add_argument("--ho21-dndx", help="the dN/dX table of Ho, Bird and Garnett (2021), six rows")
-    ap.add_argument(
-        "--ho21-dndx-rows-are-centre-and-intervals",
-        action="store_true",
-        help="say that the table's rows are: redshift, central value, 68 per cent limits, 95 per cent limits",
-    )
     ap.add_argument("--out", default=os.path.join(C.FIGURES, "dndx_vs_ho21.png"))
     args = ap.parse_args(argv)
-    if args.ho21_dndx and not args.ho21_dndx_rows_are_centre_and_intervals:
-        ap.error(
-            "--ho21-dndx needs --ho21-dndx-rows-are-centre-and-intervals: the meaning of its rows is not recorded"
-        )
     import matplotlib
 
     matplotlib.use("Agg")
@@ -125,19 +123,15 @@ def main(argv=None) -> int:
             va="center",
             fontsize=8.5,
         )
-    if args.ho21_dndx:
-        a = np.loadtxt(args.ho21_dndx)
-        if a.shape[0] != 6:
-            raise SystemExit(f"{args.ho21_dndx}: expected six rows, found {a.shape[0]}")
-        ax.errorbar(
-            a[0], a[1], yerr=[a[1] - a[2], a[3] - a[1]], fmt="o", ms=3.6, color=C.INK, ecolor=C.INK_SECONDARY,
-            elinewidth=0.8, mec=C.SURFACE, mew=0.5, zorder=3, label="DLA, Ho, Bird and Garnett (2021), 68 per cent interval",
-        )  # fmt: skip
-        facts["measurement"] = (
-            "DLA dN/dX of Ho, Bird and Garnett (2021); rows read as centre and intervals"
-        )
-    else:
-        facts["measurement"] = "not drawn: the meaning of the table's rows is not confirmed"
+    zm, dndx, lo68, hi68 = read_ho21_dndx(C.data_file("ho21", "dndx_all.txt"))
+    ax.errorbar(
+        zm, dndx, yerr=[dndx - lo68, hi68 - dndx], fmt="o", ms=3.6, color=C.INK, ecolor=C.INK_SECONDARY,
+        elinewidth=0.8, mec=C.SURFACE, mew=0.5, zorder=3, label="DLA, Ho, Bird and Garnett (2021), 68 per cent interval",
+    )  # fmt: skip
+    facts["measurement"] = (
+        "DLA dN/dX of Ho, Bird and Garnett (2021), 68 per cent interval: docs/figures/data/ho21/dndx_all.txt, "
+        f"{zm.size} redshift bins"
+    )
     ax.set_yscale("log")
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
     ax.yaxis.set_minor_formatter(
