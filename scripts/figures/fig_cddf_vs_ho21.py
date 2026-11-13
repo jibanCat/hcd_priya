@@ -6,14 +6,16 @@
 
 What is drawn, in three panels (one per redshift bin of the measurement):
 
-- line: ``pred.cddf`` of the LF+MF model at the snapshot redshift nearest the centre of the bin, at the nine
+- line: ``pred.cddf`` of the LF+MF model at a snapshot redshift inside the bin (2.2, 2.8 and 3.4), at the nine
   parameter values written out in ``figures_common.MIDPOINT`` (the midpoint of each parameter's training range: not
   a fiducial cosmology), with ``tau0_amp = 1`` and ``dtau0 = 0``. A bin the model does not support is NaN and is
-  simply absent;
+  simply absent: the line and the band break there. The flags of each drawn prediction go into the side file;
 - band (only with ``--design``): the lowest and the highest ``pred.cddf`` over the design points of the file, each
-  evaluated in the same way. The script reports every design point that the predictor flags or refuses;
+  evaluated in the same way. The script reports every design point that the predictor refuses, and every one for
+  which it sets a flag that the drawn line does not have;
 - points: f(N_HI) of Ho, Bird and Garnett (2021) with the limits of their 68 per cent interval, from
-  ``docs/figures/data/ho21`` (see PROVENANCE.md there). Bins in which the measurement is zero are not drawn.
+  ``docs/figures/data/ho21`` (see PROVENANCE.md there). A bin in which the measured f is zero is not drawn, also
+  where the table gives an upper limit for it.
 
 The model needs an incidence MF record (a release of format 2): without one it returns no CDDF. The measurement bin
 from z = 4 to 5 is left out: it reaches beyond z 4.6, the upper edge of the redshift range the multi-fidelity
@@ -88,40 +90,28 @@ def main(argv=None) -> int:
             "measurement_bin": bin_label,
             "model_z": z,
             "model_bins_absent": int(np.sum(np.isnan(pred.cddf))),
+            "model_flags_set": C.flags_set(pred),
         }
         if design is not None:
-            lo, hi, flagged, refused = C.envelope(emu, design, z, "cddf")
-            ok = np.isfinite(lo) & np.isfinite(hi)
-            ax.fill_between(
-                x[ok],
-                lo[ok],
-                hi[ok],
-                color=C.BLUE,
-                alpha=0.22,
-                lw=0,
-                zorder=1,
-                label=f"range over the {len(design)} design points",
-            )
+            lo, hi, flagged, refused = C.envelope(emu, design, z, "cddf", panel["model_flags_set"])
+            in_band = len(design) - len(refused)
+            C.band(ax, x, lo, hi, color=C.BLUE, alpha=0.22, lw=0, zorder=1, label=f"range over {in_band} design points")  # fmt: skip
             panel.update(
                 design_points=len(design),
+                design_points_in_band=in_band,
                 design_points_flagged=len(flagged),
                 design_points_refused=len(refused),
+                design_point_flags=C.flag_counts(flagged),
             )
             print(
-                f"z = {z}: {len(design)} design points; flagged by the predictor: {len(flagged)}; refused: {len(refused)}"
+                f"z = {z}: {len(design)} design points; with a flag the drawn line does not have: {len(flagged)}; "
+                f"refused: {len(refused)}"
             )
             for i, hit in flagged:
                 print(f"   design point {i}: {', '.join(hit)}")
             for i, why in refused:
                 print(f"   design point {i} refused: {why}")
-        ok = np.isfinite(pred.cddf)
-        ax.plot(
-            x[ok],
-            pred.cddf[ok],
-            color=C.BLUE,
-            zorder=2,
-            label="model (LF+MF), at the parameters of the script",
-        )
+        C.line(ax, x, pred.cddf, color=C.BLUE, zorder=2, label="model (LF+MF), at the parameters of the script")  # fmt: skip
         logn, f, f_lo, f_hi = read_ho21_cddf(C.data_file("ho21", name))
         ax.errorbar(
             logn, f, yerr=[f - f_lo, f_hi - f], fmt="o", ms=3.4, color=C.INK, ecolor=C.INK_SECONDARY, elinewidth=0.8,

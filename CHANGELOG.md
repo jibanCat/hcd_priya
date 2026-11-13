@@ -29,8 +29,10 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   and CI use a model package built with a synthetic bundle.
 - **Two figures with their scripts and data** ([`docs/model_figures.md`](docs/model_figures.md)): the model's
   column-density distribution against the DLA measurement of Ho, Bird and Garnett (2021), and the class power ratio
-  of the training simulations against Eq. 6 of Rogers et al. (2018). `scripts/figures/` regenerates them from the
-  package and the files in `docs/figures/data/`, each with its origin and sha256. A third script, for dN/dX against
+  of the training simulations against Eq. 6 of Rogers et al. (2018). `scripts/figures/` draws them; the data files
+  are in `docs/figures/data/`, each with its origin and sha256. The class-ratio figure regenerates from the
+  repository alone. The CDDF figure needs a model with an incidence record (none is published yet) and, for its
+  band, a table of the training design points that is not distributed. A third script, for dN/dX against
   redshift, is ready; its figure waits for the meaning of the measurement's table to be confirmed.
 - **A warning for a mean flux outside the trained range.** A prediction whose `tau_eff` lies outside the range of
   mean flux the model was trained on, or outside the tables of the multi-fidelity correction, emits a
@@ -44,7 +46,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   format `hcd_priya.release/1` loads and predicts as before. No such record is released yet.
 - **The column-density distribution as an output.** With an incidence record a prediction carries `cddf` and
   `log_nhi`: the CDDF at the record's bin centres, the linear mean over the ensemble members, and under LF+MF that
-  mean times the record's HR/LF ratio per bin. A bin where nothing was trained or measured is NaN, never a number.
+  mean times the record's HR/LF ratio per bin. A bin is NaN, never a number, where no HR/LF simulation pair has
+  absorbers at any tabulated redshift, and under LF+MF also where none has them at the redshift used.
   Without an incidence record both are `None`.
 - **A documentation page on the class spectra against the per-class model of Rogers et al. (2018)**
   ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)): what was compared, the numbers, and what the

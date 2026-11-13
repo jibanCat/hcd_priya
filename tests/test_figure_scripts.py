@@ -149,6 +149,15 @@ def test_the_ho21_tables_read_as_centre_value_and_68_per_cent_limits():
         assert logn.size > 0 and logn.shape == f.shape == lo.shape == hi.shape
         assert np.all(np.diff(logn) > 0) and logn[0] >= 20.0 and logn[-1] < 23.0
         assert np.all(f > 0) and np.all(lo <= f) and np.all(f <= hi)
+        table = np.loadtxt(os.path.join(DATA, "ho21", name))
+        drawn = table[1] > 0
+        assert np.array_equal(logn, table[0][drawn]) and np.array_equal(f, table[1][drawn])
+        assert np.array_equal(
+            lo, table[2][drawn]
+        ), "row 2: the lower 68 per cent limit, not a 95 per cent row"
+        assert np.array_equal(
+            hi, table[3][drawn]
+        ), "row 3: the upper 68 per cent limit, not a 95 per cent row"
         low, high = (float(v) for v in name[len("cddf_z") : -len(".txt")].replace("225", "2 2.5").replace("253", "2.5 3").replace("34", "3 4").split())  # fmt: skip
         assert low <= z < high, "the model's redshift lies inside the measurement's bin"
 
@@ -192,7 +201,12 @@ def test_the_cddf_figure_runs_on_a_model_with_an_incidence_record(
     assert [p["model_z"] for p in facts["panels"]] == list(SYNTHETIC_Z)
     for panel in facts["panels"]:
         assert panel["design_points"] == 3 and panel["design_points_refused"] == 0
+        assert panel["design_points_in_band"] == 3
         assert panel["model_bins_absent"] >= 1, "the first bin is never supported"
+        assert (
+            "incidence_mf_applied" in panel["model_flags_set"]
+        ), "the flags of the drawn line are recorded"
+        assert panel["design_points_flagged"] == sum(panel["design_point_flags"].values()) == 0
     assert "3 design points" in capsys.readouterr().out
     assert "composition" not in json.dumps(facts)
 
@@ -234,6 +248,34 @@ def test_the_dndx_figure_draws_no_measurement_unless_told_what_its_rows_are(
     assert "rows read as centre and intervals" in _facts(out)["measurement"]
 
 
+def test_the_dndx_figure_refuses_a_model_without_an_incidence_record(tmp_path):
+    dndx = _script("fig_dndx_vs_ho21")
+    plain = SR.make_release(tmp_path / "plain")
+    with pytest.raises(SystemExit, match="no incidence MF record"):
+        dndx.main(_args(plain) + ["--out", str(tmp_path / "dndx.png")])
+    assert not (tmp_path / "dndx.png").exists()
+
+
+def test_an_absent_bin_breaks_the_line_and_the_band():
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    x = np.arange(5.0)
+    y = np.array([1.0, 2.0, np.nan, 4.0, 5.0])  # the bin in the middle is absent
+    (drawn,) = C.line(ax, x, y)
+    assert len(drawn.get_ydata()) == 5 and np.isnan(
+        drawn.get_ydata()[2]
+    ), "the gap is kept, not bridged"
+    pieces = C.band(ax, x, 0.5 * y, 2.0 * y).get_paths()
+    assert len(pieces) == 2, "the band has one piece on each side of the absent bin"
+    for piece in pieces:
+        assert not np.any((piece.vertices[:, 0] > 1.0) & (piece.vertices[:, 0] < 3.0))
+    plt.close(fig)
+
+
 def test_a_design_table_with_another_header_is_refused(tmp_path):
     path = tmp_path / "design.csv"
     path.write_text("a,b\n1,2\n", encoding="utf-8")
@@ -243,10 +285,23 @@ def test_a_design_table_with_another_header_is_refused(tmp_path):
 
 def test_the_band_reports_flagged_points_and_drops_none(release):
     emu = hp.load_release(str(release["root"]), release["sha"])
-    far = dict(
-        C.MIDPOINT, ns=5.0
-    )  # far outside any training range: the predictor flags it or refuses it
-    lo, hi, flagged, refused = C.envelope(emu, [dict(C.MIDPOINT), far], 3.0, "dndx")
+    # far outside any training range: the predictor flags it or refuses it
+    far = dict(C.MIDPOINT, ns=5.0)
+    drawn = emu.predict(C.MIDPOINT, z=3.0, tau0_amp=1.0, dtau0=0.0)
+    lo, hi, flagged, refused = C.envelope(
+        emu, [dict(C.MIDPOINT), far], 3.0, "dndx", C.flags_set(drawn)
+    )
     assert [i for i, _ in flagged] + [i for i, _ in refused] == [1]
-    one = emu.predict(C.MIDPOINT, z=3.0, tau0_amp=1.0, dtau0=0.0).dndx
-    assert np.all(lo <= one) and np.all(one <= hi)
+    assert np.all(lo <= drawn.dndx) and np.all(drawn.dndx <= hi)
+    # every flag the drawn line does not have is reported, whatever its name: with no baseline, the flags that
+    # every prediction of this model carries are reported too
+    _, _, everything, _ = C.envelope(emu, [dict(C.MIDPOINT)], 3.0, "dndx")
+    assert everything == [(0, C.flags_set(drawn))] and "incidence_mf_applied" in everything[0][1]
+    assert C.flag_counts([(0, ["a", "b"]), (3, ["b"])]) == {"a": 1, "b": 2}
+
+
+def test_a_band_with_every_point_refused_stops_with_a_message(release):
+    emu = hp.load_release(str(release["root"]), release["sha"])
+    not_a_point = dict(C.MIDPOINT, ns=float("nan"))
+    with pytest.raises(SystemExit, match="refused every design point"):
+        C.envelope(emu, [not_a_point], 3.0, "dndx")

@@ -204,9 +204,11 @@ power spectra", JCAP 2026 (07) 094
 
 ## Figures
 
-Drawn by the scripts in [`scripts/figures/`](scripts/figures/) from the package and the data files in
-[`docs/figures/data/`](docs/figures/data/). The full captions, what each figure does not test, and how to regenerate
-them: [`docs/model_figures.md`](docs/model_figures.md).
+Drawn by the scripts in [`scripts/figures/`](scripts/figures/); the data files are in
+[`docs/figures/data/`](docs/figures/data/). The class-ratio figure regenerates from the repository alone. The CDDF
+figure needs a model with an incidence record (none is published yet) and, for its band, a table of the training
+design points that is not distributed. The full captions and what each figure does not test:
+[`docs/model_figures.md`](docs/model_figures.md).
 
 ![The column-density distribution of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/cddf_vs_ho21.png)
 
@@ -214,7 +216,8 @@ them: [`docs/model_figures.md`](docs/model_figures.md).
 parameter's training range (the nine values are written in the script; nothing is fitted), at the snapshots z = 2.2,
 2.8 and 3.4. Band: the lowest and the highest value over the 60 design points of the training simulations; it is
 not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
-[arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) in three redshift bins, with 68 per cent intervals. One
+[arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) in three redshift bins, with 68 per cent intervals (bins
+where the measured value is zero are not drawn). One
 snapshot stands beside each bin (z = 3.4 for the bin 3 to 4). The bin 4 to 5 is left out because it reaches beyond
 the validated range of the model's correction. The model's held-out error is not shown. No model is published yet:
 this figure was drawn from the candidate LF+MF release (staged, not yet public).
@@ -223,8 +226,8 @@ this figure was drawn from the candidate LF+MF release (staged, not yet public).
 
 **The class power ratio P_class / P_clean at z = 3.** Points: the 60 low-resolution PRIYA training simulations with
 the filtered troughs restored (mean and standard deviation over the simulations, z = 3.0). Line: Eq. 6 of Rogers et
-al. (2018, [arXiv:1706.08532](https://arxiv.org/abs/1706.08532)), from `hcd_analysis.hcd_template.class_ratio`
-(their snapshot is at z = 3.01). Shaded: below 7.85e-4 s/km, the lowest mode of their 8000 km/s box, where the
+al. (2018, [arXiv:1706.08532](https://arxiv.org/abs/1706.08532)), from `hcd_analysis.hcd_template.class_ratio` at
+z = 3.0 (their snapshot is at z = 3.01). Shaded: below 7.85e-4 s/km, the lowest mode of their 8000 km/s box, where the
 template is evaluated by extrapolation. This figure holds no emulator prediction: the emulator predicts the filtered
 class spectra and was not tested with the troughs restored ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)).
 

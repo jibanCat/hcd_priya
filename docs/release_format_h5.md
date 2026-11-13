@@ -423,8 +423,10 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   column-density threshold) was never trained on: the network's output there means nothing, and `pred.cddf` is NaN
   there under both fidelities. A bin with no pair at one redshift holds the ratio 1 in the table, which means "no
   correction measured"; under LF+MF `pred.cddf` is NaN there (flag `cddf_bins_without_support`), and under LF it
-  keeps the LF value. A bin with fewer pairs than its redshift keeps the mean over the pairs that exist. The loader
-  refuses a record whose bins are not the model's, or that claims pairs in a bin the model was never trained on.
+  keeps the LF value (whether the LF training simulations have absorbers in that bin at that redshift is not
+  checked). A bin with fewer pairs than its redshift keeps the mean over the pairs that exist. The loader refuses a
+  record whose number of bins is not the model's (the model files hold no bin centres, so the centres themselves
+  cannot be compared), or that claims pairs in a bin the model was never trained on.
 - `n_sims` is the number of matched pairs behind each redshift's dN/dX mean, and `n_pairs` their sum. The fit refuses
   a pair whose dN/dX is not finite and positive, so every pair counts in every class and no cell is filled in. A
   redshift with one pair is a ratio of one simulation, not a mean. A CDDF cell is the mean over the pairs with both
@@ -501,7 +503,7 @@ difference is visible:
 | `dndx` under LF+MF | the LF model's | the LF model's times `R_c(z)` |
 | `w_c` under LF+MF | the map of the LF `dndx` | the map of the corrected `dndx` |
 | `cddf`, `log_nhi` | `None` | the CDDF at the record's bins (LF: the member mean; LF+MF: times `R(z, N_HI)`) |
-| anything under `fidelity="LF"` | the LF model's | the same |
+| `P_class`, `dndx`, `w_c` under `fidelity="LF"` | the LF model's | the same |
 | flag `incidence_mf_applied` | absent | present |
 
 A release without an optional part is written in format 1, so a release has one representation. A manifest of

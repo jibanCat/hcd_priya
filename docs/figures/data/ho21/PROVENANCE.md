@@ -20,10 +20,12 @@ redshift bins. They are the measured points of the figure `docs/figures/cddf_vs_
 - **Licence:** the source repository has no licence file. The files are used here at the direction of the
   repository's owner, who is the first author of the paper and the maintainer of this project.
 - **What the rows are,** read from the function `ho21_cddf` of `dla_data.py` in the source repository at that
-  commit (the function was read, not run): each file has six rows of thirty numbers. Row 0: log10 of N_HI at the bin
-  centre (N_HI in cm^-2; 20.05 to 22.95 in steps of 0.1). Row 1: f(N_HI). Rows 2 and 3: the lower and the upper limit
-  of the 68 per cent interval. Rows 4 and 5: the lower and the upper limit of the 95 per cent interval. A bin with
-  f = 0 has no detection.
+  commit (the function was read, not run): each file has six rows of thirty numbers. Row 0: log10 of N_HI (N_HI in
+  cm^-2). Row 1: f(N_HI). Rows 2 and 3: the lower and the upper limit of the 68 per cent interval. Rows 4 and 5: the
+  lower and the upper limit of the 95 per cent interval.
+- **Two readings that are inferred from the numbers, not stated by the reader:** that row 0 is the bin centre (the
+  values run from 20.05 to 22.95 in steps of 0.1), and that a bin with f = 0 holds no detection (such bins still
+  carry a non-zero upper limit; the figure does not draw them).
 - **One slip in the source repository's reader, not followed here:** `ho21_cddf` reads `cddf_z253.txt` for both
   2.5 <= z < 3 and 3 <= z < 4. Each file is taken here by the redshift range in its name.
 - **Not copied:** the file for 4 < z < 5 (the figure leaves that bin out), the file for all redshifts, and the

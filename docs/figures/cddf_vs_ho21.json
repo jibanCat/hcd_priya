@@ -4,27 +4,58 @@
  "incidence_record": true,
  "panels": [
   {
+   "design_point_flags": {
+    "ns_ridge": 3,
+    "outside_sampling_box": 12
+   },
    "design_points": 60,
    "design_points_flagged": 12,
+   "design_points_in_band": 60,
    "design_points_refused": 0,
    "measurement_bin": "2 < z < 2.5",
    "model_bins_absent": 2,
+   "model_flags_set": [
+    "cddf_bins_without_support",
+    "incidence_mf_applied",
+    "k_downweighted",
+    "mf_applied"
+   ],
    "model_z": 2.2
   },
   {
+   "design_point_flags": {
+    "ns_ridge": 3,
+    "outside_sampling_box": 12
+   },
    "design_points": 60,
    "design_points_flagged": 12,
+   "design_points_in_band": 60,
    "design_points_refused": 0,
    "measurement_bin": "2.5 < z < 3",
    "model_bins_absent": 1,
+   "model_flags_set": [
+    "incidence_mf_applied",
+    "k_downweighted",
+    "mf_applied"
+   ],
    "model_z": 2.8
   },
   {
+   "design_point_flags": {
+    "ns_ridge": 3,
+    "outside_sampling_box": 12
+   },
    "design_points": 60,
    "design_points_flagged": 12,
+   "design_points_in_band": 60,
    "design_points_refused": 0,
    "measurement_bin": "3 < z < 4",
    "model_bins_absent": 1,
+   "model_flags_set": [
+    "incidence_mf_applied",
+    "k_downweighted",
+    "mf_applied"
+   ],
    "model_z": 3.4
   }
  ],

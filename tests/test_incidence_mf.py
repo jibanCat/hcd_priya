@@ -372,6 +372,13 @@ def test_only_a_sealed_unchanged_record_is_applied(tmp_path):
         IM.reverify(inc._replace(dndx_ratio=inc.dndx_ratio * 2.0))
     with pytest.raises(E, match="changed in memory"):
         IM.reverify(inc._replace(record=dict(inc.record, version="another")))
+    for name in (
+        "n_sims",
+        "cddf_n_pairs",
+        "cddf_ratio",
+    ):  # the support counts decide which bins are NaN
+        with pytest.raises(E, match="changed in memory"):
+            IM.reverify(inc._replace(**{name: getattr(inc, name) + 1}))
     with pytest.raises(E, match="sha256"):
         IM.reverify(inc._replace(record_bytes=raw + b" "))
     with pytest.raises(E, match="loaded by"):

@@ -2,8 +2,10 @@
 against the digest recorded beside it, the parameters every model curve is drawn at, how a model is loaded, and the
 look of the figures.
 
-Each figure script regenerates one figure of the README from the installed package, the data files committed under
-``docs/figures/data`` and, for the two model figures, a model. Nothing else is read.
+Each figure script draws one figure from the installed package, the data files committed under
+``docs/figures/data`` and, for the two model figures, a model that holds an incidence record. Two more inputs are
+optional files that you supply; they are not in the repository and are read without a digest check: a table of
+design points for the bands (``--design``) and, for the dN/dX figure, the measurement's table (``--ho21-dndx``).
 """
 
 from __future__ import annotations
@@ -103,18 +105,19 @@ def read_design(path: str, names) -> list[dict]:
     return [dict(zip(names, (float(v) for v in r))) for r in rows[1:]]
 
 
-FLAGS_REPORTED = (
-    "outside_training_box",
-    "outside_sampling_box",
-    "ns_ridge",
-    "mean_flux_off_ladder",
-)
+def flags_set(pred) -> list:
+    """The names of the flags that are True in a prediction, sorted."""
+    return sorted(name for name, value in pred.flags.items() if value is True)
 
 
-def envelope(emu, design, z, attribute):
+def envelope(emu, design, z, attribute, baseline=()):
     """The lowest and the highest ``pred.<attribute>`` over the design points at one redshift (LF+MF, tau0_amp = 1,
-    dtau0 = 0), ignoring NaN bins, with the points the predictor flagged and those it refused. No point is dropped
-    silently: a refused point is reported and is not in the band."""
+    dtau0 = 0), ignoring NaN bins, with the points the predictor flagged and those it refused.
+
+    A point is reported as flagged when the predictor sets a flag for it that the drawn line does not have
+    (``baseline``: the flags of the prediction at the script's own parameters at this redshift). Every such flag is
+    reported, whatever its name. No point is dropped silently: a refused point is reported and is not in the band.
+    """
     import warnings
 
     import numpy as np
@@ -131,15 +134,42 @@ def envelope(emu, design, z, attribute):
             refused.append((i, str(exc)[:100]))
             continue
         values.append(np.asarray(getattr(pred, attribute), dtype=float))
-        hit = [name for name in FLAGS_REPORTED if pred.flags.get(name)]
+        hit = sorted(set(flags_set(pred)) - set(baseline))
         if hit:
             flagged.append((i, hit))
+    if not values:
+        raise SystemExit(
+            f"z = {z:g}: the predictor refused every design point, so there is no band to draw"
+        )
     values = np.array(values)
     with warnings.catch_warnings():
         warnings.simplefilter(
             "ignore", RuntimeWarning
         )  # a bin that is NaN for every point stays NaN
         return np.nanmin(values, axis=0), np.nanmax(values, axis=0), flagged, refused
+
+
+def flag_counts(flagged) -> dict:
+    """{flag name: the number of design points that have it}, from the ``flagged`` list of ``envelope``."""
+    counts = {}
+    for _, hit in flagged:
+        for name in hit:
+            counts[name] = counts.get(name, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def line(ax, x, y, **kw):
+    """Plot ``y`` against ``x`` with every NaN left in, so that an absent bin breaks the line. Compressing the
+    arrays first would join the two neighbours of an absent bin with a straight segment."""
+    return ax.plot(x, y, **kw)
+
+
+def band(ax, x, lo, hi, **kw):
+    """Fill between ``lo`` and ``hi`` only where both are finite: an absent bin is a gap in the band."""
+    import numpy as np
+
+    ok = np.isfinite(lo) & np.isfinite(hi)
+    return ax.fill_between(x, lo, hi, where=ok, **kw)
 
 
 def style(plt) -> None:

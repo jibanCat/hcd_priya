@@ -70,11 +70,13 @@ the corrected incidence is not validated.
 **The column-density distribution.** With an incidence record a prediction also carries ``cddf``, the distribution
 f(N_HI) at the bin centres ``log_nhi`` that the record gives: the linear mean over the ensemble members of their
 CDDF output, and under LF+MF that mean times the record's second table R(z, N_HI), the mean HR/LF ratio per bin. A
-bin is NaN, never a number, where nothing supports it: where no simulation pair has absorbers at any tabulated
-redshift (the model was never trained there: the bin below the catalogue's column-density threshold), and, under
-LF+MF, where no pair has them at that redshift, so that no correction was measured (flag
-``cddf_bins_without_support``). A table row that rests on one simulation pair is flagged
-``incidence_mf_single_pair``. Without an incidence record ``cddf`` and ``log_nhi`` are None: the model files do not
+bin is NaN, never a number, in two cases. Under both fidelities: where no HR/LF simulation pair has absorbers at
+any tabulated redshift (that includes every bin the model was never trained on, such as the bin below the
+catalogue's column-density threshold). Under LF+MF also: where no pair has them at the redshift used, so that no
+correction was measured (flag ``cddf_bins_without_support``). Under LF the support of the LF training simulations at
+each redshift is not checked. The dN/dX table row that rests on one simulation pair is flagged
+``incidence_mf_single_pair`` (the pairs behind each CDDF bin are in the provenance, ``cddf_n_pairs``). Without an
+incidence record ``cddf`` and ``log_nhi`` are None: the model files do not
 say what the bins are. A release of format 1 has no such
 record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition. No
 held-out error of the corrected incidence is shipped; ``labels["incidence_mf_error"]`` says how one is computed and
@@ -985,7 +987,8 @@ class _PredictorBase:
                 "which this model was never trained on: the record is not of this model's training data"
             )
         self._inc = inc
-        # what is applied: immutable copies of the tables, not the record's arrays
+        # what is applied: immutable copies of the two ratio tables, not the record's arrays (the pair counts
+        # that decide which bins are NaN are read from the record, which nothing here writes to)
         self._inc_tab = {"z": jnp.asarray(inc.z), "ratio": jnp.asarray(inc.dndx_ratio)}
         self._inc_cddf_tab = {
             "z": jnp.asarray(inc.z),
@@ -999,9 +1002,11 @@ class _PredictorBase:
         """The column-density distribution of a prediction, (n_z, Nbin), and whether a bin was left out because no
         correction was measured there. The linear mean over the members of their CDDF; under LF+MF multiplied by
         the incidence record's factor R(z, N_HI) (``multifidelity.cddf_res_factor``). A bin is NaN, never a
-        number, where nothing supports it: where no simulation pair has absorbers at any tabulated redshift (the
-        model was never trained there), and, under LF+MF, where no pair has them at this redshift (no correction
-        was measured, so the value would be the LF value under another name)."""
+        number, in two cases: under both fidelities where no HR/LF simulation pair has absorbers at any tabulated
+        redshift (that includes every bin the model was never trained on); under LF+MF also where no pair has
+        them at this redshift (no correction was measured, so the value would be the LF value under another
+        name). Under LF the support of the LF training simulations at each redshift is not checked.
+        """
         from .emulator.multifidelity import cddf_res_factor
 
         if single:
@@ -1030,7 +1035,8 @@ class _PredictorBase:
             "incidence_mf_applied": bool(use_mf),
             "incidence_mf_z_clamped": bool(any(clamped)),
             "incidence_mf_z_interpolated": bool(any(between)),
-            # the table row used rests on one simulation pair: a ratio of one simulation, not a mean
+            # the dN/dX table row used rests on one simulation pair: a ratio of one simulation, not a mean (the
+            # pairs behind each CDDF bin are in the provenance, cddf_n_pairs, and are not flagged one by one)
             "incidence_mf_single_pair": bool(use_mf and any(self._inc.single_pair(v) for v in zs)),
             # an LF+MF CDDF bin is NaN because no correction was measured there at this redshift
             "cddf_bins_without_support": bool(cddf_gap),
@@ -1055,13 +1061,13 @@ class _PredictorBase:
                 if use_mf
                 else ""
             )
-            + ". A bin is NaN where nothing supports it: where no simulation pair has absorbers at any "
-            "tabulated redshift (the model was never trained there)"
+            + ". A bin is NaN where no HR/LF simulation pair has absorbers at any tabulated redshift (that "
+            "includes every bin the model was never trained on)"
             + (
                 ", and where no pair has them at this redshift, so that no correction was measured (flag "
                 "cddf_bins_without_support)"
                 if use_mf
-                else ""
+                else "; the support of the LF training simulations at this redshift is not checked"
             )
             + ". The number of pairs behind each bin and redshift is in provenance incidence_mf cddf_n_pairs"
         )
@@ -1247,7 +1253,7 @@ class _PredictorBase:
           HR/LF ratio of the incidence and ``w_c`` follows; ``incidence_mf_z_interpolated``, the
           table does not hold this redshift and the ratio is interpolated between its neighbours;
           ``incidence_mf_z_clamped``, the ratio is held constant beyond its table;
-          ``incidence_mf_single_pair``, the table row used rests on one simulation pair;
+          ``incidence_mf_single_pair``, the dN/dX table row used rests on one simulation pair;
           ``cddf_bins_without_support``, some bins of ``cddf`` are NaN because no correction was
           measured there at this redshift.
 

@@ -135,5 +135,6 @@ map of that corrected `dndx`; `pred.flags["incidence_mf_applied"]` is then True 
 names the record, its two inputs and the HR simulations it was fitted on. A release of format 1 has no such record:
 its `dndx` and `w_c` are the LF model's, as before, and it has no `cddf`. With the record a prediction also
 carries the column-density distribution `pred.cddf` at the bin centres `pred.log_nhi`, with NaN in every bin where
-nothing was trained or measured. No such record is released yet. Details:
+no HR/LF simulation pair has absorbers at any tabulated redshift and, under LF+MF, where none has them at the
+redshift used. No such record is released yet. Details:
 `docs/release_format_h5.md`, section "The incidence MF record".

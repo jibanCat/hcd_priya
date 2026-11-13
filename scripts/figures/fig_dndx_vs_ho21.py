@@ -68,6 +68,11 @@ def main(argv=None) -> int:
     import hcd_analysis.predictor as hp
 
     emu, what = C.load_model(args)
+    if not what["incidence_record"]:
+        raise SystemExit(
+            "this model has no incidence MF record: its dN/dX under LF+MF is the LF model's, which is not what "
+            "this figure is labelled as"
+        )
     design = C.read_design(args.design, hp.PARAM_NAMES) if args.design else None
     stack = emu.predict_many(C.MIDPOINT, z=list(REDSHIFTS), tau0_amp=1.0, dtau0=0.0)
     facts = dict(
@@ -78,7 +83,8 @@ def main(argv=None) -> int:
     if design is not None:
         lo, hi, all_flagged, all_refused = [], [], {}, {}
         for z in REDSHIFTS:
-            a, b, flagged, refused = C.envelope(emu, design, z, "dndx")
+            drawn = C.flags_set(emu.predict(C.MIDPOINT, z=z, tau0_amp=1.0, dtau0=0.0))
+            a, b, flagged, refused = C.envelope(emu, design, z, "dndx", drawn)
             lo.append(a), hi.append(b)
             for i, hit in flagged:  # a point counts once, with every flag it had at any redshift
                 all_flagged.setdefault(i, set()).update(hit)
@@ -87,12 +93,14 @@ def main(argv=None) -> int:
         bands = (np.array(lo), np.array(hi))
         facts.update(
             design_points=len(design),
+            design_points_in_band_at_every_redshift=len(design) - len(all_refused),
             design_points_flagged=len(all_flagged),
             design_points_refused=len(all_refused),
+            design_point_flags=C.flag_counts((i, sorted(hit)) for i, hit in all_flagged.items()),
         )
         print(
-            f"{len(design)} design points; flagged by the predictor at some redshift: {len(all_flagged)}; "
-            f"refused at some redshift: {len(all_refused)}"
+            f"{len(design)} design points; with a flag the drawn line does not have, at some redshift: "
+            f"{len(all_flagged)}; refused at some redshift: {len(all_refused)}"
         )
         for i in sorted(all_flagged):
             print(f"   design point {i}: {', '.join(sorted(all_flagged[i]))}")
@@ -147,7 +155,7 @@ def main(argv=None) -> int:
             color=C.INK_SECONDARY,
             alpha=0.3,
             lw=6,
-            label=f"range over the {len(design)} design points",
+            label=f"range over {len(design) - len(all_refused)} design points",
         )
     fig.legend(*ax.get_legend_handles_labels(), loc="outside lower center", ncols=2)
     C.save(fig, args.out, facts)

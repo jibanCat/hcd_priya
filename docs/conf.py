@@ -92,6 +92,8 @@ SITE_PAGES = {
     "CHANGELOG.md": "changelog",
     "docs/compatibility.md": "compatibility",
     "docs/release_format_h5.md": "release_format_h5",
+    "docs/rogers_comparison.md": "rogers_comparison",
+    "docs/model_figures.md": "model_figures",
     "docs/release_checklist.md": "release_checklist",
     "docs/tutorials/production_and_research_bundles.md": "tutorials/production_and_research_bundles",
 }

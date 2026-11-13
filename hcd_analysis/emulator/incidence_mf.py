@@ -16,11 +16,11 @@ on the mean flux. Between the tabulated redshifts it is interpolated linearly, a
 ``build_cddf_res_corr``, ``dndx_res_factor``, ``apply_dndx_res_corr``, ``cddf_res_factor``. What is here is the
 container: the record that carries a fitted table with its inputs, and its strict reader. The predictor applies the
 dN/dX table before the map to sightline fractions, and the CDDF table to the column-density distribution it returns
-(``pred.cddf``), never returning a number in a bin where nothing was trained or measured (``cddf_n_pairs``).
+(``pred.cddf``), never returning a number in a bin where no HR/LF pair has absorbers at any tabulated redshift,
+nor, under LF+MF, where none has them at the redshift used (``cddf_n_pairs``).
 
 **Inputs.** The LF side is the LF training cache (its snapshot-level columns). The HR side is NOT the HR cache: the HR
-cache's catalogue-derived columns predate a catalogue fix and stay refused by ``mf_release`` (PI ruling 2026-11-06b
-A1). The HR side is an HR incidence product derived from the rebuilt HR catalogues with the functions that made the
+cache's catalogue-derived columns predate a catalogue fix and stay refused by ``mf_release``. The HR side is an HR incidence product derived from the rebuilt HR catalogues with the functions that made the
 LF cache columns (``hr_snap_from_product``). The record names both inputs by sha256. The code pins those digests and
 verifies no lineage of the HR product: how it was derived is the statement of whoever builds the record
 (``HR_SOURCE`` says exactly this).
