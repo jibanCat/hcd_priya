@@ -127,3 +127,11 @@ lineage-verified. Below the larger of the MF tables' lowest redshift and `valida
 refused (`MFRangeError`); ask for `fidelity="LF"` there. A bundle loaded without an MF record predicts exactly as before, and `fidelity="LF+MF"` on it
 raises `MFUnavailableError`. Details: `docs/release_format_h5.md`, sections "The multi-fidelity record" and "The
 release manifest".
+
+**The incidence.** The record above corrects the class spectra. A release of format `hcd_priya.release/2` also names
+an incidence MF record: a fixed table `R_c(z)`, the mean HR/LF ratio of dN/dX per HCD class and redshift over the
+matched simulation pairs. With it, an LF+MF prediction returns `dndx = dndx_LF * R_c(z)`, and `w_c` is the shipped
+map of that corrected `dndx`; `pred.flags["incidence_mf_applied"]` is then True and `provenance["incidence_mf"]`
+names the record, its two inputs and the HR simulations it was fitted on. A release of format 1 has no such record:
+its `dndx` and `w_c` are the LF model's, as before. No such record is released yet. Details:
+`docs/release_format_h5.md`, section "The incidence MF record".

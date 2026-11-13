@@ -383,7 +383,53 @@ container, read with `allow_pickle=False` by `products.load_mf_product`, which c
 cache digests and the composition (`"all"` for a product that records none). It is not a release record and the
 release loader refuses it.
 
-## The release manifest (`hcd_priya.release/1`)
+## The incidence MF record (`hcd_priya.incidence_mf_record/1`)
+
+The P1D record above corrects the class spectra only. The incidence dN/dX of the three HCD classes, and the
+column-density distribution f(N_HI) (the CDDF), also differ between the low- and high-resolution simulations. Their
+correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`):
+
+- **What it holds.** A fixed table `R_c(z)`: at each redshift, the mean over the matched HR simulations of
+  `(dN/dX)_HR / (dN/dX)_LF`, per class (LLS, subDLA, DLA). And the same kind of table per column-density bin,
+  `R(z, N_HI)`, for the CDDF, with the bin centres. The tables do not depend on cosmology or on the mean flux.
+- **How it is used.** `dndx_MF = dndx_LF * R_c(z)`: linear in z between the tabulated redshifts, held constant beyond
+  them. The predictor applies it to an LF+MF prediction before the map from dN/dX to sightline fractions, so `w_c`
+  follows; the class spectra are not touched. The predictor returns no CDDF, so the CDDF table is stored and not
+  applied.
+- **Where the numbers come from.** The tables are built and evaluated by the functions that have been in
+  `hcd_analysis/emulator/multifidelity.py` since June 2026 (`build_dndx_res_corr`, `build_cddf_res_corr`,
+  `dndx_res_factor`, `apply_dndx_res_corr`, `cddf_res_factor`); the record is their container.
+  `scripts/build_incidence_mf.py` builds one from two digest-pinned inputs: the LF training cache, and an HR
+  incidence product derived from the rebuilt HR absorber catalogues. The HR cache is not read: its catalogue-derived
+  columns stay refused, as stated above.
+- **Layout.** One directory with one file, `incidence_mf_record.json`: strict UTF-8 JSON, a closed key set, finite
+  numbers, the tables included as lists. The record is anchored by the sha256 of that file.
+
+```json
+{"format": "hcd_priya.incidence_mf_record/1", "version": "<text>", "model_form": "<the code's statement>",
+ "class_order": ["LLS", "subDLA", "DLA"],
+ "tables": {"z": [Nz], "n_sims": [Nz], "dndx_ratio": [[3] x Nz],
+            "log_nhi_centres": [Nbin], "cddf_ratio": [[Nbin] x Nz]},
+ "lf_cache": {"file": "<name>", "sha256": "<64 hex>", "source": "<the code's statement>"},
+ "hr_incidence": {"file": "<name>", "sha256": "<64 hex>", "source": "<the code's statement>",
+                  "groups_not_in_product": ["<an HR snapshot group the product does not hold>", ...]},
+ "composition": {"id": "<text>", "excluded_sims": [...], "ruling_ids": [...]},
+ "train_sims": [...], "n_pairs": N, "fit_code": {"commit": "<40 hex>", "dirty": false}}
+```
+
+- `n_sims` is the number of matched pairs behind each redshift's mean, and `n_pairs` their sum. A redshift with one
+  pair is a ratio of one simulation, not a mean.
+- `composition` says which HR simulations were left out and under which ruling; `train_sims` are those used. The
+  builder has no default composition.
+- The loader (`incidence_mf.load_record`) compares the file's sha256 with the published one before parsing, refuses
+  any other file in the directory, an unknown key, a statement that differs from the code's, a table that is not
+  finite, positive and consistent in shape, and a record fitted from a tree with uncommitted changes.
+- The predictor applies a record only when its `lf_cache.sha256` equals the training cache of the backbone, as
+  re-derived from the member metas, and only together with the P1D MF record.
+- **Not validated here:** the w_c map was fitted on LF counts. That it still holds when dN/dX is scaled to the HR
+  incidence has not been tested.
+
+## The release manifest (`hcd_priya.release/1` and `hcd_priya.release/2`)
 
 An LF+MF release is published under ONE digest, the sha256 of a small `release.json` in the release directory
 (`hcd_analysis/emulator/release_manifest.py`):
@@ -406,6 +452,32 @@ manifest, a manifest naming a mismatched pair is refused. The returned bundle's 
 format, the release version and the release sha256. `release_manifest.write_release_manifest` writes the file once,
 into a directory that already holds both parts. The two-digest call (`load_bundle` with `mf_dir` and
 `mf_record_sha256`) keeps working.
+
+**Format 2** is format 1 plus at least one optional part from a closed list. Today the list has one entry, the
+incidence MF record:
+
+```json
+{"format": "hcd_priya.release/2", "release_version": "<text>",
+ "backbone": {"dir": "<name>", "manifest_sha256": "<64 hex>"},
+ "mf": {"dir": "<name>", "record_sha256": "<64 hex>"},
+ "incidence": {"dir": "<name>", "record_sha256": "<64 hex>"}}
+```
+
+`load_release` loads the incidence record against the digest the manifest gives and binds it to the backbone's
+training cache; an LF+MF prediction of such a release has its `dndx` multiplied by `R_c(z)` (flag
+`incidence_mf_applied`, `provenance["incidence_mf"]`). The two formats behave differently on purpose, and the
+difference is visible:
+
+| | format 1 | format 2 with an incidence record |
+|---|---|---|
+| `P_class` under LF+MF | LF times exp(g) | the same |
+| `dndx` under LF+MF | the LF model's | the LF model's times `R_c(z)` |
+| `w_c` under LF+MF | the map of the LF `dndx` | the map of the corrected `dndx` |
+| anything under `fidelity="LF"` | the LF model's | the same |
+| flag `incidence_mf_applied` | absent | present |
+
+A release without an optional part is written in format 1, so a release has one representation. A manifest of
+format 1 that names an optional part, a manifest of format 2 that names none, and a part outside the list are refused.
 
 ## What the loader guarantees
 
