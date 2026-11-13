@@ -678,3 +678,28 @@ def test_a_mean_flux_outside_the_trained_range_warns_and_is_still_predicted(emu)
     with pytest.warns(hp.MeanFluxRangeWarning, match="and at 1 more of the redshifts") as caught:
         s = emu.predict_many(PARAMS, [2.6, 3.0, 3.4], tau_eff=[2.0, float(kim_tau0(3.0)), 3.0])
     assert len(caught) == 1 and s.flags["mean_flux_off_ladder"] is True  # one warning per call
+    assert (
+        caught[0].filename == __file__
+    )  # for a stack too, the warning points at the caller's line
+
+
+def test_a_model_without_a_recorded_mean_flux_range_does_not_warn(info):
+    """A bundle whose training cache records no range has the flag None: nothing is known, nothing is warned."""
+    import warnings
+
+    emu = hp.load_bundle(info.bundle_dir, info.manifest_sha256)
+    emu._alpha_range = None
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        p = emu.predict(PARAMS, 3.0, tau_eff=5.0 * float(kim_tau0(3.0)))
+    assert p.flags["mean_flux_off_ladder"] is None
+
+
+def test_a_research_model_warns_in_the_same_way(research):
+    rp = hp.load_research_bundle(
+        research.bundle_dir, research.manifest_sha256, purpose="synthetic fold (predictor tests)"
+    )
+    with pytest.warns(hp.MeanFluxRangeWarning) as caught:
+        p = rp.predict(PARAMS, 3.0, tau_eff=2.0 * float(kim_tau0(3.0)))
+    assert len(caught) == 1 and p.flags["mean_flux_off_ladder"] is True
+    assert caught[0].filename == __file__

@@ -5,11 +5,13 @@
 It takes the first Python block of the README's Quickstart and the output block printed under it, and checks:
 
 - the example writes the nine parameters out: it holds one ``params = {...}`` of plain numbers whose names are the
-  model's nine parameter names, and it does not call ``example_params`` (a first example never hides its values);
+  model's nine parameter names, it does not call ``example_params``, and the prediction is made at exactly those
+  written values (a first example never hides or computes its values);
 - it loads with ``hp.load_published`` and predicts;
-- it runs, and prints the lines the README shows. Each printed line is ``label: value``. The labels must be the
-  README's, in order. The values are compared only where they do not depend on the model: a model with another
-  number of wavenumbers, or a synthetic test model, prints other shapes and flags;
+- it runs, and prints the lines the README shows. Each printed line is ``label: value``, and the README shows at
+  least one. With a published model every line must equal the README's. With a synthetic test build (untrained
+  networks, another number of wavenumbers) the labels must be the README's, in order, and the values are compared
+  only where they do not depend on the model;
 - ``pred.P_class`` is an array with four rows (clean, LLS, subDLA, DLA) and at least one column, of finite numbers.
 
 Run it with ``-I`` in an environment that has only the installed wheels: the script fails if ``hcd_analysis`` was
@@ -26,7 +28,7 @@ import os
 import sys
 
 # the labels whose value is the same for every model
-SAME_FOR_EVERY_MODEL = ("classes, in the order of P_class",)
+SAME_FOR_EVERY_MODEL = ("model", "classes, in the order of P_class")
 
 
 def blocks(text: str) -> tuple[str, str]:
@@ -63,43 +65,59 @@ def main(argv=None) -> int:
     (readme,) = argv if argv is not None else sys.argv[1:]
     code, shown = blocks(open(readme, encoding="utf-8").read())
     print(code.rstrip())
+    import numpy as np
+    import hcd_analysis
+    import hcd_analysis.predictor as hp
+
     params = written_out_params(code)
     if "example_params" in code or params is None:
         print(
             "FAILED: the first example must write the nine parameters out as params = {name: number, ...}"
         )
         return 1
+    if tuple(params) != tuple(hp.PARAM_NAMES):
+        print(
+            f"FAILED: the example's parameter names {tuple(params)} are not the model's {tuple(hp.PARAM_NAMES)}"
+        )
+        return 1
     if "hp.load_published(" not in code or ".predict(" not in code:
         print("FAILED: the first example must load with hp.load_published and predict")
+        return 1
+    want = shown.splitlines()
+    if not want or not all(": " in x for x in want):
+        print(
+            "FAILED: the README must show, under the example, the lines it prints, each as 'label: value'"
+        )
         return 1
     out = io.StringIO()
     scope: dict = {}
     with contextlib.redirect_stdout(out):
         exec(compile(code, readme, "exec"), scope)
     printed = out.getvalue().splitlines()
-    import numpy as np
-    import hcd_analysis
-    import hcd_analysis.predictor as hp
-
     print("-> printed:")
     for line in printed:
         print("   " + line)
-    if tuple(params) != tuple(hp.PARAM_NAMES):
-        print(
-            f"FAILED: the example's parameter names {tuple(params)} are not the model's {tuple(hp.PARAM_NAMES)}"
-        )
+    pred, emu = scope.get("pred"), scope.get("emu")
+    written = {k: float(v) for k, v in params.items()}
+    if scope.get("params") != params or getattr(pred, "params", None) != written:
+        print("FAILED: the prediction was not made at the parameter values the example writes out")
         return 1
-    want = shown.splitlines()
+    synthetic = bool(emu.provenance.get("release", {}).get("synthetic_build"))
     label = lambda line: line.partition(": ")[0]
-    if [label(x) for x in printed] != [label(x) for x in want] or not all(": " in x for x in want):
-        print("FAILED: the example does not print the lines that the README shows under it:")
+    if [label(x) for x in printed] != [label(x) for x in want]:
+        print("FAILED: the example does not print the labels that the README shows under it:")
         print(shown.rstrip())
         return 1
     for got, exp in zip(printed, want):
-        if label(exp) in SAME_FOR_EVERY_MODEL and got != exp:
-            print(f"FAILED: the README shows {exp!r}, the example printed {got!r}")
+        if got != exp and (not synthetic or label(exp) in SAME_FOR_EVERY_MODEL):
+            print(f"FAILED: the README shows the line {exp!r}, the example printed {got!r}")
             return 1
-    value = scope["pred"].P_class
+    print(
+        "-> a synthetic test build: labels compared, values only where every model agrees"
+        if synthetic
+        else "-> a published model: every printed line equals the README's"
+    )
+    value = pred.P_class
     shape = getattr(value, "shape", None)
     ok = shape is not None and len(shape) == 2 and shape[0] == 4 and shape[1] > 0
     ok = ok and bool(np.all(np.isfinite(value)))

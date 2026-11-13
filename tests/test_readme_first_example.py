@@ -46,67 +46,111 @@ def test_every_print_has_a_label_and_the_readme_shows_its_output():
     assert "classes, in the order of P_class: " + repr(hp.CLASSES) in want
 
 
-def test_the_example_runs_as_written_on_an_installed_model(tmp_path, monkeypatch, capsys):
+SWITCH = "HCD_PRIYA_ALLOW_SYNTHETIC"
+
+
+def _readme_copy(tmp_path, change=None):
+    """A copy of the README outside the package's tree (so the runner's location check passes), optionally with
+    ``change = (old, new)`` applied once."""
+    text = open(README, encoding="utf-8").read()
+    if change is not None:
+        old, new = change
+        assert text.count(old) >= 1, old
+        text = text.replace(old, new, 1)
+    copy = tmp_path / "elsewhere" / "README.md"
+    copy.parent.mkdir()
+    copy.write_text(text, encoding="utf-8")
+    return str(copy)
+
+
+@pytest.fixture()
+def stand_in(tmp_path, monkeypatch):
+    """A stand-in model package with a synthetic build, as CI installs it, and the test switch on."""
+    rel = make_release(tmp_path / "release")
+    model_package(tmp_path, rel)  # version 0+synthetic, synthetic
+    use_model_package(monkeypatch, tmp_path)
+    monkeypatch.setattr(PM, "MODELS", [])
+    monkeypatch.setenv(SWITCH, "1")
+    return rel
+
+
+@pytest.mark.filterwarnings("ignore:.*synthetic test build")
+def test_the_example_runs_as_written_on_the_stand_in_model(stand_in, tmp_path, capsys):
+    assert R.main([_readme_copy(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert out.rstrip().endswith("PASSED") and "model: LF+MF" in out
+    assert "a synthetic test build: labels compared" in out
+
+
+def test_with_a_published_model_every_line_must_equal_the_readme(tmp_path, monkeypatch, capsys):
+    """The stand-in release listed as a published model: it has another number of wavenumbers than the README shows,
+    so the exact comparison that a published model gets fails, and says which line."""
     rel = make_release(tmp_path / "release")
     model_package(tmp_path, rel, version="7.0.0", synthetic=False)
     use_model_package(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        PM,
-        "MODELS",
-        [
-            {
-                "name": "lfmf",
-                "version": "7.0.0",
-                "format": "hcd_priya.release/1",
-                "anchor_sha256": rel["sha"],
-            }
-        ],
-    )
-    copy = tmp_path / "elsewhere" / "README.md"  # not beside the package: the location check passes
-    copy.parent.mkdir()
-    shutil.copyfile(README, copy)
-    assert R.main([str(copy)]) == 0
+    pin = {"name": "lfmf", "version": "7.0.0", "format": "hcd_priya.release/1"}
+    monkeypatch.setattr(PM, "MODELS", [dict(pin, anchor_sha256=rel["sha"])])
+    assert R.main([_readme_copy(tmp_path)]) == 1
     out = capsys.readouterr().out
-    assert out.rstrip().endswith("PASSED") and "model: LF+MF" in out
+    assert "FAILED: the README shows the line 'shape of pred.P_class" in out and "(4, 172)" in out
 
 
+@pytest.mark.filterwarnings("ignore:.*synthetic test build")
 @pytest.mark.parametrize(
     "old, new, why",
     [
-        ('"ns": 0.925,', '"n_s": 0.925,', "are not the model's"),
+        # the names are not the model's (a wrong name, and a wrong order)
+        ('"ns": 0.925,', '"n_s": 0.925,', "FAILED: the example's parameter names"),
+        (
+            '"hub": 0.70,           # dimensionless Hubble parameter h\n    "omegamh2": 0.143,     # Omega_m h^2\n',
+            '"omegamh2": 0.143,\n    "hub": 0.70,\n',
+            "FAILED: the example's parameter names",
+        ),
+        # values that are hidden or computed
         ("params = {", "params = dict(hp.example_params()) or {", "write the nine parameters out"),
-        ('print("model:"', 'print("the model:"', "does not print the lines that the README shows"),
+        (
+            "params = {",
+            "params = hp.example_params(verbose=False); unused = {",
+            "write the nine parameters out",
+        ),
+        (
+            "\npred = emu.predict(params,",
+            "\nparams = dict(zip(hp.PARAM_NAMES, hp.PARAM_LIMITS.mean(axis=1)))\npred = emu.predict(params,",
+            "FAILED: the prediction was not made at the parameter values the example writes out",
+        ),
+        (
+            "\npred = emu.predict(params,",
+            "\nother = dict(params, ns=0.95)\npred = emu.predict(other,",
+            "FAILED: the prediction was not made at the parameter values the example writes out",
+        ),
+        # what is printed and what is shown
+        ('print("model:"', 'print("the model:"', "FAILED: the example does not print the labels"),
+        (
+            'print("classes, in the order of P_class:", hp.CLASSES)\n',
+            'print("classes, in the order of P_class:", hp.CLASSES)\nprint("extra:", 1)\n',
+            "FAILED: the example does not print the labels",
+        ),
+        ("```text\nmodel: LF+MF\n", "```text\n", "FAILED: the example does not print the labels"),
         (
             "classes, in the order of P_class: ('clean', 'LLS', 'subDLA', 'DLA')\n",
             "classes, in the order of P_class: ('clean', 'DLA')\n",
-            "the README shows",
+            "FAILED: the README shows the line",
         ),
+        ("```text\nmodel: LF+MF\n", "```text\nthe model is LF+MF\n", "each as 'label: value'"),
     ],
 )
-def test_a_changed_example_fails(tmp_path, monkeypatch, capsys, old, new, why):
-    rel = make_release(tmp_path / "release")
-    model_package(tmp_path, rel, version="7.0.0", synthetic=False)
-    use_model_package(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        PM,
-        "MODELS",
-        [
-            {
-                "name": "lfmf",
-                "version": "7.0.0",
-                "format": "hcd_priya.release/1",
-                "anchor_sha256": rel["sha"],
-            }
-        ],
-    )
+def test_a_changed_example_fails(stand_in, tmp_path, capsys, old, new, why):
+    assert R.main([_readme_copy(tmp_path, (old, new))]) == 1
+    assert why in capsys.readouterr().out
+
+
+def test_an_example_without_an_output_block_fails(stand_in, tmp_path):
     text = open(README, encoding="utf-8").read()
-    assert text.count(old) >= 1
+    start = text.index("## Quickstart\n")
+    a = text.index("```text\n", start)
+    b = text.index("```\n", a + 8) + 4
     copy = tmp_path / "elsewhere" / "README.md"
     copy.parent.mkdir()
-    copy.write_text(text.replace(old, new, 1), encoding="utf-8")
-    try:
-        code = R.main([str(copy)])
-    except Exception as exc:  # a broken example may also stop with its own error
-        code, why = 1, type(exc).__name__
-        print(why)
-    assert code == 1 and why in capsys.readouterr().out
+    copy.write_text(text[:a] + text[b:].replace("```text", "```output"), encoding="utf-8")
+    with pytest.raises(ValueError):  # no text block follows the example
+        R.main([str(copy)])

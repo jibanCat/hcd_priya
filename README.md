@@ -22,30 +22,32 @@ It is built on the PRIYA suite of cosmological hydrodynamic simulations.
 `hcd-priya` installs the Python package `hcd_analysis` and the command `hcd`. It requires `hcd-priya-models`, a
 data-only package that holds the trained models. It needs Python 3.11 or later on Linux (x86-64).
 
-**What works today: an install from a clone.** Neither package is on a package index yet. Install from a clone of
-this repository, and give the wheel of the model package as a file (given as a file, it is never looked up on an
-index):
+**What works today: an install from a clone, with a stand-in model.** Neither package is on a package index yet, and
+no trained model is published yet. What someone outside the project can install today is the code together with a
+stand-in model package: a synthetic bundle of untrained networks. It shows that the installation and the interface
+work; its numbers are not science. These are the commands that continuous integration runs:
 
 ```bash
 git clone https://github.com/jibanCat/hcd_priya && cd hcd_priya
 python3.11 -m venv .venv && source .venv/bin/activate
-pip install . <path to the hcd_priya_models wheel>
+pip install build && python -m build --wheel --outdir dist .
+# builds the stand-in model wheel into dist/models and installs both wheels, with pinned dependencies
+tools/ci/install_with_synthetic_models.sh python "$(ls dist/*.whl)[test]" dist/models \
+    -c tools/ci/constraints-devenv.txt
+export HCD_PRIYA_ALLOW_SYNTHETIC=1      # the stand-in loads only with this switch, and with a warning
 python -c "import hcd_analysis; print(hcd_analysis.__version__)"
 hcd --help
 ```
 
-- **Which model wheel.** No trained model is published yet. The only model wheel that someone outside the project
-  can build today is a stand-in with a synthetic bundle: untrained networks, which show that the installation
-  works and whose numbers are not science. The model wheel is built in this repository
-  ([`model_package/`](model_package/README.md)); `tools/ci/install_with_synthetic_models.sh` builds the stand-in and
-  installs it ([`CONTRIBUTING.md`](CONTRIBUTING.md) has the commands). With the stand-in, the first example of the
-  README runs only with `HCD_PRIYA_ALLOW_SYNTHETIC=1` set, and with a warning.
+- **The switch.** `load_published` refuses the stand-in unless `HCD_PRIYA_ALLOW_SYNTHETIC=1` is set, so that untrained
+  networks are never taken for a model. With it, the first example of the README runs and prints the shapes and
+  flags of the stand-in, which differ from those of the trained model.
+- **With a model wheel in hand.** The model wheel is built in this repository
+  ([`model_package/`](model_package/README.md)) from an accepted release. Whoever holds one installs it as a file,
+  which is never looked up on an index: `pip install . path/to/hcd_priya_models-VERSION-py3-none-any.whl`.
 - **The supported install** pins every dependency to the versions the test suite is developed and run with
-  ([`tools/ci/constraints-devenv.txt`](tools/ci/constraints-devenv.txt)), on CPython 3.11:
-
-  ```bash
-  pip install -c tools/ci/constraints-devenv.txt ".[test]" <path to the hcd_priya_models wheel>
-  ```
+  ([`tools/ci/constraints-devenv.txt`](tools/ci/constraints-devenv.txt)), on CPython 3.11, as the commands above
+  do. [`CONTRIBUTING.md`](CONTRIBUTING.md) adds the editable install for development.
 
 **What will work after publication (not available yet).** Once both packages are published, the whole install will
 be one line. It does not work today:
@@ -63,8 +65,8 @@ written, with no switch and no warning.
   Windows are not tested. [`docs/compatibility.md`](docs/compatibility.md) lists what is tested and what is not.
 - **Extras:** `test` (pytest), `tutorials` (jupyter, nbformat) and `dev`. `pyproject.toml` declares the
   dependencies; `requirements.txt` only points to the install above.
-- **Working in a clone.** To run the scripts or the pipeline from the clone, install it editable (add `-e` before
-  `".[test]"` in the supported install). The pipeline records the clone's commit, and only
+- **Working in a clone.** To run the scripts or the pipeline from the clone, make the install editable after the
+  commands above: `pip install --no-deps -e .`. The pipeline records the clone's commit, and only
   an editable install makes that commit the code that runs (with your changes committed); a plain install runs the
   copy made when it was installed. The scripts under `scripts/` are not part of the installed package; run them from
   the repository root.
@@ -114,7 +116,8 @@ print("shape of pred.k, the wavenumbers in s/km:", pred.k.shape)
 print("flags that are set (read them before you use the numbers):", sorted(n for n, v in pred.flags.items() if v is True))
 ```
 
-With the LF+MF model this prints (the model has 172 wavenumbers; no spectrum value is shown here):
+With the trained LF+MF model this prints (the model has 172 wavenumbers; no spectrum value is shown here). The
+stand-in model of today's install prints other shapes and flags:
 
 ```text
 model: LF+MF

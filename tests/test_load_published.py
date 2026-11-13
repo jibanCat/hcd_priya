@@ -60,7 +60,7 @@ def test_a_pinned_model_loads_and_is_the_release_it_was_built_from(release, tmp_
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # a published model loads without any warning
         emu = hp.load_published("lfmf")
-        assert type(hp.load_published()) is hp.Bundle  # "lfmf" is the default
+        assert type(hp.load_published()) is hp.Bundle  # no name: the LF+MF model
     ref = hp.load_release(str(release["root"]), release["sha"])
     p = emu.predict(PARAMS, 3.0, tau0_amp=1.0, dtau0=0.0)
     q = ref.predict(PARAMS, 3.0, tau0_amp=1.0, dtau0=0.0)
@@ -354,12 +354,40 @@ def test_the_model_loads_without_a_name_and_under_any_spelling_of_it(
             hp.load_published(name)
 
 
-def test_two_names_that_read_alike_in_one_package_are_refused(release, tmp_path, monkeypatch):
+def test_two_names_that_read_alike_in_one_package_are_refused_as_a_malformed_package(
+    release, tmp_path, monkeypatch
+):
     pkg = model_package(tmp_path, release, version="7.0.0", synthetic=False)
     doc = json.loads((pkg / "data" / "models.json").read_text())
     doc["models"].append(dict(doc["models"][0], name="LF+MF"))
     (pkg / "data" / "models.json").write_text(json.dumps(doc))
     use_model_package(monkeypatch, tmp_path)
     monkeypatch.setattr(PM, "MODELS", [_pin(release, "7.0.0")])
-    with pytest.raises(hp.NoPublishedModelError, match="holds no model 'lfmf'"):
-        hp.load_published("lfmf")
+    for name in ("lfmf", "LF+MF", "fold-0"):  # whatever is asked for: the package's list is refused
+        with pytest.raises(hp.ModelPackageError, match="its list of models is malformed"):
+            hp.load_published(name)
+
+
+def test_the_codes_entry_may_spell_the_name_like_a_user(release, tmp_path, monkeypatch):
+    """The entry in the code's list is compared without case and punctuation too: an entry written "LF+MF" accepts
+    the package's "lfmf". The digest still comes from that entry."""
+    model_package(tmp_path, release, version="7.0.0", synthetic=False)
+    use_model_package(monkeypatch, tmp_path)
+    monkeypatch.setattr(PM, "MODELS", [_pin(release, "7.0.0", name="LF+MF")])
+    assert hp.load_published().provenance["release"]["release_sha256"] == release["sha"]
+    assert hp.published_models() == [("LF+MF", "7.0.0")]
+    monkeypatch.setattr(
+        PM, "MODELS", [_pin(release, "7.0.0", name="LF+MF", anchor_sha256="0" * 64)]
+    )
+    with pytest.raises(ReleaseManifestError):
+        hp.load_published()
+    monkeypatch.setattr(PM, "MODELS", [_pin(release, "6.0.0", name="LF+MF")])
+    with pytest.raises(hp.ModelPackageError, match="accepts for 'lfmf' the model versions: 6.0.0"):
+        hp.load_published()
+    monkeypatch.setattr(
+        PM, "MODELS", [_pin(release, "7.0.0"), _pin(release, "7.0.0", name="LF+MF")]
+    )
+    with pytest.raises(
+        hp.ModelPackageError, match="accepts for 'lfmf'"
+    ):  # two entries for one version
+        hp.load_published()

@@ -3,8 +3,12 @@ amplitudes and no prior.
 
     import hcd_analysis.predictor as hp
     emu = hp.load_bundle(bundle_dir, "<the published manifest sha256>")     # None is refused
+    # the nine PRIYA parameters, written out (here the midpoint of each training range: not a fiducial cosmology)
+    params = {"ns": 0.925, "Ap": 1.9e-9, "herei": 4.0, "heref": 2.7, "alphaq": 2.15,
+              "hub": 0.70, "omegamh2": 0.143, "hireionz": 7.25, "bhfeedback": 0.05}
     pred = emu.predict(params, z=3.0, tau_eff=0.36)                          # or tau0_amp=..., dtau0=...
-    pred.k, pred.P_class, pred.template, pred.w_c                            # (K,), (4, K), (3, K), (3,)
+    print("shapes of k, P_class, template, w_c:", pred.k.shape, pred.P_class.shape, pred.template.shape, pred.w_c.shape)
+    # prints, for a model with K wavenumbers: shapes of k, P_class, template, w_c: (K,) (4, K) (3, K) (3,)
     P_tot = hp.add_hcd(pred, pred.w_c)                                       # the map's estimate of its HCD content
     stack = emu.predict_many(params, z=[2.6, 2.8, 3.0], tau0_amp=1.0, dtau0=0.0)
     P_tot = hp.add_hcd(stack, A)                                             # A: (3,) for every z, or (n_z, 3)
@@ -164,6 +168,13 @@ class MeanFluxRangeWarning(UserWarning):
     multiples are recorded with the model. Outside that range the prediction is an extrapolation
     in the mean flux. It is still returned, with the flag ``mean_flux_off_ladder`` set, and this
     warning says so once per call. The message gives the value, the redshift and the range.
+
+    The multi-fidelity correction has a mean-flux range of its own, that of its tables. An LF+MF
+    prediction whose ``tau_eff`` lies outside it has the correction held at the nearest table
+    value (flag ``mf_tau0_clamped``), and the same warning says so.
+
+    The message holds the value, so a loop over many such values warns once per call. To silence
+    it: ``warnings.filterwarnings("ignore", category=hp.MeanFluxRangeWarning)``.
     """
 
 
@@ -277,8 +288,11 @@ def snapshot_z(z: float) -> float:
     Examples
     --------
     >>> import hcd_analysis.predictor as hp
-    >>> hp.snapshot_z(3.0000000001)
-    3.0
+    >>> print("the snapshot redshift nearest to 3.0000000001:", hp.snapshot_z(3.0000000001))
+    the snapshot redshift nearest to 3.0000000001: 3.0
+
+    A redshift between two snapshots is refused:
+
     >>> hp.snapshot_z(3.1)  # doctest: +ELLIPSIS
     Traceback (most recent call last):
         ...
@@ -303,7 +317,11 @@ def tau_eff_priya(
 
         tau_eff(z) = tau0_amp * ((1 + z) / (1 + z_pivot))**dtau0 * tau_Kim(z)
 
-    where ``tau_Kim`` is the mean-flux fit of Kim et al. (2007), ``mean_flux_model.kim_tau0``.
+    where ``tau_Kim`` is the mean-flux fit of Kim et al. (2007), ``mean_flux_model.kim_tau0``:
+    ``tau_Kim(z) = 0.0023 * (1 + z)**3.65`` (Kim, T.-S., Bolton, J. S., Viel, M., Haehnelt, M. G.,
+    Carswell, R. F. 2007, MNRAS, 382, 1657, doi:10.1111/j.1365-2966.2007.12406.x,
+    arXiv:0711.1862, which gives the fit for 1.7 < z < 4 with uncertainties 0.0007 on the
+    amplitude and 0.21 on the exponent).
 
     **Using another mean-flux model.** ``predict`` and ``predict_many`` take ``tau_eff`` directly,
     so any model of the mean flux can replace PRIYA's: compute its effective optical depth at the
@@ -320,7 +338,7 @@ def tau_eff_priya(
     - **Source.** Becker, G. D., Hewett, P. C., Worseck, G., Prochaska, J. X. 2013, "A refined
       measurement of the mean transmitted flux in the Ly-alpha forest over 2 < z < 5 using
       composite quasar spectra", MNRAS, doi:10.1093/mnras/stt031, arXiv:1208.2584. The curve is
-      their equation 5 (the numbering of the arXiv version),
+      their equation 5 (the numbering of the arXiv version, v2),
       ``tau_eff(z) = tau0 * ((1 + z) / (1 + z0))**beta + C``, with ``z0 = 3.5`` and their
       best-fitting ``[tau0, beta, C] = [0.751, 2.90, -0.132]`` (given below that equation and in
       their Table 3).
@@ -332,8 +350,11 @@ def tau_eff_priya(
       covariance of the three parameters (its Table 3: variances 0.00049, 0.01336 and 0.00049
       for ``tau0``, ``beta`` and ``C``, with covariances -0.00241, -0.00043 and 0.00224 for the
       pairs ``tau0``-``beta``, ``tau0``-``C`` and ``beta``-``C``), and it states that its binned
-      measurements depart from the curve by two per cent in flux on average. Use those when the
-      uncertainty matters.
+      measurements depart from the curve by two per cent in flux on average. It also tabulates
+      the binned mean flux with 1 sigma errors (its Table 2; the full covariance is in its
+      supplementary material) and gives about 1 per cent for the uncertainty of the overall
+      scaling, which it says dominates the errors at z <= 3.75. Use those when the uncertainty
+      matters.
 
     Two cautions. ``tau_eff`` here is that of the PRIYA-filtered simulated forest, so a published
     fit that was corrected for metal lines or strong absorbers, as this one was, follows another
@@ -368,8 +389,9 @@ def tau_eff_priya(
     Doubling ``tau0_amp`` doubles ``tau_eff``:
 
     >>> import hcd_analysis.predictor as hp
-    >>> round(hp.tau_eff_priya(3.0, 2.0, 0.0) / hp.tau_eff_priya(3.0, 1.0, 0.0), 12)
-    2.0
+    >>> ratio = hp.tau_eff_priya(3.0, 2.0, 0.0) / hp.tau_eff_priya(3.0, 1.0, 0.0)
+    >>> print("tau_eff at tau0_amp = 2 over tau_eff at tau0_amp = 1:", round(ratio, 12))
+    tau_eff at tau0_amp = 2 over tau_eff at tau0_amp = 1: 2.0
 
     Another mean-flux model, passed as ``tau_eff`` (``emu`` is a loaded model and ``params`` its
     nine parameters, as in ``load_release``):
@@ -378,8 +400,8 @@ def tau_eff_priya(
     >>> pred = emu.predict(params, z=3.0, tau_eff=tau_becker13)
     >>> print("the prediction used the value given:", pred.tau_eff == tau_becker13)
     the prediction used the value given: True
-    >>> print("inside the trained mean-flux range:", not pred.flags["mean_flux_off_ladder"])
-    inside the trained mean-flux range: True
+    >>> print("flag mean_flux_off_ladder:", pred.flags["mean_flux_off_ladder"])
+    flag mean_flux_off_ladder: False
 
     A value far outside the trained range is predicted too, with a warning and the flag:
 
@@ -387,8 +409,9 @@ def tau_eff_priya(
     >>> with warnings.catch_warnings(record=True) as caught:
     ...     warnings.simplefilter("always")
     ...     far = emu.predict(params, z=3.0, tau_eff=5.0 * tau_becker13)
-    >>> print("warning:", caught[0].category.__name__, "| flag:", far.flags["mean_flux_off_ladder"])
-    warning: MeanFluxRangeWarning | flag: True
+    >>> n = sum(issubclass(w.category, hp.MeanFluxRangeWarning) for w in caught)
+    >>> print("mean-flux warnings:", n, "| flag mean_flux_off_ladder:", far.flags["mean_flux_off_ladder"])
+    mean-flux warnings: 1 | flag mean_flux_off_ladder: True
     """
     zz = _scalar("z", z)
     return float(
@@ -448,8 +471,12 @@ def check_amplitudes(A: ArrayLike, zs: Sequence[float] | None = None) -> np.ndar
     Synthetic amplitudes:
 
     >>> import hcd_analysis.predictor as hp
-    >>> hp.check_amplitudes([0.01, 0.002, 0.001]).shape
-    (3,)
+    >>> A = hp.check_amplitudes([0.01, 0.002, 0.001])      # LLS, subDLA, DLA
+    >>> print("accepted, as an array of shape", A.shape)
+    accepted, as an array of shape (3,)
+
+    Fractions that leave less than nothing for the clean class are refused:
+
     >>> hp.check_amplitudes([0.6, 0.3, 0.2])  # doctest: +ELLIPSIS
     Traceback (most recent call last):
         ...
@@ -1193,11 +1220,14 @@ class _PredictorBase:
         w4 = np.stack([self._rb.wc_map.w_c(dmean[i], z) for i, z in enumerate(zs)])
         template = Pm[:, 1:, :] / Pm[:, :1, :] - 1.0
         flags, labels, prov = self._flags(pv, th, zs, taus, kout), self.labels(), self.provenance
-        if flags["mean_flux_off_ladder"]:  # served, flagged, and said aloud
-            self._warn_off_ladder(zs, taus)
         if self._mf is not None:
             flags.update(self._mf_flags(zs, taus, use_mf))
             labels.update(self._mf_labels(labels, use_mf))
+        # a mean flux outside what the model covers is served, flagged, and said aloud: once per call
+        if flags["mean_flux_off_ladder"]:
+            self._warn_off_ladder(zs, taus)
+        elif use_mf and flags["mf_tau0_clamped"]:
+            self._warn_mf_tau0_clamped(zs, taus)
         sel = (lambda a: a[0]) if single else (lambda a: a)
         return Prediction(
             z=zs[0] if single else _frozen(zs),
@@ -1232,6 +1262,28 @@ class _PredictorBase:
                 f"which is {lo:g} to {hi:g} times the fit of Kim et al. (2007). The prediction is "
                 "an extrapolation in the mean flux; it is returned with the flag "
                 "mean_flux_off_ladder set."
+            ),
+            stacklevel=4,
+        )
+
+    def _warn_mf_tau0_clamped(self, zs, taus):
+        """One ``MeanFluxRangeWarning`` for an LF+MF call whose mean flux is inside the trained ladder but outside
+        the tables of the MF correction: the condition of the flag ``mf_tau0_clamped`` (``_mf_flags``).
+        """
+        z_tab, tau_by_z = self._mf_dom
+        bad = []
+        for z, t in zip(zs, taus):
+            ladder = [np.interp(z, z_tab, tau_by_z[:, r]) for r in range(tau_by_z.shape[1])]
+            if t < min(ladder) or t > max(ladder):
+                bad.append((z, t, min(ladder), max(ladder)))
+        z, t, lo, hi = bad[0]
+        more = f" (and at {len(bad) - 1} more of the redshifts asked for)" if len(bad) > 1 else ""
+        warnings.warn(
+            MeanFluxRangeWarning(
+                f"tau_eff = {t:.4g} at z = {z:g}{more} is outside the mean-flux range of the "
+                f"multi-fidelity correction's tables, [{lo:.4g}, {hi:.4g}] at that redshift. The "
+                "correction is held at the nearest table value; the prediction is returned with "
+                "the flag mf_tau0_clamped set."
             ),
             stacklevel=4,
         )
@@ -1524,12 +1576,13 @@ def load_bundle(
     Examples
     --------
     ``bundle_dir`` is a bundle directory and ``manifest_sha256`` the published sha256 of its
-    ``manifest.json``; ``params`` are the nine parameters, as in ``load_release``.
+    ``manifest.json``; ``params`` are the nine parameters, written out as in ``load_release``.
 
     >>> import hcd_analysis.predictor as hp
     >>> lf_model = hp.load_bundle(bundle_dir, manifest_sha256)
-    >>> lf_model.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0).labels["product"]
-    'LF'
+    >>> pred = lf_model.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+    >>> print("model:", pred.labels["product"])
+    model: LF
     """
     if expected_manifest_sha256 is None:
         raise _H.SafeFormatError(
@@ -1658,17 +1711,18 @@ def load_research_bundle(
     Examples
     --------
     ``research_dir`` is a research bundle and ``research_sha256`` the sha256 of its
-    ``manifest.json``; ``params`` are the nine parameters, as in ``load_release``.
+    ``manifest.json``; ``params`` are the nine parameters, written out as in ``load_release``.
 
     >>> import hcd_analysis.predictor as hp
     >>> rp = hp.load_research_bundle(research_dir, research_sha256, purpose="docstring example")
-    >>> type(rp).__name__, sorted(rp.split)[:4]
-    ('ResearchPredictor', ['cv_set_id', 'fold', 'folds_digest', 'held_out_sims'])
+    >>> print("loaded:", type(rp).__name__, "| first entries of its split:", sorted(rp.split)[:4])
+    loaded: ResearchPredictor | first entries of its split: ['cv_set_id', 'fold', 'folds_digest', 'held_out_sims']
     >>> pred = rp.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
-    >>> pred.flags["research_model"]
-    True
-    >>> pred.flags["research_split"]["held_out_sims"] == rp.split["held_out_sims"]
-    True
+    >>> print("every prediction is flagged as a research model:", pred.flags["research_model"])
+    every prediction is flagged as a research model: True
+    >>> same = pred.flags["research_split"]["held_out_sims"] == rp.split["held_out_sims"]
+    >>> print("and names the simulations the model was trained without:", same)
+    and names the simulations the model was trained without: True
     """
     rb = _H.load_research(
         bundle_dir, expected_manifest_sha256=expected_manifest_sha256, purpose=purpose
@@ -1730,11 +1784,11 @@ def example_params(*, verbose: bool = True) -> dict[str, float]:
       omegamh2 = 0.143
       hireionz = 7.25
       bhfeedback = 0.05
-    >>> list(params) == list(hp.PARAM_NAMES)
-    True
-    >>> quiet = hp.example_params(verbose=False)       # the same values, nothing printed
-    >>> quiet == params
-    True
+    >>> print("the names are the model's, in its order:", list(params) == list(hp.PARAM_NAMES))
+    the names are the model's, in its order: True
+    >>> quiet = hp.example_params(verbose=False)       # nothing is printed
+    >>> print("the same values:", quiet == params)
+    the same values: True
     """
     params = {n: 0.5 * (float(lo) + float(hi)) for n, (lo, hi) in zip(PARAM_NAMES, PARAM_LIMITS)}
     if verbose:
@@ -1757,12 +1811,21 @@ def published_models() -> list[tuple[str, str]]:
     Examples
     --------
     >>> import hcd_analysis.predictor as hp
-    >>> isinstance(hp.published_models(), list)
-    True
+    >>> print("the accepted models are a list:", isinstance(hp.published_models(), list))
+    the accepted models are a list: True
     """
     from . import published_models as _PM
 
     return [(m["name"], m["version"]) for m in _PM.MODELS]
+
+
+# The name of the model that load_published loads when it is given none: the LF+MF model.
+DEFAULT_MODEL = "LF+MF"
+
+
+def _model_key(name: str) -> str:
+    """A model name without case and punctuation: "LF+MF", "lf-mf" and "lfmf" are one name."""
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
 
 
 def _model_package():
@@ -1794,7 +1857,8 @@ def _model_package():
             and all(isinstance(v, str) for v in m.values())
             for m in models
         )
-        and len({m["name"] for m in models}) == len(models)
+        and len({_model_key(m["name"]) for m in models})
+        == len(models)  # no two names that read alike
     )
     if not ok:
         raise ModelPackageError(
@@ -1802,15 +1866,6 @@ def _model_package():
             f"version ({doc.get('version')!r})"
         )
     return mp, version, doc
-
-
-# The name of the model that load_published loads when it is given none: the LF+MF model.
-DEFAULT_MODEL = "LF+MF"
-
-
-def _model_key(name: str) -> str:
-    """A model name without case and punctuation: "LF+MF", "lf-mf" and "lfmf" are one name."""
-    return "".join(ch for ch in str(name).lower() if ch.isalnum())
 
 
 def load_published(name: str = DEFAULT_MODEL) -> Bundle:
@@ -1901,10 +1956,11 @@ def load_published(name: str = DEFAULT_MODEL) -> Bundle:
     # 1. Which model? Names are compared without case and punctuation.
     key = _model_key(name)
     held = [m for m in doc["models"] if _model_key(m["name"]) == key]
-    if len(held) != 1:
-        # No model of that name is in the installed model package (or, in a malformed package, two
-        # names read alike). A user gets here with a misspelt name, or by asking for a model that
-        # this version of the model package does not ship. The message lists what it holds.
+    if not held:
+        # No model of that name is in the installed model package. A user gets here with a
+        # misspelt name, or by asking for a model that this version of the model package does
+        # not ship. The message lists what it holds. (Two names that read alike cannot occur:
+        # such a package is refused as malformed when its list is read.)
         have = ", ".join(m["name"] for m in doc["models"]) or "none"
         raise NoPublishedModelError(
             f"hcd-priya-models {version} holds no model {name!r} (it holds: {have}). A release "
@@ -1914,7 +1970,9 @@ def load_published(name: str = DEFAULT_MODEL) -> Bundle:
 
     # 2. Does this version of the code accept this version of the model? The code lists every
     #    accepted (name, version) with the sha256 of its release: published_models.MODELS.
-    pins = [m for m in _PM.MODELS if m["name"] == name and m["version"] == version]
+    pins = [
+        m for m in _PM.MODELS if _model_key(m["name"]) == key and m["version"] == version
+    ]  # the entry's name is compared like the user's: without case and punctuation
     synthetic = False
     if len(pins) == 1:
         # The normal case: the installed code and model packages belong together. The digest is
@@ -1922,9 +1980,9 @@ def load_published(name: str = DEFAULT_MODEL) -> Bundle:
         # cannot vouch for themselves.
         fmt, anchor = pins[0]["format"], pins[0]["anchor_sha256"]
     elif doc["synthetic"] and version.endswith("+synthetic") and not pins:
-        # A synthetic test build: untrained networks, for tests and CI. Only a developer gets
-        # here, because such a package is built from a clone and no package index serves its
-        # version. All three conditions are needed: the package says it is synthetic, its
+        # A synthetic test build: untrained networks, for tests and CI. The person who gets
+        # here built the stand-in from a clone (the README's install for today does that): no
+        # package index serves its version. All three conditions are needed: the package says it is synthetic, its
         # version carries the local label, and the code lists nothing for it.
         if os.environ.get("HCD_PRIYA_ALLOW_SYNTHETIC") != "1":
             # The stand-in is installed and nobody asked for it: refuse, so that untrained
@@ -1946,9 +2004,9 @@ def load_published(name: str = DEFAULT_MODEL) -> Bundle:
     else:
         # Everything else is refused. A user gets here by upgrading one of the two packages and
         # not the other (a model version the code does not list). The same refusal covers a
-        # package that calls itself synthetic under a public version, and a code list that names
-        # one model version twice: neither can be trusted.
-        accepted = ", ".join(v for n, v in published_models() if n == name) or "none yet"
+        # package that calls itself synthetic under a public version that the code does not
+        # list, and a code list that names one model version twice: neither can be trusted.
+        accepted = ", ".join(v for n, v in published_models() if _model_key(n) == key) or "none yet"
         raise ModelPackageError(
             f"hcd-priya-models {version} is installed, but this version of hcd_priya accepts for "
             f"{name!r} the model versions: {accepted}. Install a pair of versions that match "
@@ -2052,8 +2110,9 @@ def add_hcd(pred: Prediction, A: ArrayLike) -> np.ndarray:
     >>> pred = hp.Prediction(z=3.0, k=np.array([0.01, 0.02]), P_class=P, template=P[1:] / P[0] - 1,
     ...                      w_c=np.zeros(3), dndx=np.zeros(3), member_std=None, tau_eff=0.5,
     ...                      params={}, flags={}, labels={}, provenance={}, stacked=False)
-    >>> hp.add_hcd(pred, [0.1, 0.0, 0.0])
-    array([1.1, 1.1])
+    >>> total = hp.add_hcd(pred, [0.1, 0.0, 0.0])           # 10 per cent LLS sightlines, 90 per cent clean
+    >>> print("0.9 * clean + 0.1 * LLS at the two wavenumbers:", total.tolist())
+    0.9 * clean + 0.1 * LLS at the two wavenumbers: [1.1, 1.1]
     """
     if not isinstance(pred, Prediction):
         raise TypeError("add_hcd takes a Prediction from Bundle.predict or Bundle.predict_many")

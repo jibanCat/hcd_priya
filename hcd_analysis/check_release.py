@@ -142,7 +142,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if (args.published is None) == (args.release_dir is None) or (
         args.published is None and args.release_sha256 is None
     ):
-        ap.error("give RELEASE_DIR and RELEASE_SHA256, or --published NAME")
+        ap.error(
+            "give RELEASE_DIR and RELEASE_SHA256, or --published (a NAME after it is optional)"
+        )
 
     try:
         import hcd_analysis

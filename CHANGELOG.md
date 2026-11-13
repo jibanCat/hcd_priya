@@ -28,7 +28,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   that statement and the values when it is called. No model is published yet, so the list is empty; tests
   and CI use a model package built with a synthetic bundle.
 - **A warning for a mean flux outside the trained range.** A prediction whose `tau_eff` lies outside the range of
-  mean flux the model was trained on raises `MeanFluxRangeWarning`, which gives the range. The prediction is still
+  mean flux the model was trained on, or outside the tables of the multi-fidelity correction, emits a
+  `MeanFluxRangeWarning` that gives the range. The prediction is still
   returned, with the flag `mean_flux_off_ladder` as before.
 - **`python -m hcd_analysis.check_release`**: loads a model from a fresh install, predicts, and compares with
   reference predictions.
