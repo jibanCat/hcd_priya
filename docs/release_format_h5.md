@@ -405,7 +405,7 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
 - **Layout.** One directory with one file, `incidence_mf_record.json`: strict UTF-8 JSON, a closed key set, finite
   numbers, the tables included as lists. The record is anchored by the sha256 of that file.
 
-```json
+```text
 {"format": "hcd_priya.incidence_mf_record/1", "version": "<text>", "model_form": "<the code's statement>",
  "class_order": ["LLS", "subDLA", "DLA"],
  "tables": {"z": [Nz], "n_sims": [Nz], "dndx_ratio": [[3] x Nz],
@@ -417,8 +417,14 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
  "train_sims": [...], "n_pairs": N, "fit_code": {"commit": "<40 hex>", "dirty": false}}
 ```
 
-- `n_sims` is the number of matched pairs behind each redshift's mean, and `n_pairs` their sum. A redshift with one
-  pair is a ratio of one simulation, not a mean.
+- `n_sims` is the number of matched pairs behind each redshift's dN/dX mean, and `n_pairs` their sum. The fit refuses
+  a pair whose dN/dX is not finite and positive, so every pair counts in every class and no cell is filled in. A
+  redshift with one pair is a ratio of one simulation, not a mean. A CDDF cell is the mean over the pairs with both
+  values positive, and 1 where there is none.
+- `lf_cache.source` and `hr_incidence.source` are the code's statements of what it establishes about each input,
+  and it is little: both files are pinned by their sha256. The code verifies no lineage of the HR incidence product;
+  that it was derived from the rebuilt HR catalogues is the statement of whoever built the record.
+  `groups_not_in_product` is recorded as given, and is not compared with the product.
 - `composition` says which HR simulations were left out and under which ruling; `train_sims` are those used. The
   builder has no default composition.
 - The loader (`incidence_mf.load_record`) compares the file's sha256 with the published one before parsing, refuses
@@ -426,6 +432,10 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   finite, positive and consistent in shape, and a record fitted from a tree with uncommitted changes.
 - The predictor applies a record only when its `lf_cache.sha256` equals the training cache of the backbone, as
   re-derived from the member metas, and only together with the P1D MF record.
+- **Redshifts outside the table.** At a snapshot redshift the table does not hold, the factor is interpolated
+  between the neighbouring rows and the prediction is flagged `incidence_mf_z_interpolated`; beyond the table it is
+  held at the edge row and flagged `incidence_mf_z_clamped`. This differs from the P1D record, which is refused
+  below its tables.
 - **Not validated here:** the w_c map was fitted on LF counts. That it still holds when dN/dX is scaled to the HR
   incidence has not been tested.
 
@@ -465,7 +475,9 @@ incidence MF record:
 
 `load_release` loads the incidence record against the digest the manifest gives and binds it to the backbone's
 training cache; an LF+MF prediction of such a release has its `dndx` multiplied by `R_c(z)` (flag
-`incidence_mf_applied`, `provenance["incidence_mf"]`). The two formats behave differently on purpose, and the
+`incidence_mf_applied`, `provenance["incidence_mf"]`). Only `load_release` applies it: the two-digest call
+(`load_bundle` with `mf_dir`) on the parts of a format-2 release does not read the incidence record, and returns
+the LF `dndx` and `w_c` with no incidence flag. The two formats behave differently on purpose, and the
 difference is visible:
 
 | | format 1 | format 2 with an incidence record |

@@ -17,12 +17,14 @@ estimator.
      partner;
   5. fits the two tables, writes the record, reloads it and prints its sha256 (the anchor to publish).
 
-The composition has no default: which HR simulations make the table is stated on the command line and in the record.
+Nothing about the composition has a default. Which HR simulations make the table is stated on the command line:
+either --exclude-sim NAME (repeatable) or --exclude-none. So is what the HR incidence product does not hold: either
+--group-not-in-product TEXT (repeatable; recorded as given, not compared with the product) or --no-group-missing.
 
   python scripts/build_incidence_mf.py --version V --out-dir NEW \\
       --lf-cache LF.h5 --lf-cache-sha256 H --hr-incidence HR.npz --hr-incidence-sha256 H \\
-      --composition-id ID [--exclude-sim NAME ...] --ruling-id R [--ruling-id ...] \\
-      [--group-not-in-product TEXT ...]
+      --composition-id ID (--exclude-sim NAME ... | --exclude-none) --ruling-id R [--ruling-id ...] \\
+      (--group-not-in-product TEXT ... | --no-group-missing)
 """
 
 from __future__ import annotations
@@ -57,6 +59,9 @@ def parse(argv=None):
     ap.add_argument("--hr-incidence-sha256", required=True)
     ap.add_argument("--composition-id", required=True)
     ap.add_argument("--exclude-sim", action="append", default=[], help="an HR simulation left out")
+    ap.add_argument(
+        "--exclude-none", action="store_true", help="say that every HR simulation is used"
+    )
     ap.add_argument("--ruling-id", action="append", default=[], required=True)
     ap.add_argument(
         "--group-not-in-product",
@@ -64,7 +69,22 @@ def parse(argv=None):
         default=[],
         help="an HR snapshot group that the HR incidence product does not hold (recorded as given)",
     )
-    return ap.parse_args(argv)
+    ap.add_argument(
+        "--no-group-missing",
+        action="store_true",
+        help="say that the HR incidence product holds every HR snapshot group",
+    )
+    a = ap.parse_args(argv)
+    if bool(a.exclude_sim) == a.exclude_none:
+        ap.error("state the composition: give --exclude-sim NAME (repeatable), or --exclude-none")
+    if bool(a.group_not_in_product) == a.no_group_missing:
+        ap.error(
+            "state what the HR product lacks: give --group-not-in-product TEXT (repeatable), or "
+            "--no-group-missing"
+        )
+    if len(set(a.group_not_in_product)) != len(a.group_not_in_product):
+        ap.error("--group-not-in-product names a group twice")
+    return a
 
 
 def main(argv=None, *, _code=None):
@@ -93,17 +113,17 @@ def main(argv=None, *, _code=None):
     from hcd_analysis.emulator import incidence_mf as IM
     from hcd_analysis.emulator import multifidelity as MF
 
-    lf = MF.load_snap_cache(a.lf_cache)
-    hr = IM.hr_snap_from_product(a.hr_incidence)
-    for what, (p, want) in pins.items():
-        if L.sha256_file(p) != want:
-            sys.exit(f"refusing: the {what} changed while it was read")
     composition = {
         "id": a.composition_id,
         "excluded_sims": sorted(set(a.exclude_sim)),
         "ruling_ids": a.ruling_id,
     }
     try:
+        lf = MF.load_snap_cache(a.lf_cache)
+        hr = IM.hr_snap_from_product(a.hr_incidence)
+        for what, (p, want) in pins.items():
+            if L.sha256_file(p) != want:
+                sys.exit(f"refusing: the {what} changed while it was read")
         tables, train, n_pairs = IM.fit_tables(lf, hr, exclude_sims=composition["excluded_sims"])
         path, sha = IM.write_record(
             out,
@@ -120,7 +140,11 @@ def main(argv=None, *, _code=None):
             n_pairs=n_pairs,
             fit_code=code,
         )
-    except IM.MFRecordError as e:
+    except (
+        IM.MFRecordError,
+        OSError,
+        KeyError,
+    ) as e:  # a refusal of the fit, or an input that is not readable
         sys.exit(f"refusing: {e}")
     inc = IM.load_record(out, expected_record_sha256=sha, lf_cache_sha256=a.lf_cache_sha256)
     summary = {

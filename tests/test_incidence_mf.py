@@ -62,7 +62,7 @@ def snaps(sims=SIMS, zs=ZS):
 # ----------------------------------------------------------------------------------------------- the fit
 def test_the_fit_is_the_historical_functions_on_the_matched_pairs():
     lf, hr = snaps()
-    t, train, n = IM.fit_tables(lf, hr)
+    t, train, n = IM.fit_tables(lf, hr, exclude_sims=[])
     assert train == sorted(SIMS) and n == 9 and t["n_sims"].tolist() == [3, 3, 3]
     np.testing.assert_allclose(t["dndx_ratio"], RATIO, rtol=1e-14)
     np.testing.assert_allclose(t["cddf_ratio"], CDDF_RATIO, rtol=1e-14)
@@ -79,26 +79,72 @@ def test_the_fit_is_the_historical_functions_on_the_matched_pairs():
 def test_the_composition_leaves_simulations_out_and_says_which_remain():
     lf, hr = snaps()
     hr["dndx"][hr["sim"] == "synthsimC"] *= 3.0  # one run with another ratio
-    all3, _, _ = IM.fit_tables(lf, hr)
+    all3, _, _ = IM.fit_tables(lf, hr, exclude_sims=[])
     t, train, n = IM.fit_tables(lf, hr, exclude_sims=["synthsimC"])
     assert train == ["synthsimA", "synthsimB"] and n == 6 and t["n_sims"].tolist() == [2, 2, 2]
     np.testing.assert_allclose(t["dndx_ratio"], RATIO, rtol=1e-14)
     np.testing.assert_allclose(all3["dndx_ratio"], RATIO * 5.0 / 3.0, rtol=1e-14)
     with pytest.raises(E, match="unknown simulations"):
         IM.fit_tables(lf, hr, exclude_sims=["no_such_sim"])
-    with pytest.raises(E, match="no HR simulation left"):
+    with pytest.raises(E, match="no training pairs left"):
         IM.fit_tables(lf, hr, exclude_sims=list(SIMS))
+    with pytest.raises(TypeError, match="exclude_sims"):  # the composition has no default
+        IM.fit_tables(lf, hr)
 
 
 def test_an_hr_snapshot_without_its_lf_partner_is_refused_not_dropped():
     lf, hr = snaps()
     hr["z"][0] = 2.5  # no LF snapshot of that simulation there
     with pytest.raises(E, match="without an LF partner.*synthsimA z=2.5"):
-        IM.fit_tables(lf, hr)
+        IM.fit_tables(lf, hr, exclude_sims=[])
+    for bins in (LOG_NHI + 0.1, LOG_NHI[:1]):  # other centres; another number of bins
+        lf, hr = snaps()
+        hr["log_nhi"] = bins
+        with pytest.raises(E, match="column-density bins differ"):
+            IM.fit_tables(lf, hr, exclude_sims=[])
+
+
+def test_a_snapshot_listed_twice_is_refused():
     lf, hr = snaps()
-    hr["log_nhi"] = LOG_NHI + 0.1
-    with pytest.raises(E, match="column-density bins differ"):
-        IM.fit_tables(lf, hr)
+    twice = {k: (v if k == "log_nhi" else np.concatenate([v, v[:1]])) for k, v in hr.items()}
+    with pytest.raises(E, match="listed more than once.*synthsimA z=2"):
+        IM.fit_tables(lf, twice, exclude_sims=[])
+    lf2 = {k: (v if k == "log_nhi" else np.concatenate([v, v[:1]])) for k, v in lf.items()}
+    with pytest.raises(E, match="LF partner is not unique.*synthsimA z=2"):
+        IM.fit_tables(lf2, hr, exclude_sims=[])
+    # an LF snapshot listed twice that no HR snapshot pairs with does not matter
+    only = lf["sim"] == "synthsim_lf_only"
+    lf3 = {k: (v if k == "log_nhi" else np.concatenate([v, v[only][:1]])) for k, v in lf.items()}
+    assert IM.fit_tables(lf3, hr, exclude_sims=[])[2] == 9
+
+
+@pytest.mark.parametrize("side", ["lf", "hr"])
+@pytest.mark.parametrize("value", [0.0, -1.0, float("nan"), float("inf")])
+def test_a_pair_without_a_finite_positive_dndx_is_refused_not_averaged_around(side, value):
+    lf, hr = snaps()
+    d = lf if side == "lf" else hr
+    i = int(np.where((d["sim"] == "synthsimB") & (d["z"] == 3.0))[0][0])
+    d["dndx"][i, 2] = value
+    with pytest.raises(E, match="dN/dX is not finite and positive.*synthsimB z=3"):
+        IM.fit_tables(lf, hr, exclude_sims=[])
+
+
+def test_the_cddf_takes_empty_bins_and_refuses_bad_ones():
+    lf, hr = snaps()
+    hr["f_nhi"][
+        :, 1
+    ] = 0.0  # a bin that is empty in every HR snapshot: ratio 1, by the historical rule
+    t, _, _ = IM.fit_tables(lf, hr, exclude_sims=[])
+    assert t["cddf_ratio"][:, 1].tolist() == [1.0, 1.0, 1.0]
+    np.testing.assert_allclose(t["cddf_ratio"][:, 0], CDDF_RATIO[:, 0], rtol=1e-14)
+    np.testing.assert_allclose(
+        t["dndx_ratio"], RATIO, rtol=1e-14
+    )  # the dN/dX table does not see it
+    for value in (-1.0, float("nan")):
+        lf, hr = snaps()
+        hr["f_nhi"][0, 0] = value
+        with pytest.raises(E, match="f\\(N_HI\\) is not finite and non-negative.*synthsimA z=2"):
+            IM.fit_tables(lf, hr, exclude_sims=[])
 
 
 def test_the_hr_product_is_read_as_plain_arrays(tmp_path):
@@ -117,10 +163,24 @@ def test_the_hr_product_is_read_as_plain_arrays(tmp_path):
     got = IM.hr_snap_from_product(p)
     assert set(got) == set(hr) and all(np.array_equal(got[k], hr[k]) for k in hr)
     for name, change, why in (
-        ("missing", {"dndx": None}, "lacks the arrays"),
+        ("missing", {"dndx": None}, "the HR incidence product lacks the arrays \\['dndx'\\]"),
         ("order", {"class_names": np.array(["DLA", "subDLA", "LLS"])}, "class_names must be"),
         ("shape", {"dndx": hr["dndx"][:, :2]}, "inconsistent shapes"),
+        ("scalar", {"sim_name": np.array("synthsimA")}, "inconsistent shapes"),
         ("pickle", {"sim_name": np.array(list(hr["sim"]), dtype=object)}, "unreadable"),
+        (
+            "nan",
+            {"dndx": np.where(np.arange(hr["dndx"].size).reshape(-1, 3) == 4, np.nan, hr["dndx"])},
+            "finite",
+        ),
+        ("text", {"z": np.array(["two"] * len(hr["z"]))}, "not numeric"),
+        # a name column out of step with the parameters: one name with two points, or two names on one point
+        ("two_points", {"sim_name": np.roll(hr["sim"], 1)}, "more than one parameter point"),
+        (
+            "one_point",
+            {"sim_name": np.array([f"{s}{i}" for i, s in enumerate(hr["sim"])])},
+            "share one",
+        ),
     ):
         q = tmp_path / f"{name}.npz"
         np.savez(q, **{k: v for k, v in dict(arrays, **change).items() if v is not None})
@@ -137,7 +197,7 @@ CACHE = "cd" * 32
 
 def test_a_record_round_trips_and_its_factor_is_the_historical_lookup(tmp_path):
     lf, hr = snaps()
-    t, train, n = IM.fit_tables(lf, hr)
+    t, train, n = IM.fit_tables(lf, hr, exclude_sims=[])
     sha = write_incidence(tmp_path / "inc", cache=CACHE, tables=t, train_sims=train, n_pairs=n)
     inc = IM.load_record(tmp_path / "inc", expected_record_sha256=sha, lf_cache_sha256=CACHE)
     assert inc.anchored is True and inc.record_sha256 == sha
@@ -237,6 +297,11 @@ def _set(path, value):
             "groups_not_in_product",
         ),
         ("ruling", _set(["composition", "ruling_ids"], []), "ruling"),
+        ("missing_key", lambda d: d.pop("composition") and None, "missing \\['composition'\\]"),
+        ("no_tables_key", lambda d: d["tables"].pop("n_sims") and None, "missing \\['n_sims'\\]"),
+        ("cddf_shape", _set(["tables", "cddf_ratio"], [[2.0, 0.5, 1.0]] * 3), "cddf_ratio"),
+        ("cddf_rows", _set(["tables", "cddf_ratio"], [[2.0, 0.5]] * 2), "cddf_ratio"),
+        ("huge", _set(["tables", "z"], [2.0, 3.0, 10**400]), "tables.z"),
         ("nan", lambda d: json.dumps(dict(d, version=float("nan"))).encode(), "NaN|constant"),
         (
             "duplicate",
@@ -343,10 +408,15 @@ def rel(tmp_path_factory):
 
 def test_lf_mf_dndx_is_the_lf_dndx_times_the_factor_and_w_c_follows(rel):
     two, one = rel["two"], rel["one"]
-    for z, factor, clamped in (
-        (3.0, [4.0, 3.0, 0.5], False),  # a tabulated redshift
-        (2.6, [3.2, 3.0, 0.5], False),  # between two rows: linear
-        (5.2, [4.0, 5.0, 0.25], True),  # above the table: held at the last row, and flagged
+    for z, factor, clamped, between in (
+        (3.0, [4.0, 3.0, 0.5], False, False),  # a tabulated redshift
+        (
+            2.6,
+            [3.2, 3.0, 0.5],
+            False,
+            True,
+        ),  # not in the table: linear between its neighbours, flagged
+        (5.2, [4.0, 5.0, 0.25], True, False),  # above the table: held at the last row, and flagged
     ):
         p = two.predict(PARAMS, z, tau_eff=0.4)
         q = one.predict(
@@ -371,6 +441,7 @@ def test_lf_mf_dndx_is_the_lf_dndx_times_the_factor_and_w_c_follows(rel):
         assert not np.array_equal(hp.add_hcd(p, p.w_c), hp.add_hcd(q, q.w_c))
         assert p.flags["incidence_mf_applied"] is True and p.flags["mf_applied"] is True
         assert p.flags["incidence_mf_z_clamped"] is clamped
+        assert p.flags["incidence_mf_z_interpolated"] is between
         assert "incidence_mf_applied" not in q.flags and "incidence_mf" not in q.labels
 
 
@@ -461,3 +532,62 @@ def test_the_record_is_applied_only_with_the_p1d_mf_record(rel, tmp_path):
     with pytest.raises(E, match="changed in memory"):
         rel["one"]._attach_incidence(inc._replace(dndx_ratio=inc.dndx_ratio * 2.0))
     assert rel["one"]._inc is None  # a refused record is not attached
+
+
+def test_no_cddf_is_exposed_or_applied(rel):
+    """The record stores the CDDF table; the predictor returns no CDDF and applies none."""
+    import dataclasses
+
+    two = rel["two"]
+    p = two.predict(PARAMS, 3.0, tau_eff=0.4)
+    names = {f.name for f in dataclasses.fields(p)}
+    assert not [n for n in names if "cddf" in n.lower() or "nhi" in n.lower()]
+    text = json.dumps([sorted(p.flags), p.labels, p.provenance], default=str).lower()
+    assert "cddf_ratio" not in text and "log_nhi" not in text
+    assert not [k for k in p.flags if "cddf" in k.lower()]
+    assert two._inc.cddf_factor(3.0).tolist() == [
+        4.0,
+        0.5,
+    ]  # stored, and read by the historical lookup
+
+
+def test_what_is_applied_is_a_copy_of_the_table(rel):
+    two = rel["two"]
+    assert isinstance(two._inc_tab["ratio"], jnp.ndarray) and isinstance(two._inc_z, tuple)
+    assert not two._inc.dndx_ratio.flags.writeable
+
+
+def test_a_format_1_manifest_is_written_byte_for_byte_as_before(tmp_path):
+    for part in ("backbone", "mf"):
+        (tmp_path / part).mkdir()
+    path, sha = RM.write_release_manifest(
+        str(tmp_path),
+        release_version="v",
+        backbone_dir="backbone",
+        backbone_manifest_sha256="a" * 64,
+        mf_dir="mf",
+        mf_record_sha256="b" * 64,
+    )
+    golden = (
+        '{\n "backbone": {\n  "dir": "backbone",\n  "manifest_sha256": "' + "a" * 64 + '"\n },\n'
+        ' "format": "hcd_priya.release/1",\n "mf": {\n  "dir": "mf",\n  "record_sha256": "'
+        + "b" * 64
+        + '"\n },\n'
+        ' "release_version": "v"\n}'
+    )
+    assert (
+        open(path, "rb").read() == golden.encode()
+        and sha == hashlib.sha256(golden.encode()).hexdigest()
+    )
+    with pytest.raises(
+        RM.ReleaseManifestError, match="both incidence_dir and incidence_record_sha256"
+    ):
+        RM.write_release_manifest(
+            str(tmp_path / "x"),
+            release_version="v",
+            backbone_dir="backbone",
+            backbone_manifest_sha256="a" * 64,
+            mf_dir="mf",
+            mf_record_sha256="b" * 64,
+            incidence_dir="incidence",
+        )

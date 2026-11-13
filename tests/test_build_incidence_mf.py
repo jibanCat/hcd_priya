@@ -69,7 +69,12 @@ def _argv(inputs, out, extra=(), **over):
         "--ruling-id": "synthetic ruling",
     }
     a.update(over)
-    return [x for kv in a.items() for x in kv] + list(extra)
+    extra = list(extra)
+    if "--exclude-sim" not in extra:
+        extra.append("--exclude-none")
+    if "--group-not-in-product" not in extra:
+        extra.append("--no-group-missing")
+    return [x for kv in a.items() for x in kv] + extra
 
 
 def test_the_synthetic_cache_is_read_by_the_historical_loader(inputs):
@@ -82,10 +87,17 @@ def test_the_synthetic_cache_is_read_by_the_historical_loader(inputs):
 
 def test_refusals_before_any_input_is_read(inputs, tmp_path):
     (tmp_path / "there").mkdir()
-    with pytest.raises(SystemExit, match="exists"):
-        B.main(_argv(inputs, tmp_path / "there"), _code=CLEAN)
+    absent = {
+        "--lf-cache": str(tmp_path / "no_lf.h5"),
+        "--hr-incidence": str(tmp_path / "no_hr.npz"),
+    }
+    with pytest.raises(SystemExit, match="exists"):  # the inputs do not exist: they were not opened
+        B.main(_argv(inputs, tmp_path / "there", **absent), _code=CLEAN)
     with pytest.raises(SystemExit, match="clean tree"):
-        B.main(_argv(inputs, tmp_path / "out"), _code=lambda: {"commit": "c" * 40, "dirty": True})
+        B.main(
+            _argv(inputs, tmp_path / "out", **absent),
+            _code=lambda: {"commit": "c" * 40, "dirty": True},
+        )
     for key, what in (
         ("--lf-cache-sha256", "LF cache"),
         ("--hr-incidence-sha256", "HR incidence product"),
@@ -93,16 +105,72 @@ def test_refusals_before_any_input_is_read(inputs, tmp_path):
         with pytest.raises(SystemExit, match=f"the {what} .* not the pinned"):
             B.main(_argv(inputs, tmp_path / "out", **{key: "0" * 64}), _code=CLEAN)
     assert not (tmp_path / "out").exists()
-    with pytest.raises(
-        SystemExit
-    ):  # the composition has no default: its id and a ruling are required
+
+
+def test_nothing_about_the_composition_has_a_default(inputs, tmp_path, capsys):
+    full = _argv(inputs, tmp_path / "out")
+    for drop, why in (
+        (("--ruling-id", "synthetic ruling"), "--ruling-id"),
+        (("--composition-id", "synthetic-composition"), "--composition-id"),
+        (("--exclude-none",), "state the composition"),
+        (("--no-group-missing",), "state what the HR product lacks"),
+    ):
+        with pytest.raises(SystemExit) as e:
+            B.main([x for x in full if x not in drop], _code=CLEAN)
+        assert e.value.code == 2 and why in capsys.readouterr().err
+    for extra, why in (
+        (["--exclude-sim", "synthsimC", "--exclude-none"], "state the composition"),
+        (["--group-not-in-product", "g", "--no-group-missing"], "state what the HR product lacks"),
+        (["--group-not-in-product", "g", "--group-not-in-product", "g"], "names a group twice"),
+    ):
+        argv = [x for x in full if x not in ("--exclude-none", "--no-group-missing")] + extra
+        argv += [] if "--exclude-sim" in extra else ["--exclude-none"]
+        argv += [] if "--group-not-in-product" in extra else ["--no-group-missing"]
+        with pytest.raises(SystemExit) as e:
+            B.main(argv, _code=CLEAN)
+        assert e.value.code == 2 and why in capsys.readouterr().err
+    assert not (tmp_path / "out").exists()
+
+
+def test_an_input_that_changes_while_it_is_read_is_refused(inputs, tmp_path, monkeypatch):
+    real = B.importlib.import_module("hcd_analysis.emulator.incidence_mf").hr_snap_from_product
+
+    def read_then_change(path):
+        out = real(path)
+        with open(path, "ab") as f:
+            f.write(b"x")
+        return out
+
+    monkeypatch.setattr("hcd_analysis.emulator.incidence_mf.hr_snap_from_product", read_then_change)
+    with pytest.raises(SystemExit, match="the HR incidence product changed while it was read"):
+        B.main(_argv(inputs, tmp_path / "out"), _code=CLEAN)
+    assert not (tmp_path / "out").exists()
+
+
+def test_an_unreadable_input_is_a_refusal_not_a_traceback(inputs, tmp_path):
+    bad = tmp_path / "bad.npz"
+    bad.write_text("not an archive")
+    with pytest.raises(SystemExit, match="refusing: .*unreadable HR incidence product"):
         B.main(
-            [
-                x
-                for x in _argv(inputs, tmp_path / "out")
-                if x not in ("--ruling-id", "synthetic ruling")
-            ]
+            _argv(
+                inputs,
+                tmp_path / "out",
+                **{"--hr-incidence": str(bad), "--hr-incidence-sha256": _sha(bad)},
+            ),
+            _code=CLEAN,
         )
+    notcache = tmp_path / "bad.h5"
+    notcache.write_text("not a cache")
+    with pytest.raises(SystemExit, match="refusing: "):
+        B.main(
+            _argv(
+                inputs,
+                tmp_path / "out",
+                **{"--lf-cache": str(notcache), "--lf-cache-sha256": _sha(notcache)},
+            ),
+            _code=CLEAN,
+        )
+    assert not (tmp_path / "out").exists()
 
 
 def test_a_build_writes_the_record_of_the_stated_composition(inputs, tmp_path, capsys):

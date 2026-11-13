@@ -62,8 +62,9 @@ HR simulations of (dN/dX)_HR / (dN/dX)_LF per HCD class and redshift. ``load_rel
 the manifest gives, and refuses one fitted on another LF cache than the backbone's training cache. An LF+MF prediction
 then returns ``dndx = dndx_LF R_c(z)``, and ``w_c`` is the w_c map of that corrected ``dndx``; ``P_class`` is not
 touched by it, so a mixed spectrum changes only through the fractions. An LF prediction is unchanged. R_c does not
-depend on the cosmological parameters or on the mean flux; between the tabulated redshifts it is linear, beyond them
-it is held constant and flagged (``incidence_mf_z_clamped``). The w_c map was fitted on LF counts; that it holds for
+depend on the cosmological parameters or on the mean flux. At a redshift the table does not hold it is linear
+between its neighbours and flagged (``incidence_mf_z_interpolated``); beyond the table it is held constant and flagged
+(``incidence_mf_z_clamped``), where the P1D MF below its tables is refused. The w_c map was fitted on LF counts; that it holds for
 the corrected incidence is not validated. The record also stores the same kind of table for the column-density
 distribution; the predictor returns no CDDF, so that table is not applied here. A release of format 1 has no such
 record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition.
@@ -528,6 +529,8 @@ def _members_forward(ens, pf, dn_mean, dn_std, x, tau):
 
 
 _forward_one = eqx.filter_jit(_members_forward)
+# the P1D MF label's statement about w_c; replaced when the incidence is corrected too
+_W_C_STAYS_LF = "w_c stays the LF backbone's"
 _mf_g = eqx.filter_jit(lambda mf, x, tau: mf(x, tau))  # the MF correction g (4, K) at one input
 _forward_many = eqx.filter_jit(
     eqx.filter_vmap(_members_forward, in_axes=(None, None, None, None, 0, 0))
@@ -932,21 +935,27 @@ class _PredictorBase:
                 f"not on this bundle's training cache {cache[:12]}"
             )
         self._inc = inc
-        self._inc_tab = inc.dndx_table()
+        # what is applied: immutable copies of the table, not the record's arrays
+        self._inc_tab = {"z": jnp.asarray(inc.z), "ratio": jnp.asarray(inc.dndx_ratio)}
+        self._inc_z = tuple(float(v) for v in inc.z)
 
     def _incidence_flags(self, zs, use_mf):
-        z = self._inc.z
+        z = self._inc_z
+        clamped = [v < z[0] - Z_TOL or v > z[-1] + Z_TOL for v in zs]
+        between = [not c and not any(abs(v - t) <= Z_TOL for t in z) for v, c in zip(zs, clamped)]
         return {
             "incidence_mf_applied": bool(use_mf),
-            "incidence_mf_z_clamped": bool(any(v < z[0] - Z_TOL or v > z[-1] + Z_TOL for v in zs)),
+            "incidence_mf_z_clamped": bool(any(clamped)),
+            "incidence_mf_z_interpolated": bool(any(between)),
         }
 
     def _incidence_labels(self, labels, use_mf):
         out = {
             "incidence_mf": "the MF correction of the incidence of the loaded incidence record: dndx_MF = dndx_LF "
             "R_c(z), R_c(z) the mean over the matched HR simulations of (dN/dX)_HR / (dN/dX)_LF per class and "
-            "redshift (theta-independent; linear in z between the tabulated redshifts, held constant and flagged "
-            "incidence_mf_z_clamped beyond them); applied with the P1D MF correction, never to an LF prediction"
+            "redshift (theta-independent; at a redshift the table does not hold it is linear in z between its "
+            "neighbours, flagged incidence_mf_z_interpolated, and beyond the table held constant, flagged "
+            "incidence_mf_z_clamped); applied with the P1D MF correction, never to an LF prediction"
         }
         if use_mf:
             out["dndx"] = (
@@ -957,8 +966,10 @@ class _PredictorBase:
                 + "; the dN/dX is multiplied by the incidence MF factor R_c(z) before the map (the map itself "
                 "was fitted on LF counts)"
             )
+            if _W_C_STAYS_LF not in labels["mf"]:
+                raise RuntimeError("the MF label no longer carries the statement about w_c")
             out["mf"] = labels["mf"].replace(
-                "w_c stays the LF backbone's",
+                _W_C_STAYS_LF,
                 "dndx and w_c carry the incidence MF correction (labels incidence_mf)",
             )
         return out
@@ -1013,7 +1024,7 @@ class _PredictorBase:
             "highest z and outside its tau0 tables it is held constant and flagged; above z "
             f"{_MR.VALIDATED_Z_MAX:g}, the upper edge of the frozen grouped-validation domain (z 2.2-4.6; the held-out "
             "validation is reported separately), it is applied unchanged but "
-            "flagged mf_z_above_validated); w_c stays the LF backbone's"
+            "flagged mf_z_above_validated); " + _W_C_STAYS_LF
         }
         if use_mf:
             out["product"] = f"{labels.get('product') or 'LF'}+MF"
@@ -1125,8 +1136,9 @@ class _PredictorBase:
           prediction above z 4.6, outside the frozen grouped-validation domain (z 2.2-4.6). The
           values there are served unchanged.
         - With an incidence MF record: ``incidence_mf_applied``, ``dndx`` was multiplied by the
-          HR/LF ratio of the incidence and ``w_c`` follows; ``incidence_mf_z_clamped``, the
-          ratio is held constant beyond its table.
+          HR/LF ratio of the incidence and ``w_c`` follows; ``incidence_mf_z_interpolated``, the
+          table does not hold this redshift and the ratio is interpolated between its neighbours;
+          ``incidence_mf_z_clamped``, the ratio is held constant beyond its table.
 
         The first call for an input shape compiles the model with JAX; later calls reuse it.
 
@@ -1295,16 +1307,9 @@ class _PredictorBase:
         ):  # dndx_MF = dndx_LF R_c(z), before the map to fractions
             from .emulator.multifidelity import apply_dndx_res_corr
 
-            dmean = np.stack(
-                [
-                    np.asarray(
-                        apply_dndx_res_corr(
-                            self._inc_tab, jnp.asarray(dmean[i]), jnp.asarray(float(z))
-                        ),
-                        dtype=np.float64,
-                    )
-                    for i, z in enumerate(zs)
-                ]
+            zv = jnp.asarray(np.asarray(zs, dtype=np.float64))
+            dmean = np.asarray(
+                apply_dndx_res_corr(self._inc_tab, jnp.asarray(dmean), zv), dtype=np.float64
             )
         w4 = np.stack([self._rb.wc_map.w_c(dmean[i], z) for i, z in enumerate(zs)])
         template = Pm[:, 1:, :] / Pm[:, :1, :] - 1.0
@@ -2116,7 +2121,9 @@ def load_published(name: str = DEFAULT_MODEL) -> Bundle:
         )
 
     # 3. Only an LF+MF release directory loads here; another format has its own loader.
-    if fmt not in ("hcd_priya.release/1", "hcd_priya.release/2"):
+    from .emulator.release_manifest import FORMATS as _RELEASE_FORMATS
+
+    if fmt not in _RELEASE_FORMATS:
         raise ModelPackageError(f"{name!r}: the format {fmt!r} is not one load_published loads")
 
     # 4. Find the files inside the installed model package. A package whose list names files it

@@ -14,7 +14,9 @@ networks and loads only with an explicit switch; see ``load_published``.)
 - ``name``: the model's name, as the model package spells it (``lfmf`` for the LF+MF model). It is compared
   without case and punctuation, like the name a user passes to ``load_published``, so ``LF+MF`` is the same name.
 - ``version``: the version of ``hcd-priya-models`` that holds it, which is the version of the model bundle.
-- ``format``: ``hcd_priya.release/1``, an LF+MF release directory.
+- ``format``: the release's own format: ``hcd_priya.release/1``, an LF+MF release directory, or
+  ``hcd_priya.release/2``, one that also holds an incidence MF record. A release listed under another format than
+  its own is refused.
 - ``anchor_sha256``: the sha256 of the release's ``release.json``. Loading verifies every file of the release
   against it.
 

@@ -19,7 +19,9 @@ container: the record that carries a fitted table with its inputs, and its stric
 **Inputs.** The LF side is the LF training cache (its snapshot-level columns). The HR side is NOT the HR cache: the HR
 cache's catalogue-derived columns predate a catalogue fix and stay refused by ``mf_release`` (PI ruling 2026-11-06b
 A1). The HR side is an HR incidence product derived from the rebuilt HR catalogues with the functions that made the
-LF cache columns (``hr_snap_from_product``). The record names both inputs by sha256 (``HR_SOURCE``).
+LF cache columns (``hr_snap_from_product``). The record names both inputs by sha256. The code pins those digests and
+verifies no lineage of the HR product: how it was derived is the statement of whoever builds the record
+(``HR_SOURCE`` says exactly this).
 
 **Layout.** One record directory holds exactly one file, ``incidence_mf_record.json``: strict UTF-8 JSON with a closed
 key set (``RECORD_KEYS``) and finite numbers, the numbers of the tables included (they are a few hundred). A published
@@ -31,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import warnings
 from typing import NamedTuple
 
 import numpy as np
@@ -46,15 +49,24 @@ MAX_BYTES = 1 << 20
 CLASS_ORDER = ("LLS", "subDLA", "DLA")
 MODEL_FORM = (
     "multifidelity.build_dndx_res_corr and build_cddf_res_corr: at each redshift the mean over the matched HR "
-    "simulations of HR / LF, per HCD class for dN/dX and per column-density bin for f(N_HI) (1 where no pair has "
-    "both values positive); theta-independent; linear in z between the tabulated redshifts and constant beyond "
-    "them (dndx_res_factor, cddf_res_factor); dndx_MF = dndx_LF * R_c(z)"
+    "simulations of HR / LF. dN/dX: per HCD class, over every matched pair (the fit refuses a pair whose dN/dX "
+    "is not finite and positive, so no cell is filled in). f(N_HI): per column-density bin, over the pairs with "
+    "both values positive, and 1 where there is none. Theta-independent; linear in z between the tabulated "
+    "redshifts and constant beyond them (dndx_res_factor, cddf_res_factor); dndx_MF = dndx_LF * R_c(z)"
 )
+# What the code can and cannot say about each input: both are named by their sha256, nothing more is verified here.
 HR_SOURCE = (
-    "HR dN/dX and f(N_HI) derived from the rebuilt HR absorber catalogues with the functions that made the LF "
-    "cache's snapshot columns; not the HR cache's catalogue-derived columns, which mf_release refuses"
+    "an HR incidence product (plain arrays of dN/dX and f(N_HI) per HR snapshot), digest-anchored only: this code "
+    "pins its sha256 and checks its shapes and values, and verifies no lineage. That it was derived from the "
+    "rebuilt HR absorber catalogues, with the functions that made the LF cache's snapshot columns, is the "
+    "statement of whoever built the record. It is not the HR cache, whose catalogue-derived columns mf_release "
+    "refuses"
 )
-LF_SOURCE = "the LF training cache's snapshot columns (snap_dNdX_*, snap_f_nhi), read with multifidelity.load_snap_cache"
+LF_SOURCE = (
+    "the LF cache's snapshot columns (snap_dNdX_*, snap_f_nhi), read with multifidelity.load_snap_cache from a "
+    "file pinned by its sha256; the predictor applies the record only when that sha256 is the training cache of "
+    "the backbone"
+)
 RECORD_KEYS = {
     "format",
     "version",
@@ -80,80 +92,131 @@ def hr_snap_from_product(path):
     that ``multifidelity.match_snap_hr_to_lf`` and the two table builders take: the keys of
     ``multifidelity.load_snap_cache``. Required arrays: ``sim_name`` (S,), ``z`` (S,), ``params`` (S, 9), ``dndx``
     (S, 3) in the order LLS, subDLA, DLA (``class_names`` must say so), ``cddf`` (S, Nbin), ``log_nhi_centres``
-    (Nbin,)."""
+    (Nbin,). Every number must be finite, and each simulation name must go with exactly one parameter point (a
+    name column that is out of step with the parameters is refused)."""
+    import zipfile
+
     from .data import normalize_params
 
     try:
         with np.load(os.fspath(path), allow_pickle=False) as f:
-            missing = [k for k in _HR_ARRAYS if k not in f.files]
-            if missing:
-                raise MFRecordError(f"{path}: the HR incidence product lacks the arrays {missing}")
-            a = {k: f[k] for k in _HR_ARRAYS}
-    except (OSError, ValueError) as e:  # not an .npz, or an array that would need pickle
+            a = {k: f[k] for k in _HR_ARRAYS if k in f.files}
+    except (
+        OSError,
+        ValueError,
+        zipfile.BadZipFile,
+    ) as e:  # not an .npz, or an array that needs pickle
         raise MFRecordError(f"{path}: unreadable HR incidence product ({e})") from None
-    if [str(c) for c in a["class_names"]] != list(CLASS_ORDER):
+    missing = [k for k in _HR_ARRAYS if k not in a]
+    if missing:
+        raise MFRecordError(f"{path}: the HR incidence product lacks the arrays {missing}")
+    if a["class_names"].ndim != 1 or [str(c) for c in a["class_names"]] != list(CLASS_ORDER):
         raise MFRecordError(f"{path}: class_names must be {list(CLASS_ORDER)}")
-    S_ = a["sim_name"].shape[0]
-    nb = a["log_nhi_centres"].shape[0]
-    want = {"z": (S_,), "params": (S_, 9), "dndx": (S_, 3), "cddf": (S_, nb)}
+    if a["sim_name"].ndim != 1 or a["log_nhi_centres"].ndim != 1 or a["sim_name"].size < 1:
+        raise MFRecordError(f"{path}: HR incidence arrays with inconsistent shapes: sim_name, bins")
+    n, nb = a["sim_name"].shape[0], a["log_nhi_centres"].shape[0]
+    want = {"z": (n,), "params": (n, 9), "dndx": (n, 3), "cddf": (n, nb)}
     bad = [(k, a[k].shape, v) for k, v in want.items() if a[k].shape != v]
-    if a["sim_name"].ndim != 1 or S_ < 1 or bad:
+    if bad:
         raise MFRecordError(f"{path}: HR incidence arrays with inconsistent shapes: {bad}")
-    params = np.asarray(a["params"], dtype=np.float64)
+    try:
+        num = {k: np.asarray(a[k], dtype=np.float64) for k in (*want, "log_nhi_centres")}
+    except (TypeError, ValueError) as e:
+        raise MFRecordError(f"{path}: an HR incidence array is not numeric ({e})") from None
+    if not all(np.all(np.isfinite(v)) for v in num.values()):
+        raise MFRecordError(f"{path}: the HR incidence arrays must be finite")
+    sims = np.asarray(a["sim_name"]).astype(str)
+    pu = np.round(normalize_params(num["params"]), 6)
+    point = {}
+    for s, q in zip(sims, map(tuple, pu)):
+        if point.setdefault(s, q) != q:
+            raise MFRecordError(f"{path}: the simulation {s} has more than one parameter point")
+    if len(set(point.values())) != len(point):
+        raise MFRecordError(f"{path}: two simulation names share one parameter point")
     return dict(
-        dndx=np.asarray(a["dndx"], dtype=np.float64),
-        f_nhi=np.asarray(a["cddf"], dtype=np.float64),
-        log_nhi=np.asarray(a["log_nhi_centres"], dtype=np.float64),
-        z=np.round(np.asarray(a["z"], dtype=np.float64), 4),
-        params=params,
-        pu=np.round(normalize_params(params), 6),
-        sim=np.asarray(a["sim_name"]).astype(str),
+        dndx=num["dndx"],
+        f_nhi=num["cddf"],
+        log_nhi=num["log_nhi_centres"],
+        z=np.round(num["z"], 4),
+        params=num["params"],
+        pu=pu,
+        sim=sims,
     )
 
 
 # --------------------------------------------------------------------------------------------- the fit
-def fit_tables(lf_snap, hr_snap, *, exclude_sims=()):
+def _snap_keys(d):
+    """The key ``multifidelity.match_snap_hr_to_lf`` pairs on: the unit-box parameters and the redshift."""
+    return [(tuple(d["pu"][i]), round(float(d["z"][i]), 4)) for i in range(len(d["z"]))]
+
+
+def fit_tables(lf_snap, hr_snap, *, exclude_sims):
     """Fit the two tables on the matched HR/LF snapshot pairs, with the historical functions.
 
     ``lf_snap`` and ``hr_snap`` are snapshot dicts (``multifidelity.load_snap_cache`` for the LF cache,
-    ``hr_snap_from_product`` for the HR product). ``exclude_sims`` are HR simulation names the composition leaves
-    out. Every remaining HR snapshot must have its LF partner (``match_snap_hr_to_lf``: same parameters and
-    redshift); one without a partner is refused, never dropped.
+    ``hr_snap_from_product`` for the HR product). ``exclude_sims`` (required; an empty list says "none") are the HR
+    simulation names the composition leaves out (``mf_release.select_train_rows``).
 
-    Returns ``(tables, train_sims, n_pairs)``: ``tables`` has ``z`` (Nz,), ``n_sims`` (Nz,) the number of pairs at
-    each redshift, ``dndx_ratio`` (Nz, 3), ``log_nhi_centres`` (Nbin,) and ``cddf_ratio`` (Nz, Nbin).
+    This function adds input checks, never an estimator. Refused: an HR snapshot listed twice; an HR snapshot
+    without its LF partner (``match_snap_hr_to_lf``: same parameters and redshift), which is never dropped; an LF
+    partner key that the LF cache holds twice; a matched pair whose dN/dX is not finite and positive in every class
+    (so the dN/dX table is a plain mean over every pair, and no cell is filled in from a neighbour); a matched pair
+    whose f(N_HI) is not finite and non-negative; differing column-density bins.
+
+    Returns ``(tables, train_sims, n_pairs)``: ``tables`` has ``z`` (Nz,), ``n_sims`` (Nz,) the number of pairs
+    behind each redshift's dN/dX mean, ``dndx_ratio`` (Nz, 3), ``log_nhi_centres`` (Nbin,) and ``cddf_ratio``
+    (Nz, Nbin).
     """
+    from collections import Counter
+
     from . import multifidelity as MF
 
     sims = np.asarray(hr_snap["sim"]).astype(str)
-    ex = _MR._names(exclude_sims, "exclude_sims")
-    unknown = sorted(set(ex) - set(sims))
-    if unknown:
-        raise MFRecordError(f"unknown simulations {unknown}: not among the HR simulations")
-    keep = np.where(~np.isin(sims, ex))[0]
-    if keep.size == 0:
-        raise MFRecordError("no HR simulation left after the exclusions")
+    keep, train = _MR.select_train_rows({"sim": sims}, exclude_sims=exclude_sims)
     hr = {
         k: (v if k == "log_nhi" else np.asarray(v)[keep]) for k, v in hr_snap.items()
     }  # log_nhi is per bin
+    name = lambda i: f"{hr['sim'][i]} z={hr['z'][i]:g}"
+    hr_keys, lf_count = _snap_keys(hr), Counter(_snap_keys(lf_snap))
+    twice = sorted({name(i) for i, c in enumerate(hr_keys) if hr_keys.count(c) > 1})
+    if twice:
+        raise MFRecordError(f"HR snapshots listed more than once: {twice}")
     pairs = MF.match_snap_hr_to_lf(lf_snap, hr)
     if len(pairs) != keep.size:
         got = {h for h, _ in pairs}
-        lost = sorted(
-            {f"{hr['sim'][i]} z={hr['z'][i]:g}" for i in range(keep.size) if i not in got}
-        )
+        lost = sorted({name(i) for i in range(keep.size) if i not in got})
         raise MFRecordError(
             f"HR snapshots without an LF partner (same parameters and redshift): {lost}"
         )
-    if not np.allclose(lf_snap["log_nhi"], hr["log_nhi"], rtol=1e-12, atol=0):
+    ambiguous = sorted({name(i) for i, c in enumerate(hr_keys) if lf_count[c] != 1})
+    if ambiguous:
+        raise MFRecordError(
+            f"HR snapshots whose LF partner is not unique in the LF cache: {ambiguous}"
+        )
+    lf_bins, hr_bins = np.asarray(lf_snap["log_nhi"]), np.asarray(hr["log_nhi"])
+    if lf_bins.shape != hr_bins.shape or not np.allclose(lf_bins, hr_bins, rtol=1e-12, atol=0):
         raise MFRecordError("the LF and HR column-density bins differ")
     h = np.array([p[0] for p in pairs])
     l = np.array([p[1] for p in pairs])
     z = np.asarray(hr["z"])[h]
-    dn = MF.build_dndx_res_corr(lf_snap["dndx"][l], lf_snap["z"][l], hr["dndx"][h], z)
-    cd = MF.build_cddf_res_corr(
-        lf_snap["f_nhi"][l], lf_snap["z"][l], hr["f_nhi"][h], z, hr["log_nhi"]
-    )
+    lf_d, hr_d = np.asarray(lf_snap["dndx"], float)[l], np.asarray(hr["dndx"], float)[h]
+    lf_f, hr_f = np.asarray(lf_snap["f_nhi"], float)[l], np.asarray(hr["f_nhi"], float)[h]
+    ok = np.isfinite(lf_d) & np.isfinite(hr_d) & (lf_d > 0) & (hr_d > 0)
+    if not ok.all():
+        bad = sorted({name(h[i]) for i in np.where(~ok.all(axis=1))[0]})
+        raise MFRecordError(f"matched snapshots whose dN/dX is not finite and positive: {bad}")
+    okf = np.isfinite(lf_f) & np.isfinite(hr_f) & (lf_f >= 0) & (hr_f >= 0)
+    if not okf.all():
+        bad = sorted({name(h[i]) for i in np.where(~okf.all(axis=1))[0]})
+        raise MFRecordError(
+            f"matched snapshots whose f(N_HI) is not finite and non-negative: {bad}"
+        )
+    dn = MF.build_dndx_res_corr(lf_d, lf_snap["z"][l], hr_d, z)
+    with np.errstate(invalid="ignore"), warnings.catch_warnings():
+        warnings.simplefilter(
+            "ignore", RuntimeWarning
+        )  # a bin empty in every pair: its ratio is 1 by design
+        cd = MF.build_cddf_res_corr(lf_f, lf_snap["z"][l], hr_f, z, hr_bins)
     if not np.array_equal(dn["z"], cd["z"]):
         raise MFRecordError("the dN/dX and CDDF tables came out on different redshifts")
     zr = np.round(z, 4)
@@ -164,14 +227,14 @@ def fit_tables(lf_snap, hr_snap, *, exclude_sims=()):
         "log_nhi_centres": np.asarray(cd["log_nhi"], dtype=np.float64),
         "cddf_ratio": np.asarray(cd["ratio"], dtype=np.float64),
     }
-    return tables, sorted(set(np.asarray(hr["sim"])[h])), len(pairs)
+    return tables, train, len(pairs)
 
 
 # --------------------------------------------------------------------------------------------- record checks
 def _numbers(x, shape, where, what):
     try:
         return _WM._num_list(x, shape, where, what)
-    except (_WM.WcMapError, ValueError) as e:  # ValueError: a ragged list
+    except (_WM.WcMapError, ValueError, OverflowError) as e:  # a ragged list; an integer too large
         raise MFRecordError(f"{where}: {what}: {e}") from None
 
 
