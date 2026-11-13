@@ -53,7 +53,14 @@ Three things to read with the table:
   restored. The filter removes the low-k rise of the subDLA and DLA classes, which is what the column `s` shows.
 - **What does not agree at that level: the low-k amplitude.** The LLS and subDLA classes of PRIYA rise more steeply
   towards low k than the template (`s` of 1.3 to 1.9); the large-DLA class rises less (`s` of 0.47 to 0.89). The
-  cause is not established.
+  cause is not established. Two things are known about the two sides at low k:
+  - **The template.** It was fitted on a smaller box than PRIYA's. Below roughly the lowest modes of that box it is an
+    extrapolation and is not reliable there. This is an order-of-magnitude argument from the box size, not a
+    measurement of the template's error.
+  - **The simulations.** Bird et al. (2023) estimate the cosmic variance of the PRIYA flux power spectrum from two
+    simulations that differ only in their initial seed (their section 3.1 and Figure 5): about 2 per cent at z < 3.6,
+    and 2 to 5 per cent for k < 3e-3 s/km at z >= 4. Those numbers are for the total flux power, not for the class
+    ratios compared here, whose own variance was not measured.
 
 ## What "restoring the troughs" means
 
@@ -92,7 +99,7 @@ Three things to read with the table:
 - **Not a statement about any survey data.**
 - **Not an explanation of the low-k difference.** The amplitudes at the lowest wavenumbers differ and the cause is
   not established: the simulation, the box and the sightline length differ, and the template is extrapolated below
-  the lowest mode of its own box.
+  the lowest mode of its own box (see "What does not agree" above).
 
 ## What you can run
 
@@ -105,23 +112,35 @@ from hcd_analysis.hcd_template import class_ratio
 
 k = np.array([0.001, 0.003, 0.01, 0.03])        # angular wavenumbers in s/km
 ratio = class_ratio(k, 3.0)                     # Rogers et al. 2018, Eq. 6, at z = 3
-print(sorted(ratio), ratio["LLS"].shape)
+print("classes of the model:", sorted(ratio))
+print("shape of one class ratio:", ratio["LLS"].shape)
 # far above the k range of the comparison the ratio tends to the constant c(z) of each class
-print({name: round(float(v[0]), 2) for name, v in class_ratio(np.array([1.0]), 3.0).items()})
+high_k = class_ratio(np.array([1.0]), 3.0)
+print("the constant c(z = 3) of each class:", {name: round(float(v[0]), 2) for name, v in high_k.items()})
 # the single DLA class of the simulations is compared with a mix of the two DLA templates
 dla = 0.585 * ratio["Small-DLA"] + 0.415 * ratio["Large-DLA"]
-print(dla.shape, bool(np.all(np.diff(dla) < 0)))
+print("the mixed DLA ratio falls with k over this range:", bool(np.all(np.diff(dla) < 0)))
 ```
+
+It prints:
 
 ```text
-['LLS', 'Large-DLA', 'Small-DLA', 'Sub-DLA'] (4,)
-{'LLS': 0.97, 'Sub-DLA': 0.87, 'Small-DLA': 0.68, 'Large-DLA': 0.38}
-(4,) True
+classes of the model: ['LLS', 'Large-DLA', 'Small-DLA', 'Sub-DLA']
+shape of one class ratio: (4,)
+the constant c(z = 3) of each class: {'LLS': 0.97, 'Sub-DLA': 0.87, 'Small-DLA': 0.68, 'Large-DLA': 0.38}
+the mixed DLA ratio falls with k over this range: True
 ```
 
-## Reference
+The four constants are those of the published coefficients; they are not simulation results.
+
+## References
 
 Rogers, K. K., Bird, S., Peiris, H. V., Pontzen, A., Font-Ribera, A., Leistedt, B. 2018, "Simulating the effect of
 high column density absorbers on the one-dimensional Lyman-alpha forest flux power spectrum", MNRAS, 474 (3),
 3032-3042, [doi:10.1093/mnras/stx2942](https://doi.org/10.1093/mnras/stx2942),
 [arXiv:1706.08532](https://arxiv.org/abs/1706.08532).
+
+Bird, S., Fernandez, M., Ho, M.-F., Qezlou, M., Monadi, R., Ni, Y., Chen, N., Croft, R., Di Matteo, T. 2023, "PRIYA: a
+new suite of Lyman-alpha forest simulations for cosmology", JCAP 2023 (10) 037,
+[doi:10.1088/1475-7516/2023/10/037](https://doi.org/10.1088/1475-7516/2023/10/037),
+[arXiv:2306.05471](https://arxiv.org/abs/2306.05471).
