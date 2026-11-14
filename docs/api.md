@@ -30,6 +30,18 @@ spectra compare with the per-class model of Rogers et al. (2018) once those are 
    :inherited-members:
 ```
 
+## The Gaussian likelihood
+
+`hcd_analysis.likelihood` joins a loaded model, PRIYA's model of the mean flux and the mixture of the class spectra
+into the Gaussian log likelihood of a P1D data vector with a full covariance. The module docstring states the
+mathematics, including the rule that brings the model to the data's wavenumbers (linear interpolation at the
+wavenumber of each bin, not an average over a bin) and what the covariance does not contain (no emulator error).
+
+```{eval-rst}
+.. autoapimodule:: hcd_analysis.likelihood
+   :members:
+```
+
 ## From dN/dX to sightline fractions
 
 How a model's incidence dN/dX becomes the sightline fractions `w_c` that `add_hcd` mixes with. A loaded model
