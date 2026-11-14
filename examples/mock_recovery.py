@@ -6,7 +6,8 @@
 2. **A chain** (only with ``--demo N`` or ``--full``; needs Cobaya, which is not a requirement of the package:
    ``pip install cobaya``). ``--demo N`` runs one short Metropolis chain of N accepted steps and labels it as a
    demonstration: it is NOT converged, and its numbers mean nothing beyond "the pieces work together". ``--full``
-   runs the settings written out in ``FULL`` below until Cobaya's own convergence test stops it.
+   runs one chain with the settings written out in ``FULL`` below until Cobaya's own convergence test stops it.
+   Either chain starts at the truth of the mock. This script is a single process: it does not run under MPI.
 3. **The posterior predictive** (only after a chain): model vectors at points of the chain, with one noisy replicate
    of the data for each, drawn as a band over the data vector.
 
@@ -26,7 +27,9 @@ Nothing is fitted to a measurement here: the data vector is a simulation's.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
+import logging
 import os
 import sys
 
@@ -42,6 +45,7 @@ from hcd_analysis import likelihood as L
 #   package's own sampling box (emulator.data.SAMPLING_LIMITS); the model is sparsely trained in the widened corners.
 # - alphaq: up to 3.0, the edge of the trained box. That is beyond the package's own sampling box, which stops at 2.5
 #   because the training simulations are sparse above it.
+# - ns: up to 1.05. Above 0.995 the training simulations are sparse too; the predictor flags such a point (ns_ridge).
 # - tau0_amp and dtau0: PRIYA's two mean-flux parameters (hp.tau_eff_priya); the paper's tau_0 and d tau_0.
 BOXES = {
     "ns": (0.8, 1.05),
@@ -58,11 +62,13 @@ BOXES = {
 }
 # Gaussian terms, (mean, standard deviation): this P1D alone does not constrain these two parameters. Fernandez, Bird
 # and Ho (2024) quote Gaussian priors of width 0.015 on h and 0.005 on the AGN feedback parameter. This example uses
-# standard deviations of 0.015 / sqrt(2) and 0.005 / sqrt(2): the widths of the reference chains its stored posterior
-# was made with, written here as ordinary Gaussians with their true standard deviations.
+# standard deviations of 0.015 / sqrt(2) and 0.005 / sqrt(2), narrower by sqrt(2) than the quoted widths. They are the
+# widths of this project's own reference chains for such a mock (not shipped here), written as ordinary Gaussians with
+# their true standard deviations.
 GAUSSIAN_TERMS = {"hub": (0.70, 0.015 / np.sqrt(2.0)), "bhfeedback": (0.05, 0.005 / np.sqrt(2.0))}
-# The sampler of --full: Cobaya's Metropolis sampler, four chains under MPI (mpirun -n 4), stopped by Cobaya's
-# convergence test. The proposal starts as a fixed fraction of each box and is then learned from the chain.
+# The sampler of --full: Cobaya's Metropolis sampler, one chain, stopped by Cobaya's convergence test on that chain
+# (R-1 of the means below 0.01, of the bounds below 0.05). The proposal starts as a fixed fraction of each box and is
+# then learned from the chain. The project's reference chains ran four chains; this script runs one.
 FULL = {"Rminus1_stop": 0.01, "Rminus1_cl_stop": 0.05, "learn_proposal": True}
 PROPOSAL_FRACTION = 0.02  # the starting proposal width, as a fraction of each box: efficiency only
 BURN_IN_FRACTION = 0.3  # rows dropped from the start of a chain before anything is read from it
@@ -125,6 +131,8 @@ def parse(argv=None) -> argparse.Namespace:
         ap.error("--research needs --purpose")
     if a.demo < 0 or (a.demo and a.full):
         ap.error("give --demo N (N > 0) or --full, not both")
+    if a.draws < 1:
+        ap.error("--draws must be at least 1")
     return a
 
 
@@ -146,6 +154,11 @@ def part_one(like: L.GaussianP1DLikelihood) -> dict:
     if data.truth is None:
         sys.exit(
             "refusing: this data set states no truth; the example needs a mock made at a known point"
+        )
+    missing = [name for name in like.param_names if name not in data.truth]
+    if missing:
+        sys.exit(
+            f"refusing: the truth of this data set lacks {missing}; the example needs all eleven parameters"
         )
     theta = {name: float(data.truth[name]) for name in like.param_names}
     outside = [n for n in like.param_names if not BOXES[n][0] <= theta[n] <= BOXES[n][1]]
@@ -221,6 +234,21 @@ def cobaya_info(
     }
 
 
+@contextlib.contextmanager
+def quiet_predictor_log():
+    """Switch off the INFO record that the predictor writes for each prediction that applies a correction, and put
+    the logger's level back afterwards. A sampler lets INFO records pass and calls the likelihood at every step, so
+    the record would be written once per step. The flags of a prediction say the same without any logging.
+    """
+    logger = logging.getLogger("hcd_analysis.predictor")
+    level = logger.level
+    logger.setLevel(logging.WARNING)
+    try:
+        yield
+    finally:
+        logger.setLevel(level)
+
+
 def part_two(like, theta, a) -> np.ndarray | None:
     """The chain. Returns its points after burn-in, shape (n, 11), or None when no chain was asked for."""
     if not (a.demo or a.full):
@@ -231,6 +259,13 @@ def part_two(like, theta, a) -> np.ndarray | None:
             "=== Part 2: skipped. Cobaya is not installed (pip install cobaya); it is not a requirement of the package"
         )
         return None
+    outside = [n for n in like.param_names if not BOXES[n][0] <= theta[n] <= BOXES[n][1]]
+    if outside:
+        sys.exit(
+            f"refusing: the chain starts at the truth, and the truth lies outside the flat box of {outside}"
+        )
+    if int(os.environ.get("OMPI_COMM_WORLD_SIZE", os.environ.get("PMI_SIZE", "1"))) > 1:
+        sys.exit("refusing: this example is a single process; run it without mpirun")
     from cobaya.run import run
 
     os.makedirs(a.out, exist_ok=True)
@@ -242,13 +277,20 @@ def part_two(like, theta, a) -> np.ndarray | None:
             else "the full chain"
         )
     )
-    _, sampler = run(cobaya_info(like, theta, demo=a.demo, seed=a.seed, out=a.out))
+    line("the chain starts at", "the truth of the mock")
+    line("an earlier chain with the same prefix is overwritten", os.path.join(a.out, "chain"))
+    line(
+        "the library's log record for each corrected prediction",
+        "switched off while the sampler and the predictive draws run (it would be one line per likelihood call)",
+    )
+    with quiet_predictor_log():
+        _, sampler = run(cobaya_info(like, theta, demo=a.demo, seed=a.seed, out=a.out))
     sample = sampler.products()["sample"]
     rows = np.column_stack([np.asarray(sample[name]) for name in like.param_names])
     weights = np.asarray(sample["weight"])
     keep = np.arange(len(rows)) >= int(BURN_IN_FRACTION * len(rows))
     line("accepted steps in the chain", len(rows))
-    line("rows kept after dropping the first 30 per cent", int(keep.sum()))
+    line(f"rows kept after dropping the first {BURN_IN_FRACTION:.0%} as burn-in", int(keep.sum()))
     line("points the model refused, by kind (count and first message)", like.refusals)
     line("the chain is written in Cobaya's format with the prefix", os.path.join(a.out, "chain"))
     rows, weights = rows[keep], weights[keep]
@@ -283,7 +325,8 @@ def part_three(like, points, a) -> None:
 
     print("=== Part 3: the posterior predictive of the data vector")
     thetas = [dict(zip(like.param_names, row)) for row in points]
-    models, replicates = like.predictive(thetas, np.random.default_rng(a.seed + 1))
+    with quiet_predictor_log():
+        models, replicates = like.predictive(thetas, np.random.default_rng(a.seed + 1))
     data = like.data
     sigma = np.sqrt(np.diag(data.cov))
     lo, hi = np.percentile(replicates, [16, 84], axis=0)

@@ -40,6 +40,7 @@ OBJECTS = [
     likelihood.P1DData.from_blocks,
     likelihood.interp_to_bins,
     likelihood.GaussianP1DLikelihood,
+    hp.same_run,
 ]
 
 

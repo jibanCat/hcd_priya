@@ -140,6 +140,7 @@ import copy
 import dataclasses
 import logging
 import os
+import re
 import warnings
 from typing import Any, Mapping, Sequence
 
@@ -1773,6 +1774,46 @@ class Bundle(_PredictorBase):
             self._attach_mf(mf, kind="release")
 
 
+_RUN_NAME = re.compile(
+    "".join(rf"{name}(?P<{name}>[0-9.]+(?:e[-+]?[0-9]+)?)" for name in PARAM_NAMES) + r"\Z"
+)
+SAME_RUN_RTOL = 0.015
+
+
+def same_run(a: str, b: str) -> bool:
+    """Whether two simulation names are the same run.
+
+    True for equal strings. Otherwise both names must be of the PRIYA form, the nine parameters
+    in the order of ``PARAM_NAMES`` each followed by its value (``ns0.9Ap1.5e-09herei3.9...``),
+    and every parameter must agree within ``SAME_RUN_RTOL`` (1.5 per cent). The high- and the
+    low-resolution run of one design point can differ in the last printed digit of a parameter;
+    two different design points differ by far more in at least one. A name of another form is
+    equal only to itself.
+
+    Examples
+    --------
+    >>> import hcd_analysis.predictor as hp
+    >>> lf = "ns0.9Ap1.5e-09herei3.9heref2.8alphaq1.57hub0.7omegamh20.141hireionz7.1bhfeedback0.05"
+    >>> hr = "ns0.9Ap1.5e-09herei3.9heref2.8alphaq1.58hub0.7omegamh20.142hireionz7.1bhfeedback0.05"
+    >>> print("two spellings of one run:", hp.same_run(lf, hr))
+    two spellings of one run: True
+    >>> other = lf.replace("ns0.9", "ns0.95")
+    >>> print("another run:", hp.same_run(lf, other), "| a name of another form:", hp.same_run("simA", "simB"))
+    another run: False | a name of another form: False
+    """
+    if a == b:
+        return True
+    ma, mb = _RUN_NAME.match(str(a)), _RUN_NAME.match(str(b))
+    if not (ma and mb):
+        return False
+    try:
+        va = np.array([float(ma[n]) for n in PARAM_NAMES])
+        vb = np.array([float(mb[n]) for n in PARAM_NAMES])
+    except ValueError:
+        return False
+    return bool(np.all(np.abs(va - vb) <= SAME_RUN_RTOL * np.maximum(np.abs(va), np.abs(vb))))
+
+
 class ResearchPredictor(_PredictorBase):
     """A research model, ready to predict. ``load_research_bundle`` returns it.
 
@@ -1855,13 +1896,23 @@ class ResearchPredictor(_PredictorBase):
 
     def _attach_incidence(self, inc):
         """As the base, after the held-out guard of a research model: the record's table must be built without the
-        simulations this backbone holds out (as re-derived from the member metas), and the record must say so. A
-        held-out name among its ``train_sims`` is refused; so is a held-out name that its
-        ``composition.excluded_sims`` does not list (the names are compared as strings, so a record that names a
-        simulation in another way is refused here and never passes unseen)."""
+        simulations this backbone holds out (as re-derived from the member metas), and the record must say so.
+
+        Refused: a record with a name in ``train_sims`` that is the same run as a held-out simulation
+        (``same_run``: the same string, or the same nine parameters within 1.5 per cent, because the high- and the
+        low-resolution run of one design point can be named with two digits of difference); and a record whose
+        ``composition.excluded_sims`` does not list every held-out simulation by the exact string the backbone
+        holds.
+
+        Limits. The guard compares the names the record declares about itself; it cannot see which simulations
+        the table was really built from. And since ``excluded_sims`` can only name simulations that have a
+        high-resolution run, a backbone that holds out a simulation without one gets no record from the builder
+        that passes here: a refusal, the safe side."""
         inc = _IM.reverify(inc)
         held = set(self._backbone_identity()["held_out_sims"])
-        seen = sorted(held & set(inc.record["train_sims"]))
+        seen = sorted(
+            name for name in inc.record["train_sims"] if any(same_run(name, h) for h in held)
+        )
         if seen:
             raise _MR.MFRecordError(
                 f"refusing the incidence MF record {inc.record_sha256[:12]}: its table was built with the "

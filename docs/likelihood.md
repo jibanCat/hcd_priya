@@ -75,8 +75,10 @@ python examples/mock_recovery.py --release RELEASE_DIR SHA256 --data MOCK_FILE S
   point. Every line is labelled.
 - **Part 2** needs Cobaya, which is not a requirement of the package (`pip install cobaya`). `--demo N` runs one
   short chain of N accepted steps and labels it "A DEMONSTRATION CHAIN, NOT CONVERGED": its numbers are not results.
-  `--full` runs the settings written out in the script until Cobaya's own convergence test stops it. Without Cobaya
-  the part says so and is skipped.
+  `--full` runs one chain with the settings written out in the script until Cobaya's own convergence test stops it.
+  Either chain starts at the truth of the mock, and the script says so; it is a single process and refuses to run
+  under MPI. While the sampler and the predictive draws run, the script switches off the predictor's log
+  record for each corrected prediction, which would otherwise be written at every step. Without Cobaya the part says so and is skipped.
 - **Part 3**, after a chain, draws the posterior predictive of the data vector: model vectors at points of the
   chain, each with one replicate of the data drawn from the covariance.
 
@@ -85,12 +87,15 @@ What the example fixes is written out at the top of the script:
 - **The flat boxes of the eleven parameters:** the parameter limits of Table 2 of Fernandez, Bird and Ho (2024),
   read in the arXiv version. The two helium reionisation redshifts use the package's own sampling box, which is
   narrower than the box the model was trained on. `alphaq` is sampled to 3.0, the edge of the trained box and
-  beyond the package's own sampling box (2.5), where the training simulations are sparse.
+  beyond the package's own sampling box (2.5), where the training simulations are sparse. `ns` is sampled to 1.05;
+  above 0.995 the training simulations are sparse too, and the predictor flags such a point (`ns_ridge`).
 - **Two Gaussian terms,** on `hub` (mean 0.70) and `bhfeedback` (mean 0.05), which this kind of data does not
-  constrain. Their standard deviations are 0.015 / sqrt(2) and 0.005 / sqrt(2), the widths of the reference chains the
-  example is compared with; they are narrower by sqrt(2) than the widths that Fernandez, Bird and Ho (2024) quote.
-- **The sampler settings of `--full`:** Cobaya's Metropolis sampler, four chains, stopped at R-1 < 0.01 for the means
-  and R-1 < 0.05 for the bounds; the first 30 per cent of a chain is dropped before anything is read from it.
+  constrain. Their standard deviations are 0.015 / sqrt(2) and 0.005 / sqrt(2), narrower by sqrt(2) than the widths that
+  Fernandez, Bird and Ho (2024) quote: they are the widths of this project's own reference chains for such a mock,
+  which are not shipped.
+- **The sampler settings of `--full`:** Cobaya's Metropolis sampler, one chain, stopped at R-1 < 0.01 for the means
+  and R-1 < 0.05 for the bounds; the first 30 per cent of a chain is dropped before anything is read from it. The
+  project's reference chains ran four chains; this script runs one.
 
 A research (fold) model, trained without the simulation the mock comes from, is loaded with `--research`, its fold
 MF record with `--mf` and an incidence record built without that simulation with `--incidence`.
@@ -110,9 +115,11 @@ from two files that you supply into a `P1DData`: five redshifts, 3.4 to 4.2, wit
 - **`cross_redshift` has no default.** `True` keeps the full 65 x 65 matrix of the file; `False` keeps the five
   blocks on the diagonal and sets the covariance between redshifts to zero. The choice changes a likelihood, so it
   is the user's to state.
-- **Where the files come from: not verified here.** The code they are distributed with attributes them to the
-  XQ-100 analysis of Wilson, Irsic and McQuinn (2021). This project has not verified that attribution, or the
-  definition of the column it reads, against the paper.
+- **Three things are not verified here.** The code the files are distributed with attributes them to the XQ-100
+  analysis of Wilson, Irsic and McQuinn (2021); this project has not verified that attribution, or the definition
+  of the column it reads, against the paper. And the covariance file holds indices and values only: that its order
+  is redshift 3.4 to 4.2 ascending, then wavenumber ascending, is taken from the same code, which marks it as
+  unchecked. A wrong order would give a wrong likelihood without any error.
 
 ## References
 

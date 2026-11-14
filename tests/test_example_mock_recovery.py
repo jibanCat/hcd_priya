@@ -3,9 +3,12 @@ out, and the input it hands to Cobaya (built here without Cobaya; the chain itse
 Synthetic values only."""
 
 import importlib.util
+import logging
 import math
 import os
+import re
 import sys
+import types
 
 import numpy as np
 import pytest
@@ -71,7 +74,8 @@ def test_part_one_prints_labelled_lines_and_a_zero_chi_square_at_the_truth(setup
     assert "=== Part 2: no chain was asked for (--demo N, or --full)" in lines
     assert "=== Part 3: no chain, so no posterior predictive" in lines
     body = [ln for ln in lines if not ln.startswith("===")]
-    assert all(": " in ln or ln.endswith(":") for ln in body), "every printed line is labelled"
+    labelled = re.compile(r"[a-zA-Z(][^:]{8,}: \S")  # a label of words, a colon, then a value
+    assert all(labelled.match(ln) for ln in body), [ln for ln in body if not labelled.match(ln)]
 
 
 def test_without_cobaya_the_chain_is_skipped_and_said_so(setup, capsys, monkeypatch):
@@ -152,3 +156,124 @@ def test_what_the_example_refuses(setup, capsys, tmp_path):
     sha = L.write_p1d_data(tmp_path / "bare.json", bare)
     with pytest.raises(SystemExit, match="states no truth"):
         ex.main(["--release", *setup["release"], "--data", str(tmp_path / "bare.json"), sha])
+
+
+class _FakeSample:
+    """What the example reads from Cobaya's sample: columns by name, and the weights."""
+
+    def __init__(self, columns):
+        self._c = columns
+
+    def __getitem__(self, name):
+        return self._c[name]
+
+
+def _pretend_cobaya_is_installed(ex, monkeypatch):
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        ex.importlib.util,
+        "find_spec",
+        lambda name, *a: object() if name == "cobaya" else real(name, *a),
+    )
+
+
+def test_the_chain_is_read_with_its_weights_after_burn_in_and_the_predictive_is_drawn(
+    setup, capsys, monkeypatch, tmp_path
+):
+    """Parts two and three with a stand-in for Cobaya: ten made-up rows with unequal weights. Checked: the logger is
+    quiet while the sampler runs and restored after, the burn-in, the weighted percentiles, the figure.
+    """
+    ex = _script()
+    seen = {}
+    rows = 10
+    columns = {n: THETA[n] * (1.0 + 1e-3 * np.arange(rows)) for n in THETA if THETA[n] != 0}
+    columns["dtau0"] = 1e-3 * np.arange(rows)
+    columns["weight"] = np.array([1.0, 1, 1, 5, 1, 1, 1, 1, 1, 7])
+
+    def run(info):
+        seen["level"] = logging.getLogger("hcd_analysis.predictor").level
+        seen["logp"] = info["likelihood"]["p1d"]["external"](**THETA)
+        seen["info"] = info
+        return None, types.SimpleNamespace(products=lambda: {"sample": _FakeSample(columns)})
+
+    fake = types.ModuleType("cobaya")
+    fake.run = types.ModuleType("cobaya.run")
+    fake.run.run = run
+    monkeypatch.setitem(sys.modules, "cobaya", fake)
+    monkeypatch.setitem(sys.modules, "cobaya.run", fake.run)
+    _pretend_cobaya_is_installed(ex, monkeypatch)
+    before = logging.getLogger("hcd_analysis.predictor").level
+    out_dir = tmp_path / "out"
+    argv = [
+        "--release",
+        *setup["release"],
+        "--data",
+        *setup["data"],
+        "--demo",
+        "10",
+        "--draws",
+        "4",
+    ]
+    assert ex.main(argv + ["--out", str(out_dir), "--seed", "5"]) == 0
+    out = capsys.readouterr().out
+    assert seen["level"] == logging.WARNING
+    assert logging.getLogger("hcd_analysis.predictor").level == before
+    assert np.isfinite(seen["logp"]) and seen["info"]["sampler"]["mcmc"]["max_samples"] == 10
+    assert "=== Part 2: A DEMONSTRATION CHAIN, NOT CONVERGED: its numbers are not results" in out
+    assert "the chain starts at: the truth of the mock" in out
+    assert "accepted steps in the chain: 10" in out
+    assert "rows kept after dropping the first 30% as burn-in: 7" in out
+    # the weighted percentiles of the seven kept rows of one parameter, computed here by hand
+    v, w = columns["ns"][3:], columns["weight"][3:]
+    cdf = np.cumsum(w) / w.sum()
+    want = [v[np.searchsorted(cdf, q)] for q in (0.16, 0.5, 0.84)]
+    (got,) = [ln for ln in out.splitlines() if ln.startswith("ns: 16th, 50th, 84th percentile")]
+    assert got == (
+        f"ns: 16th, 50th, 84th percentile of the chain | truth: {want[0]} {want[1]} {want[2]} | {THETA['ns']}"
+    )
+    assert want[0] == v[0] and want[1] != np.median(
+        v
+    )  # the weights matter: the heavy rows pull the median
+    assert "points of the chain used: 4" in out
+    assert (out_dir / "posterior_predictive.png").stat().st_size > 1000
+
+
+def test_the_logger_is_quiet_only_inside_the_block_and_a_chain_needs_the_truth_inside_the_boxes(
+    setup, capsys, monkeypatch, tmp_path
+):
+    ex = _script()
+    logger = logging.getLogger("hcd_analysis.predictor")
+    before = logger.level
+    with pytest.raises(RuntimeError):
+        with ex.quiet_predictor_log():
+            assert logger.level == logging.WARNING
+            raise RuntimeError("the level is put back also when the sampler fails")
+    assert logger.level == before
+    # a truth outside a flat box: part one still runs and says so; a chain is refused, since it would start there
+    d = L.read_p1d_data(setup["data"][0], expected_sha256=setup["data"][1])
+    outside = dict(d.truth, hub=0.749)
+    moved = L.P1DData(z=d.z, k=d.k, p1d=d.p1d, cov=d.cov, truth=outside)
+    sha = L.write_p1d_data(tmp_path / "outside.json", moved)
+    _pretend_cobaya_is_installed(ex, monkeypatch)
+    monkeypatch.setitem(
+        ex.BOXES, "hub", (0.65, 0.74)
+    )  # a narrower box, so that this truth lies outside it
+    with pytest.raises(SystemExit, match="the truth lies outside the flat box of \\['hub'\\]"):
+        ex.main(
+            [
+                "--release",
+                *setup["release"],
+                "--data",
+                str(tmp_path / "outside.json"),
+                sha,
+                "--demo",
+                "5",
+            ]
+        )
+    assert (
+        "parameters of the truth outside this example's flat boxes: ['hub']"
+        in capsys.readouterr().out
+    )
+    with pytest.raises(SystemExit) as e:
+        ex.main(["--release", *setup["release"], "--data", *setup["data"], "--draws", "0"])
+    assert e.value.code == 2 and "--draws must be at least 1" in capsys.readouterr().err

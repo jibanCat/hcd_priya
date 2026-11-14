@@ -445,10 +445,15 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   re-derived from the member metas, and only together with the P1D MF record.
 - **On a research (fold) model.** `predictor.load_research_bundle(..., mf_dir=..., mf_record_sha256=...,
   incidence_dir=..., incidence_record_sha256=...)` applies a record to a fold model that carries its fold MF record,
-  for held-out predictions of the corrected `dndx` and `w_c`. The table must be built without the simulations the
-  backbone holds out: a held-out name among the record's `train_sims` is refused, and so is a held-out name that the
-  record's `composition.excluded_sims` does not list. The names are compared as strings. Without the two keywords
-  the loader does what it did.
+  for held-out predictions of the corrected `dndx`, `w_c` and `cddf`. The table must be built without the
+  simulations the backbone holds out. Refused: a record with a name in `train_sims` that is the same run as a
+  held-out simulation (the same string, or the same nine parameters within 1.5 per cent: the high- and the
+  low-resolution run of one design point can be named with a digit of difference); and a record whose
+  `composition.excluded_sims` does not list every held-out simulation by the exact string the backbone holds. The
+  guard compares the names a record declares; it cannot see which simulations the table was really built from.
+  A backbone that holds out a simulation without a high-resolution run gets no record from the builder that
+  passes: the builder's exclusions can only name simulations that have one. Without the two keywords the loader
+  does what it did.
 - **Redshifts outside the table.** At a snapshot redshift the table does not hold, the factor is interpolated
   between the neighbouring rows and the LF+MF prediction is flagged `incidence_mf_z_interpolated`; beyond the table
   it is held at the edge row and flagged `incidence_mf_z_clamped`. An LF prediction applies no table and has both

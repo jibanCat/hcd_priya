@@ -1201,3 +1201,37 @@ def test_a_fold_model_refuses_an_incidence_record_that_is_not_held_out(tmp_path)
     with pytest.raises(E, match="sha256 does not match"):
         load("good", leak)
     assert load("good", good).provenance["incidence_mf"]["record_sha256"] == good
+
+
+def test_two_spellings_of_one_run_are_the_same_run_and_two_design_points_are_not():
+    lf = "ns0.9Ap1.5e-09herei3.9heref2.8alphaq1.57hub0.7omegamh20.141hireionz7.1bhfeedback0.05"
+    hr = lf.replace("alphaq1.57", "alphaq1.58").replace("omegamh20.141", "omegamh20.142")
+    assert hp.same_run(lf, lf) and hp.same_run(lf, hr) and hp.same_run(hr, lf)
+    assert not hp.same_run(lf, lf.replace("ns0.9", "ns0.95"))  # another design point
+    assert not hp.same_run(lf, lf.replace("hireionz7.1", "hireionz7.3"))
+    assert not hp.same_run("synthsim1", "synthsim2") and hp.same_run("synthsim1", "synthsim1")
+    assert not hp.same_run(lf, lf + "x") and not hp.same_run(lf, "synthsim1")
+
+
+def test_a_record_that_trains_on_the_other_spelling_of_a_held_out_run_is_refused(
+    tmp_path, monkeypatch
+):
+    """The high- and the low-resolution run of one design point can be named with a digit of difference. A record
+    that lists the held-out run under one spelling among its training simulations and under the other among its
+    exclusions must not pass."""
+    lf = "ns0.9Ap1.5e-09herei3.9heref2.8alphaq1.57hub0.7omegamh20.141hireionz7.1bhfeedback0.05"
+    hr = lf.replace("alphaq1.57", "alphaq1.58").replace("omegamh20.141", "omegamh20.142")
+    res, kw, cache = _fold(tmp_path)
+    rp = hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, **kw)
+    real = rp._backbone_identity()
+    monkeypatch.setattr(rp, "_backbone_identity", lambda: dict(real, held_out_sims=[lf]))
+    leak = _fold_incidence(tmp_path / "leak", cache, train=["synthsim0", hr], excluded=[lf])
+    with pytest.raises(E, match="not a held-out prediction"):
+        rp._attach_incidence(IM.load_record(tmp_path / "leak", expected_record_sha256=leak))
+    # the exclusion must name the held-out run by the exact string: the other spelling is refused, loudly
+    other = _fold_incidence(
+        tmp_path / "other", cache, train=["synthsim0", "synthsim1"], excluded=[hr]
+    )
+    with pytest.raises(E, match="does not state that it excludes"):
+        rp._attach_incidence(IM.load_record(tmp_path / "other", expected_record_sha256=other))
+    assert rp._inc is None  # nothing was attached by either

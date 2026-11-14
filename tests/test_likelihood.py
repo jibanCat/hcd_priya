@@ -383,7 +383,7 @@ def test_a_data_set_file_is_read_only_against_its_digest_and_only_if_strict(tmp_
     refused(dict(good, provenance=None), "provenance must be an object")
     refused(json.dumps(good)[:-1] + ', "format": "hcd_priya.p1d_data/1"}', "duplicate")
     refused(json.dumps(good).replace("10.0", "NaN", 1), "not allowed")
-    refused("not json", "data")
+    refused("not json", "unreadable JSON")
 
 
 def test_a_covariance_between_redshifts_does_not_fit_the_file_format(tmp_path):
@@ -493,5 +493,103 @@ def test_an_xq100_covariance_file_must_give_every_element_once(tmp_path):
         "\n".join(lines[:-1] + [lines[0]]) + "\n", encoding="utf-8"
     )  # one twice, one missing
     pins["covariance"] = hashlib.sha256(covf.read_bytes()).hexdigest()
-    with pytest.raises(E, match="not every element"):
+    with pytest.raises(E, match="is given twice"):
+        L.load_xq100(data, covf, cross_redshift=True, expected_sha256=pins)
+
+
+# ------------------------------------------------------------------------ what the review of the branch added
+def test_what_is_wrong_for_every_point_is_refused_and_never_turned_into_minus_infinity(emu):
+    rows = _bins(emu)
+    twice = L.P1DData.from_blocks(
+        z=[3.0, 3.0 + 5e-10],  # two redshifts of the data that are the same snapshot
+        k=rows,
+        p1d=[np.ones(r.size) for r in rows],
+        cov_blocks=[np.eye(r.size) for r in rows],
+    )
+    with pytest.raises(E, match="the same snapshot redshift"):
+        L.GaussianP1DLikelihood(emu, twice)
+    for bad in (
+        np.full((3, 3), 0.05),
+        np.full((1, 3), 0.05),
+    ):  # not (3,) and not one row per redshift
+        with pytest.raises(E, match="fixed amplitudes must have shape \\(3,\\) or \\(2, 3\\)"):
+            L.GaussianP1DLikelihood(emu, _data(emu), hcd=bad)
+    # a data redshift below the multi-fidelity correction: every point is refused, so the sampler is told, loudly
+    pred = emu.predict(PARAMS, 2.2, tau0_amp=1.0, dtau0=0.0, fidelity="LF")
+    k = 0.5 * (np.asarray(pred.k)[1:4] + np.asarray(pred.k)[2:5])
+    low = L.P1DData.from_blocks(z=[2.2], k=[k], p1d=[np.ones(3)], cov_blocks=[np.eye(3)])
+    with pytest.raises(hp.MFRangeError):
+        L.GaussianP1DLikelihood(emu, low).sampler_logp(THETA)
+    lf = L.GaussianP1DLikelihood(emu, low, fidelity="LF")
+    assert np.isfinite(lf.sampler_logp(THETA)) and lf.refusals == {}
+
+
+def test_the_order_of_the_redshifts_is_the_data_sets_and_a_coupled_covariance_is_used_in_full(emu):
+    rows = _bins(emu, n=(4, 4))
+    values = [np.linspace(3.0, 2.0, 4), np.linspace(5.0, 4.0, 4)]
+    up = L.P1DData.from_blocks(z=ZS, k=rows, p1d=values, cov_blocks=[np.eye(4)] * 2)
+    down = L.P1DData.from_blocks(
+        z=ZS[::-1], k=rows[::-1], p1d=values[::-1], cov_blocks=[np.eye(4)] * 2
+    )
+    a = L.GaussianP1DLikelihood(emu, up).model_vector(THETA)
+    b = L.GaussianP1DLikelihood(emu, down).model_vector(THETA)
+    np.testing.assert_array_equal(
+        b, np.concatenate([a[4:], a[:4]])
+    )  # the model follows the data's order
+    i = np.arange(8)
+    full = 0.05 * 0.6 ** np.abs(i[:, None] - i[None, :])  # correlations between the two redshifts
+    coupled = L.P1DData(z=ZS, k=tuple(rows), p1d=np.concatenate(values), cov=full)
+    like = L.GaussianP1DLikelihood(emu, coupled)
+    want = multivariate_normal(mean=like.model_vector(THETA), cov=full).logpdf(coupled.p1d)
+    assert like.loglike(THETA) == pytest.approx(want, rel=1e-12)
+    blocks = L.P1DData.from_blocks(
+        z=ZS, k=rows, p1d=values, cov_blocks=[full[:4, :4], full[4:, 4:]]
+    )
+    assert L.GaussianP1DLikelihood(emu, blocks).loglike(THETA) != like.loglike(THETA)
+
+
+def test_only_numbers_are_numbers_and_a_file_that_could_not_be_read_back_is_not_written(
+    tmp_path, monkeypatch
+):
+    kw = dict(z=[2.6], k=[[0.01, 0.02]], cov_blocks=[np.eye(2)])
+    for bad in (["1.0", "2.0"], [True, False]):  # text and booleans would convert to float64
+        with pytest.raises(E, match="p1d must be numbers"):
+            L.P1DData.from_blocks(p1d=[bad], **kw)
+    with pytest.raises(E, match="at least one wavenumber"):
+        L.interp_to_bins([0.0, 1.0], [1.0, 2.0], [])
+    d = _made_up()
+    monkeypatch.setattr(L, "MAX_DATA_BYTES", 100)
+    with pytest.raises(E, match="above the 100 that read_p1d_data reads"):
+        L.write_p1d_data(tmp_path / "big.json", d)
+    assert not (tmp_path / "big.json").exists()
+
+
+def test_the_indices_of_an_xq100_covariance_file_are_checked_one_by_one(tmp_path):
+    data, covf, pins, _ = _xq100_stand_in(tmp_path)
+    lines = covf.read_text(encoding="utf-8").splitlines()
+
+    def refused(changed, why):
+        covf.write_text("\n".join(changed) + "\n", encoding="utf-8")
+        pins["covariance"] = hashlib.sha256(covf.read_bytes()).hexdigest()
+        with pytest.raises(E, match=why):
+            L.load_xq100(data, covf, cross_redshift=True, expected_sha256=pins)
+
+    i, j, v = lines[1].split()
+    refused(
+        [lines[0], f"-1 {j} {v}"] + lines[2:], "two indices from 0 to 64"
+    )  # -1 would wrap to the last row
+    refused([lines[0], f"65 {j} {v}"] + lines[2:], "two indices from 0 to 64")
+    refused([lines[0], lines[0]] + lines[2:], "the element \\(0, 0\\) is given twice")
+    refused([lines[0], f"{i} {j} x"] + lines[2:], "is not a number")
+
+
+def test_xq100_redshifts_out_of_order_are_refused(tmp_path):
+    data, covf, pins, _ = _xq100_stand_in(tmp_path)
+    rows = data.read_text(encoding="utf-8").splitlines()
+    head, body = rows[0], rows[1:]
+    blocks = [body[a : a + 13] for a in range(0, len(body), 13)]
+    blocks[3], blocks[4] = blocks[4], blocks[3]  # z 3.8 before z 3.6
+    data.write_text("\n".join([head] + [ln for b in blocks for ln in b]) + "\n", encoding="utf-8")
+    pins["data"] = hashlib.sha256(data.read_bytes()).hexdigest()
+    with pytest.raises(E, match="not in ascending order"):
         L.load_xq100(data, covf, cross_redshift=True, expected_sha256=pins)

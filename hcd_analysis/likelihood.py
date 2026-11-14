@@ -24,7 +24,8 @@ bringing the model to the data's wavenumbers, and the Gaussian itself.
 
        ln L = -1/2 r^T C^-1 r  -  1/2 ln det C  -  N/2 ln(2 pi)
 
-**What the covariance is.** Whatever the data set states: C is used as given. This module adds no
+**What the covariance is.** Whatever the data set states: C is used as given (when it differs
+from its transpose by rounding, its symmetric part: see ``P1DData``). This module adds no
 emulator error to it. A likelihood built this way treats the model as exact, so a posterior from
 it is narrower than one that accounts for the error of the emulator.
 
@@ -56,6 +57,7 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike
+from scipy.linalg import solve_triangular
 
 from . import predictor as _hp
 from .emulator import safe_io as _S
@@ -96,12 +98,20 @@ def _frozen(a):
     return out
 
 
+def _numbers(name, a):
+    """``a`` as a float64 array. Text and booleans would convert to float64; they are not numbers here."""
+    try:
+        given = np.asarray(a)
+        if given.dtype.kind not in "iuf":
+            raise TypeError
+        return given.astype(np.float64)
+    except (TypeError, ValueError, OverflowError):
+        raise LikelihoodInputError(f"{name} must be numbers") from None
+
+
 def _vector(name, a, n=None):
     """A finite float64 vector of length ``n`` (any length when ``n`` is None)."""
-    try:
-        v = np.asarray(a, dtype=np.float64)
-    except (TypeError, ValueError):
-        raise LikelihoodInputError(f"{name} must be numbers") from None
+    v = _numbers(name, a)
     if v.ndim != 1 or (n is not None and v.shape != (n,)):
         want = "a vector" if n is None else f"a vector of length {n}"
         raise LikelihoodInputError(f"{name} must be {want}, got shape {v.shape}")
@@ -172,10 +182,7 @@ class P1DData:
             rows.append(_frozen(r))
         n = sum(r.size for r in rows)
         p1d = _vector("p1d", self.p1d, n)
-        try:
-            cov = np.asarray(self.cov, dtype=np.float64)
-        except (TypeError, ValueError):
-            raise LikelihoodInputError("cov must be numbers") from None
+        cov = _numbers("cov", self.cov)
         if cov.shape != (n, n) or not np.all(np.isfinite(cov)):
             raise LikelihoodInputError(
                 f"cov must be a finite matrix of shape ({n}, {n}), got shape {cov.shape}"
@@ -286,13 +293,13 @@ class P1DData:
                 raise LikelihoodInputError(f"{name} must have one entry per redshift ({n_z})")
         if model_factor is not None and len(model_factor) != n_z:
             raise LikelihoodInputError(f"model_factor must have one entry per redshift ({n_z})")
-        k_rows = [np.asarray(r, dtype=np.float64) for r in k]
+        k_rows = [_numbers("k", r) for r in k]
         sizes = [r.size for r in k_rows]
         n = int(sum(sizes))
         cov = np.zeros((n, n))
         a = 0
         for zi, m, block in zip(z, sizes, cov_blocks):
-            b = np.asarray(block, dtype=np.float64)
+            b = _numbers(f"the covariance block at z = {zi:g}", block)
             if b.shape != (m, m):
                 raise LikelihoodInputError(
                     f"the covariance block at z = {zi:g} must have shape ({m}, {m}), got {b.shape}"
@@ -301,7 +308,7 @@ class P1DData:
             a += m
 
         def flat(name, rows):
-            parts = [np.asarray(r, dtype=np.float64) for r in rows]
+            parts = [_numbers(name, r) for r in rows]
             for zi, m, p in zip(z, sizes, parts):
                 if p.shape != (m,):
                     raise LikelihoodInputError(
@@ -356,6 +363,8 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
     km = _vector("k_model", k_model)
     pm = _vector("p_model", p_model, km.size)
     kd = _vector("k_data", k_data)
+    if kd.size == 0:
+        raise LikelihoodInputError("k_data must hold at least one wavenumber")
     if km.size < 2 or np.any(np.diff(km) <= 0):
         raise LikelihoodInputError("k_model must be strictly ascending, with at least two points")
     if kd.min() < km[0] or kd.max() > km[-1]:
@@ -459,6 +468,10 @@ class GaussianP1DLikelihood:
         self.fidelity = fidelity
         self.param_names = tuple(_hp.PARAM_NAMES) + MEAN_FLUX_NAMES
         self._z = [_hp.snapshot_z(z) for z in data.z]
+        if len(set(self._z)) != len(self._z):
+            raise LikelihoodInputError(
+                f"two redshifts of the data are the same snapshot redshift: {sorted(self._z)}"
+            )
         if isinstance(hcd, str):
             if hcd != "model_fractions":
                 raise LikelihoodInputError(
@@ -467,6 +480,11 @@ class GaussianP1DLikelihood:
             self._amplitudes = None
         else:
             self._amplitudes = _hp.check_amplitudes(hcd, self._z)
+            if self._amplitudes.shape not in ((3,), (len(self._z), 3)):
+                raise LikelihoodInputError(
+                    f"fixed amplitudes must have shape (3,) or ({len(self._z)}, 3), one row per redshift of "
+                    f"the data; got {self._amplitudes.shape}"
+                )
         terms = {}
         for name, pair in dict(gaussian_terms or {}).items():
             if name not in self.param_names:
@@ -570,7 +588,7 @@ class GaussianP1DLikelihood:
         return self._chi2_of(self.model_vector(theta))
 
     def _chi2_of(self, model):
-        white = np.linalg.solve(self._chol, model - self.data.p1d)
+        white = solve_triangular(self._chol, model - self.data.p1d, lower=True)
         return float(white @ white)
 
     def loglike(self, theta: Mapping[str, float]) -> float:
@@ -636,6 +654,9 @@ class GaussianP1DLikelihood:
         such refusal is counted in ``refusals``, by the kind of the error, with the first message
         of that kind, so that a chain can say how often and why it was turned back. A point with
         missing or unknown names still raises: that is an error of the caller, not of the point.
+        So do the two refusals that hold for every point, a fidelity the model cannot serve and a
+        data redshift below the multi-fidelity correction (``predictor.MFUnavailableError``,
+        ``predictor.MFRangeError``): returning minus infinity everywhere would hide the reason.
 
         Parameters
         ----------
@@ -650,6 +671,8 @@ class GaussianP1DLikelihood:
         self._point(theta)
         try:
             return self.logp(theta)
+        except (_hp.MFUnavailableError, _hp.MFRangeError):
+            raise  # wrong for every point (no MF record; a data redshift below the correction): not a refusal
         except (_hp.PredictorInputError, OutsideModesError) as exc:
             kind = type(exc).__name__
             entry = self.refusals.setdefault(kind, [0, str(exc)])
@@ -746,6 +769,11 @@ def write_p1d_data(path: str | os.PathLike, data: P1DData) -> str:
         plain JSON, or the file exists or cannot be written.
     """
     raw = _data_bytes(data)
+    if len(raw) > MAX_DATA_BYTES:
+        raise LikelihoodInputError(
+            f"{path}: the data set takes {len(raw)} bytes as a file, above the {MAX_DATA_BYTES} that "
+            "read_p1d_data reads; it was not written"
+        )
     try:
         return _S._write_exclusive(os.fspath(path), [raw])
     except (_S.SafeFormatError, OSError) as exc:
@@ -799,7 +827,7 @@ def _parse_p1d_data(raw: bytes, where: str, expected_sha256: str) -> P1DData:
         )
     except LikelihoodInputError as exc:
         raise LikelihoodInputError(f"{where}: {exc}") from None
-    except (TypeError, ValueError) as exc:  # a ragged or non-numeric list
+    except (TypeError, ValueError, OverflowError) as exc:  # a ragged or non-numeric list
         raise LikelihoodInputError(f"{where}: its arrays are not well formed ({exc})") from None
 
 
@@ -922,8 +950,11 @@ def load_xq100(
     analysis of Wilson, Irsic and McQuinn (2021, arXiv:2106.04837, "A measurement of the
     Lyman-beta forest power spectrum and its cross with the Lyman-alpha forest in X-Shooter
     XQ-100"). This project has NOT verified that attribution against the paper, nor the
-    definition of the column ``paa`` against it. The repositories that hold the files state no
-    licence.
+    definition of the column ``paa`` against it. The covariance file holds indices and values
+    only: that index 0 to 64 means redshift 3.4 to 4.2 ascending and then wavenumber ascending
+    is taken from the same code, which itself marks it as unchecked. It is NOT verified here
+    either, and a wrong order would give a wrong likelihood without any error. The
+    repositories that hold the files state no licence.
     """
     if type(cross_redshift) is not bool:
         raise LikelihoodInputError("cross_redshift must be True or False: state the choice")
@@ -974,13 +1005,19 @@ def load_xq100(
         raise LikelihoodInputError(
             f"{covariance_file}: expected {n * n} lines of the form 'i j value', got {len(rows)}"
         )
-    try:
-        for i, j, v in rows:
+    for i, j, v in rows:
+        if not (i.isdigit() and j.isdigit() and int(i) < n and int(j) < n):
+            raise LikelihoodInputError(
+                f"{covariance_file}: a line does not start with two indices from 0 to {n - 1}"
+            )
+        if not np.isnan(cov[int(i), int(j)]):
+            raise LikelihoodInputError(f"{covariance_file}: the element ({i}, {j}) is given twice")
+        try:
             cov[int(i), int(j)] = float(v)
-    except (ValueError, IndexError):
-        raise LikelihoodInputError(
-            f"{covariance_file}: a line is not two indices below {n} and a number"
-        ) from None
+        except ValueError:
+            raise LikelihoodInputError(
+                f"{covariance_file}: the value of ({i}, {j}) is not a number"
+            ) from None
     if not np.all(np.isfinite(cov)):
         raise LikelihoodInputError(
             f"{covariance_file}: not every element of the {n} x {n} matrix is given"
@@ -1003,6 +1040,8 @@ def load_xq100(
             else "the blocks of the file on the diagonal; the covariance between redshifts is set to zero"
         ),
         "note": "a measurement, loaded as given: no emulator error, no resolution or metal model, no inflation",
+        "not_verified": "that the covariance file's index order is redshift 3.4 to 4.2 ascending, then wavenumber "
+        "ascending; the attribution of the files; the definition of the column paa",
     }
     try:
         return P1DData(
