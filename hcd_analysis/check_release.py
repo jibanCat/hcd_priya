@@ -211,7 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "what was checked: every file of the release verifies against its digest, the model loads, and its "
         "predictions are finite"
         + (
-            " and equal to the reference"
+            f" and agree with the reference to a relative tolerance of {args.rtol:g}"
             if args.reference
             else "; no reference was given, so no number was compared"
         )

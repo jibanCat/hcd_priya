@@ -9,7 +9,7 @@ amplitudes and no prior. In short::
     pred = emu.predict(params, z=3.0, tau_eff=0.36)                          # or tau0_amp=..., dtau0=...
     print("shapes of k, P_class, template, w_c:", pred.k.shape, pred.P_class.shape, pred.template.shape, pred.w_c.shape)
     # prints, for a model with K wavenumbers: shapes of k, P_class, template, w_c: (K,) (4, K) (3, K) (3,)
-    P_tot = hp.add_hcd(pred, pred.w_c)                                       # the map's estimate of its HCD content
+    P_mix = hp.add_hcd(pred, pred.w_c)       # the class spectra mixed with the map's fractions (not the full P1D)
     stack = emu.predict_many(params, z=[2.6, 2.8, 3.0], tau0_amp=1.0, dtau0=0.0)
     P_tot = hp.add_hcd(stack, A)                                             # A: (3,) for every z, or (n_z, 3)
 
@@ -175,6 +175,11 @@ class MeanFluxRangeWarning(UserWarning):
 
     The message holds the value, so a loop over many such values warns once per call. To silence
     it: ``warnings.filterwarnings("ignore", category=hp.MeanFluxRangeWarning)``.
+
+    The same category is used once more, when a model is LOADED whose training cache records no
+    mean-flux range at all: its predictions carry the flag ``mean_flux_off_ladder`` as None and
+    cannot be checked against a trained range. With this category turned into an error, loading
+    such a model raises.
     """
 
 
@@ -539,7 +544,7 @@ class Prediction:
         pred.w_c         # (3,)    the model's sightline fraction of LLS, subDLA, DLA
         pred.dndx        # (3,)    the model's incidence dN/dX of LLS, subDLA, DLA
         pred.flags       # dict    warnings; read them before you use the numbers
-        P_total = hp.add_hcd(pred, pred.w_c)     # (K,) the P1D with the model's own HCD content
+        P_mix = hp.add_hcd(pred, pred.w_c)       # (K,) the class spectra mixed with the model's fractions
 
     Shapes. K is the number of wavenumbers, n_z the number of redshifts::
 
@@ -685,11 +690,11 @@ class _PredictorBase:
         ):  # said once, at load: no prediction of this model can warn about its mean flux
             warnings.warn(
                 MeanFluxRangeWarning(
-                    "this model records no trained mean-flux range: the flag mean_flux_off_ladder will be None "
-                    "on every prediction, and no prediction will warn when its mean flux is far from what the "
-                    "model was trained on"
+                    f"the model {str(rb.manifest_sha256)[:12]} records no trained mean-flux range: the flag "
+                    "mean_flux_off_ladder will be None on every prediction, and no prediction can be checked "
+                    "against the range the model was trained on"
                 ),
-                stacklevel=2,
+                stacklevel=2,  # the loader's own line: the user's frame is at a different depth in each loader
             )
         self._fidelity = str(settings.get("fidelity", "")).upper() or None
 
@@ -1069,7 +1074,10 @@ class _PredictorBase:
         - With an MF record: ``mf_applied``; ``mf_z_clamped`` and ``mf_tau0_clamped``, the
           correction is held constant beyond its tables; ``mf_z_above_validated``, an LF+MF
           prediction above z 4.6, outside the frozen grouped-validation domain (z 2.2-4.6). The
-          values there are served unchanged.
+          values there are served unchanged. The two "held constant" flags are False on an LF
+          prediction, which applies no correction.
+        - ``synthetic_build``: present, and True, only for a model package built with untrained
+          networks for tests; ``labels["synthetic_build"]`` says so in words.
 
         The first call for an input shape compiles the model with JAX; later calls reuse it.
 
