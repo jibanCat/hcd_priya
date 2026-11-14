@@ -67,10 +67,13 @@ __all__ = [
     "LikelihoodInputError",
     "OutsideModesError",
     "P1DData",
+    "P1DReference",
     "interp_to_bins",
     "load_xq100",
     "read_p1d_data",
+    "read_reference",
     "write_p1d_data",
+    "write_reference",
 ]
 
 MEAN_FLUX_NAMES = ("tau0_amp", "dtau0")
@@ -780,10 +783,12 @@ def write_p1d_data(path: str | os.PathLike, data: P1DData) -> str:
         raise LikelihoodInputError(f"{path}: the data set was not written ({exc})") from None
 
 
-def _parse_p1d_data(raw: bytes, where: str, expected_sha256: str) -> P1DData:
+def _pinned_doc(raw: bytes, where: str, expected_sha256: str, what: str, keys: tuple, fmt: str):
+    """The parsed JSON object of a file of this module, and its sha256. The bytes are hashed before anything is
+    parsed; then they must be strict JSON with exactly ``keys`` and the format ``fmt``."""
     if type(expected_sha256) is not str or not _S.exact_hex64(expected_sha256):
         raise LikelihoodInputError(
-            f"{where}: a data set is read against its sha256, 64 lowercase hexadecimal digits"
+            f"{where}: {what} is read against its sha256, 64 lowercase hexadecimal digits"
         )
     sha = hashlib.sha256(raw).hexdigest()
     if sha != expected_sha256:
@@ -795,16 +800,19 @@ def _parse_p1d_data(raw: bytes, where: str, expected_sha256: str) -> P1DData:
         doc = _S._json_loads(raw, where)
     except _S.SafeFormatError as exc:
         raise LikelihoodInputError(str(exc)) from None
-    if not isinstance(doc, dict) or set(doc) != set(DATA_KEYS):
+    if not isinstance(doc, dict) or set(doc) != set(keys):
         got = set(doc) if isinstance(doc, dict) else set()
         raise LikelihoodInputError(
-            f"{where}: keys must be exactly {sorted(DATA_KEYS)} (missing "
-            f"{sorted(set(DATA_KEYS) - got)}, unknown {sorted(got - set(DATA_KEYS))})"
+            f"{where}: keys must be exactly {sorted(keys)} (missing "
+            f"{sorted(set(keys) - got)}, unknown {sorted(got - set(keys))})"
         )
-    if doc["format"] != DATA_FORMAT:
-        raise LikelihoodInputError(
-            f"{where}: format {doc['format']!r}; this code reads {DATA_FORMAT!r}"
-        )
+    if doc["format"] != fmt:
+        raise LikelihoodInputError(f"{where}: format {doc['format']!r}; this code reads {fmt!r}")
+    return doc, sha
+
+
+def _parse_p1d_data(raw: bytes, where: str, expected_sha256: str) -> P1DData:
+    doc, sha = _pinned_doc(raw, where, expected_sha256, "a data set", DATA_KEYS, DATA_FORMAT)
     for key in ("z", "k", "p1d", "cov_blocks"):
         if not isinstance(doc[key], list):
             raise LikelihoodInputError(f"{where}: {key} must be a list")
@@ -860,6 +868,311 @@ def read_p1d_data(path: str | os.PathLike, *, expected_sha256: str) -> P1DData:
     except (_S.SafeFormatError, OSError) as exc:
         raise LikelihoodInputError(f"{path}: not a readable data set file ({exc})") from None
     return _parse_p1d_data(raw, os.fspath(path), expected_sha256)
+
+
+# ------------------------------------------------------------------------- a stored reference of a mock recovery
+REFERENCE_FORMAT = "hcd_priya.p1d_reference/1"
+REFERENCE_KEYS = (
+    "format",
+    "param_names",
+    "truth",
+    "mean",
+    "interval68",
+    "interval95",
+    "z",
+    "k",
+    "percentiles",
+    "predictive",
+    "provenance",
+)
+
+
+@dataclasses.dataclass(frozen=True, eq=False)
+class P1DReference:
+    """A stored reference of a mock recovery: a summary of a posterior, and a predictive band.
+
+    It holds what a figure needs to show a chain against a reference, and nothing else: for each
+    parameter the truth of the mock, the posterior mean and two central intervals; and for each
+    bin of the data vector some percentiles of the posterior predictive. It holds no chain, no
+    covariance and no likelihood value. What the numbers were made with is stated in
+    ``provenance``, which this class carries and never interprets.
+
+    Attributes
+    ----------
+    param_names : tuple of str
+        The names of the parameters, shape (n_p,), each once.
+    truth : numpy.ndarray
+        Shape (n_p,). The point the mock was made at.
+    mean : numpy.ndarray
+        Shape (n_p,). The posterior mean of each parameter.
+    interval68 : numpy.ndarray
+        Shape (n_p, 2). The lower and the upper end of the central 68 per cent interval.
+    interval95 : numpy.ndarray
+        Shape (n_p, 2). The same for 95 per cent. It contains ``interval68``.
+    z : tuple of float
+        The redshifts of the data vector, shape (n_z,), distinct.
+    k : tuple of numpy.ndarray
+        One array per redshift: the wavenumbers of its bins, angular, in s/km, strictly ascending.
+    percentiles : tuple of float
+        The percentile levels of ``predictive``, strictly ascending, each between 0 and 100.
+    predictive : numpy.ndarray
+        Shape (n_percentiles, N), N the total number of bins: row i is the ``percentiles[i]``-th
+        percentile of the posterior predictive of the data vector, in km/s, bin by bin, in the
+        order of ``z`` and ``k``.
+    provenance : dict
+        What the reference is and how it was made. Free form.
+
+    Raises
+    ------
+    LikelihoodInputError
+        If the shapes do not fit, a number is not finite, a name or a redshift repeats, an
+        interval is not ordered or the 95 per cent one does not contain the 68 per cent one, the
+        percentile levels do not ascend, or the percentile rows decrease from one level to the
+        next.
+    """
+
+    param_names: tuple
+    truth: np.ndarray
+    mean: np.ndarray
+    interval68: np.ndarray
+    interval95: np.ndarray
+    z: tuple
+    k: tuple
+    percentiles: tuple
+    predictive: np.ndarray
+    provenance: Mapping = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        names = self.param_names
+        if (
+            not isinstance(names, (list, tuple))
+            or not names
+            or not all(type(n) is str and n for n in names)
+        ):
+            raise LikelihoodInputError("param_names must be a sequence of names (non-empty text)")
+        if len(set(names)) != len(names):
+            raise LikelihoodInputError("param_names must hold each name once")
+        n_p = len(names)
+        truth = _vector("truth", self.truth, n_p)
+        mean = _vector("mean", self.mean, n_p)
+        ends = {}
+        for name in ("interval68", "interval95"):
+            a = _numbers(name, getattr(self, name))
+            if a.shape != (n_p, 2) or not np.all(np.isfinite(a)):
+                raise LikelihoodInputError(
+                    f"{name} must be a finite array of shape ({n_p}, 2), got shape {a.shape}"
+                )
+            if np.any(a[:, 0] > a[:, 1]):
+                raise LikelihoodInputError(f"{name}: a lower end lies above its upper end")
+            ends[name] = a
+        i68, i95 = ends["interval68"], ends["interval95"]
+        if np.any(i95[:, 0] > i68[:, 0]) or np.any(i95[:, 1] < i68[:, 1]):
+            raise LikelihoodInputError("interval95 must contain interval68 for every parameter")
+        z = _vector("z", self.z)
+        if z.size == 0 or len(set(z.tolist())) != z.size:
+            raise LikelihoodInputError("z must hold at least one redshift, each once")
+        if not isinstance(self.k, (list, tuple)) or len(self.k) != z.size:
+            raise LikelihoodInputError(f"k must be a sequence of {z.size} arrays, one per redshift")
+        rows = []
+        for zi, row in zip(z, self.k):
+            r = _vector(f"k at z = {zi:g}", row)
+            if r.size == 0 or np.any(r <= 0) or np.any(np.diff(r) <= 0):
+                raise LikelihoodInputError(
+                    f"k at z = {zi:g} must be positive and strictly ascending, with at least one bin"
+                )
+            rows.append(_frozen(r))
+        n = sum(r.size for r in rows)
+        levels = _vector("percentiles", self.percentiles)
+        if levels.size == 0 or np.any(levels <= 0) or np.any(levels >= 100):
+            raise LikelihoodInputError("percentiles must be levels between 0 and 100")
+        if np.any(np.diff(levels) <= 0):
+            raise LikelihoodInputError("percentiles must be strictly ascending")
+        band = _numbers("predictive", self.predictive)
+        if band.shape != (levels.size, n) or not np.all(np.isfinite(band)):
+            raise LikelihoodInputError(
+                f"predictive must be a finite array of shape ({levels.size}, {n}), got shape {band.shape}"
+            )
+        if np.any(np.diff(band, axis=0) < 0):
+            raise LikelihoodInputError(
+                "predictive must not decrease from one percentile level to the next, in any bin"
+            )
+        if not isinstance(self.provenance, Mapping):
+            raise LikelihoodInputError("provenance must be a mapping")
+        object.__setattr__(self, "param_names", tuple(names))
+        object.__setattr__(self, "truth", _frozen(truth))
+        object.__setattr__(self, "mean", _frozen(mean))
+        object.__setattr__(self, "interval68", _frozen(i68))
+        object.__setattr__(self, "interval95", _frozen(i95))
+        object.__setattr__(self, "z", tuple(float(v) for v in z))
+        object.__setattr__(self, "k", tuple(rows))
+        object.__setattr__(self, "percentiles", tuple(float(v) for v in levels))
+        object.__setattr__(self, "predictive", _frozen(band))
+        object.__setattr__(self, "provenance", dict(self.provenance))
+
+    @property
+    def n(self) -> int:
+        """N, the number of bins of the data vector the reference is on."""
+        return int(self.predictive.shape[1])
+
+    def band(self, lower: float, upper: float) -> tuple:
+        """The rows of ``predictive`` at two stored percentile levels.
+
+        Parameters
+        ----------
+        lower, upper : float
+            Two levels of ``percentiles``, for example 16 and 84. Nothing is interpolated between
+            stored levels.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            Two arrays of shape (N,), in km/s.
+
+        Raises
+        ------
+        LikelihoodInputError
+            If a level is not one of ``percentiles``.
+        """
+        out = []
+        for level in (lower, upper):
+            if level not in self.percentiles:
+                raise LikelihoodInputError(
+                    f"this reference holds the percentiles {list(self.percentiles)}, not {level!r}"
+                )
+            out.append(self.predictive[self.percentiles.index(level)])
+        return tuple(out)
+
+    def check_bins(self, data: P1DData) -> None:
+        """Refuse a data set whose redshifts or wavenumbers are not exactly this reference's.
+
+        Parameters
+        ----------
+        data : P1DData
+            The data set the reference is to be drawn with.
+
+        Raises
+        ------
+        LikelihoodInputError
+            If ``data`` is not a ``P1DData``, or its ``z`` and ``k`` are not equal to the
+            reference's, value by value.
+        """
+        if not isinstance(data, P1DData):
+            raise LikelihoodInputError("data must be a P1DData")
+        same = (
+            data.z == self.z
+            and len(data.k) == len(self.k)
+            and all(np.array_equal(a, b) for a, b in zip(data.k, self.k))
+        )
+        if not same:
+            raise LikelihoodInputError(
+                "the reference is not on the bins of this data set: its redshifts and wavenumbers "
+                "must equal the data set's exactly"
+            )
+
+
+def write_reference(path: str | os.PathLike, reference: P1DReference) -> str:
+    """Write a stored reference as one JSON file and return the file's sha256.
+
+    The file is strict UTF-8 JSON in the format ``REFERENCE_FORMAT`` with exactly the keys
+    ``REFERENCE_KEYS``. Numbers are written so that reading them back gives the same float64
+    values. ``read_reference`` reads such a file only against its sha256.
+
+    Parameters
+    ----------
+    path : str or os.PathLike
+        The file to create. An existing file is not overwritten.
+    reference : P1DReference
+        The reference.
+
+    Returns
+    -------
+    str
+        The sha256 of the file, 64 hexadecimal digits.
+
+    Raises
+    ------
+    LikelihoodInputError
+        If ``provenance`` holds a value that is not plain JSON, or the file exists or cannot be
+        written.
+    """
+    if not isinstance(reference, P1DReference):
+        raise LikelihoodInputError("reference must be a P1DReference")
+    doc = {
+        "format": REFERENCE_FORMAT,
+        "param_names": list(reference.param_names),
+        "truth": reference.truth.tolist(),
+        "mean": reference.mean.tolist(),
+        "interval68": reference.interval68.tolist(),
+        "interval95": reference.interval95.tolist(),
+        "z": list(reference.z),
+        "k": [r.tolist() for r in reference.k],
+        "percentiles": list(reference.percentiles),
+        "predictive": reference.predictive.tolist(),
+        "provenance": reference.provenance,
+    }
+    try:
+        raw = json.dumps(doc, indent=1, sort_keys=True, allow_nan=False).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise LikelihoodInputError(
+            f"provenance must hold plain JSON values (text, finite numbers, lists, mappings): {exc}"
+        ) from None
+    if len(raw) > MAX_DATA_BYTES:
+        raise LikelihoodInputError(
+            f"{path}: the reference takes {len(raw)} bytes as a file, above the {MAX_DATA_BYTES} that "
+            "read_reference reads; it was not written"
+        )
+    try:
+        return _S._write_exclusive(os.fspath(path), [raw])
+    except (_S.SafeFormatError, OSError) as exc:
+        raise LikelihoodInputError(f"{path}: the reference was not written ({exc})") from None
+
+
+def read_reference(path: str | os.PathLike, *, expected_sha256: str) -> P1DReference:
+    """Read a stored reference written by ``write_reference``, against its sha256.
+
+    The file's bytes are hashed before anything is parsed, and a file with another sha256 is
+    refused. Then the file must be strict JSON (no duplicate key, no NaN or Infinity) with exactly
+    the keys of the format, and its arrays must make a valid ``P1DReference``.
+
+    Parameters
+    ----------
+    path : str or os.PathLike
+        The file. It must be a regular file, not a symbolic link.
+    expected_sha256 : str
+        The sha256 the file must have: 64 lowercase hexadecimal digits.
+
+    Returns
+    -------
+    P1DReference
+        Its ``provenance`` is the file's, with one entry added: ``file_sha256``.
+
+    Raises
+    ------
+    LikelihoodInputError
+        If the file cannot be read, has another sha256, or is not a reference of this format.
+    """
+    where = os.fspath(path)
+    try:
+        raw = _S.read_regular(where, MAX_DATA_BYTES)
+    except (_S.SafeFormatError, OSError) as exc:
+        raise LikelihoodInputError(f"{path}: not a readable reference file ({exc})") from None
+    doc, sha = _pinned_doc(
+        raw, where, expected_sha256, "a reference", REFERENCE_KEYS, REFERENCE_FORMAT
+    )
+    for key in REFERENCE_KEYS[1:-1]:
+        if not isinstance(doc[key], list):
+            raise LikelihoodInputError(f"{where}: {key} must be a list")
+    if not isinstance(doc["provenance"], dict):
+        raise LikelihoodInputError(f"{where}: provenance must be an object")
+    try:
+        return P1DReference(
+            **{key: doc[key] for key in REFERENCE_KEYS[1:-1]},
+            provenance=dict(doc["provenance"], file_sha256=sha),
+        )
+    except LikelihoodInputError as exc:
+        raise LikelihoodInputError(f"{where}: {exc}") from None
+    except (TypeError, ValueError, OverflowError) as exc:  # a ragged or non-numeric list
+        raise LikelihoodInputError(f"{where}: its arrays are not well formed ({exc})") from None
 
 
 # ------------------------------------------------------------------------------- XQ-100: a loader, and nothing more

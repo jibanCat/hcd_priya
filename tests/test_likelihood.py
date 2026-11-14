@@ -593,3 +593,138 @@ def test_xq100_redshifts_out_of_order_are_refused(tmp_path):
     pins["data"] = hashlib.sha256(data.read_bytes()).hexdigest()
     with pytest.raises(E, match="not in ascending order"):
         L.load_xq100(data, covf, cross_redshift=True, expected_sha256=pins)
+
+
+# ------------------------------------------------------------------------- a stored reference of a mock recovery
+def _reference(**over):
+    """A made-up reference: three parameters, two redshifts of 2 and 3 bins. No number here comes from a model."""
+    kw = dict(
+        param_names=("a", "b", "c"),
+        truth=[1.0, 2.0, 3.0],
+        mean=[1.1, 1.9, 3.0],
+        interval68=[[0.9, 1.3], [1.7, 2.1], [2.5, 3.5]],
+        interval95=[[0.7, 1.5], [1.5, 2.3], [2.0, 4.0]],
+        z=(2.0, 2.2),
+        k=([0.001, 0.002], [0.001, 0.002, 0.003]),
+        percentiles=(2.5, 16.0, 50.0, 84.0, 97.5),
+        predictive=np.arange(5.0)[:, None] + np.arange(5.0)[None, :] + 1.0,
+        provenance={"what": "a made-up reference in a test"},
+    )
+    kw.update(over)
+    return L.P1DReference(**kw)
+
+
+def test_a_reference_holds_a_posterior_summary_and_a_predictive_band_read_only():
+    ref = _reference()
+    assert ref.param_names == ("a", "b", "c") and ref.z == (2.0, 2.2) and ref.n == 5
+    assert ref.percentiles == (2.5, 16.0, 50.0, 84.0, 97.5)
+    assert ref.truth.shape == ref.mean.shape == (3,)
+    assert ref.interval68.shape == ref.interval95.shape == (3, 2) and ref.predictive.shape == (5, 5)
+    assert [r.tolist() for r in ref.k] == [[0.001, 0.002], [0.001, 0.002, 0.003]]
+    for a in (ref.truth, ref.mean, ref.interval68, ref.interval95, ref.predictive, *ref.k):
+        assert a.dtype == np.float64 and not a.flags.writeable
+    lo, hi = ref.band(16.0, 84.0)
+    assert lo.tolist() == ref.predictive[1].tolist() and hi.tolist() == ref.predictive[3].tolist()
+    with pytest.raises(E, match="holds the percentiles"):
+        ref.band(5.0, 95.0)  # only stored percentiles: nothing is interpolated between them
+    assert isinstance(ref.provenance, dict) and ref.provenance["what"].startswith("a made-up")
+
+
+@pytest.mark.parametrize(
+    "change, why",
+    [
+        ({"param_names": ("a", "a", "c")}, "each name once"),
+        ({"param_names": ("a", 2, "c")}, "names"),
+        ({"mean": [1.0, 2.0]}, "length 3"),
+        ({"truth": [1.0, float("nan"), 3.0]}, "finite"),
+        ({"interval68": [[1.3, 0.9], [1.7, 2.1], [2.5, 3.5]]}, "lower end"),
+        ({"interval95": [[0.95, 1.5], [1.5, 2.3], [2.0, 4.0]]}, "contain"),
+        ({"interval68": [[0.9, 1.3], [1.7, 2.1]]}, "shape"),
+        ({"percentiles": (2.5, 16.0, 50.0, 50.0, 97.5)}, "ascending"),
+        ({"percentiles": (0.0, 16.0, 50.0, 84.0, 97.5)}, "between 0 and 100"),
+        ({"predictive": np.ones((4, 5))}, "shape"),
+        ({"predictive": np.arange(5.0)[::-1, None] + np.zeros((5, 5))}, "must not decrease"),
+        ({"k": ([0.002, 0.001], [0.001, 0.002, 0.003])}, "ascending"),
+        ({"k": ([0.001, 0.002],)}, "one per redshift"),
+        ({"z": (2.0, 2.0)}, "each once"),
+        ({"truth": ["1.0", "2.0", "3.0"]}, "numbers"),
+        ({"provenance": "text"}, "mapping"),
+    ],
+)
+def test_a_malformed_reference_is_refused(change, why):
+    with pytest.raises(E, match=why):
+        _reference(**change)
+
+
+def test_a_reference_round_trips_through_its_file_exactly(tmp_path):
+    ref = _reference(mean=[1.1, 1.9, 0.1 + 0.2])  # 0.1 + 0.2 has no short decimal form
+    path = tmp_path / "reference.json"
+    sha = L.write_reference(path, ref)
+    assert sha == hashlib.sha256(path.read_bytes()).hexdigest()
+    back = L.read_reference(path, expected_sha256=sha)
+    assert back.param_names == ref.param_names and back.z == ref.z
+    assert back.percentiles == ref.percentiles
+    for name in ("truth", "mean", "interval68", "interval95", "predictive"):
+        assert getattr(back, name).tobytes() == getattr(ref, name).tobytes(), name
+    assert all(a.tobytes() == b.tobytes() for a, b in zip(back.k, ref.k))
+    assert back.provenance == dict(ref.provenance, file_sha256=sha)
+    doc = json.loads(path.read_text())
+    assert set(doc) == set(L.REFERENCE_KEYS) and doc["format"] == L.REFERENCE_FORMAT
+    with pytest.raises(E, match="was not written"):
+        L.write_reference(path, ref)  # an existing file is not overwritten
+
+
+def test_a_reference_file_is_read_only_against_its_digest_and_only_if_strict(tmp_path):
+    path = tmp_path / "reference.json"
+    sha = L.write_reference(path, _reference())
+    with pytest.raises(E, match="64 lowercase hexadecimal digits"):
+        L.read_reference(path, expected_sha256="abc")
+    with pytest.raises(E, match="is not the expected"):
+        L.read_reference(path, expected_sha256="0" * 64)
+    doc = json.loads(path.read_text())
+
+    def refused(changed, why, text=None):
+        other = tmp_path / f"other{len(list(tmp_path.iterdir()))}.json"
+        raw = (json.dumps(changed) if text is None else text).encode()
+        other.write_bytes(raw)
+        with pytest.raises(E, match=why):
+            L.read_reference(other, expected_sha256=hashlib.sha256(raw).hexdigest())
+
+    refused(dict(doc, extra=1), "keys must be exactly")
+    refused({k: v for k, v in doc.items() if k != "truth"}, "keys must be exactly")
+    refused(dict(doc, format="hcd_priya.p1d_reference/2"), "this code reads")
+    refused(dict(doc, mean="text"), "must be a list")
+    refused(dict(doc, predictive=[[1.0, 2.0], [3.0]]), "predictive must be numbers")
+    refused(dict(doc, provenance=None), "provenance must be an object")
+    refused(None, "duplicate", text=json.dumps(doc)[:-1] + ', "format": "x"}')
+    refused(None, "NaN|constant", text=json.dumps(doc).replace("1.1", "NaN", 1))
+    link = tmp_path / "link.json"
+    link.symlink_to(path)
+    with pytest.raises(E, match="not a readable reference file"):
+        L.read_reference(link, expected_sha256=sha)
+
+
+def test_a_reference_is_checked_against_the_bins_of_a_data_set():
+    ref = _reference()
+    data = L.P1DData.from_blocks(
+        z=ref.z, k=ref.k, p1d=[np.ones(2), np.ones(3)], cov_blocks=[np.eye(2), np.eye(3)]
+    )
+    ref.check_bins(data)  # the same redshifts and wavenumbers, exactly: accepted, nothing returned
+    for other in (
+        L.P1DData.from_blocks(
+            z=(2.0, 2.4), k=ref.k, p1d=[np.ones(2), np.ones(3)], cov_blocks=[np.eye(2), np.eye(3)]
+        ),
+        L.P1DData.from_blocks(
+            z=ref.z,
+            k=([0.001, 0.002], [0.001, 0.002, np.nextafter(0.003, 1.0)]),
+            p1d=[np.ones(2), np.ones(3)],
+            cov_blocks=[np.eye(2), np.eye(3)],
+        ),
+        L.P1DData.from_blocks(
+            z=(2.0,), k=([0.001, 0.002],), p1d=[np.ones(2)], cov_blocks=[np.eye(2)]
+        ),
+    ):
+        with pytest.raises(E, match="not on the bins of this data set"):
+            ref.check_bins(other)
+    with pytest.raises(E, match="P1DData"):
+        ref.check_bins({"z": ref.z})
