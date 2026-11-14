@@ -377,7 +377,7 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
 
     monkeypatch.setattr(Axes, "errorbar", errorbar)
     assert dndx.main(_args(with_error) + ["--no-band", "--out", out2]) == 0
-    # the bars themselves: per class, at the redshifts with an estimate, the fractional error times the model
+    # the bars themselves: per class, at the redshifts with an estimate, the logarithmic error times the model
     # value. The synthetic LF+MF table of the block, in the column order LLS, subDLA, DLA:
     table = SR.heldout_error()["dndx"]["lfmf"]
     bars = [d for d in drawn if d[3] == "none"]

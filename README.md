@@ -254,8 +254,8 @@ highest value over the 60 design points of the training simulations; they are no
 of Ho, Bird and Garnett (2021, [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals,
 from the tables of the DLA data collection [sbird/DLA_data](https://github.com/sbird/DLA_data)
 ([provenance](docs/figures/data/ho21/PROVENANCE.md)).
-The measurement covers DLAs only. Bars on the lines: the model's held-out error (the rms over five held-out
-simulations; an indication of size, not a standard deviation).
+The measurement covers DLAs only. Bars on the lines: the model's held-out error, drawn to first order (the rms over
+five held-out simulations of the logarithm of prediction over truth; an indication of size, not a standard deviation).
 
 ![The column-density distribution of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/cddf_vs_ho21.png)
 

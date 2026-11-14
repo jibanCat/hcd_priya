@@ -16,7 +16,7 @@
   "k_downweighted",
   "mf_applied"
  ],
- "heldout_error": "drawn on the model lines: pred.dndx_err times pred.dndx (LF+MF), the held-out rms of the fractional error",
+ "heldout_error": "drawn on the model lines: pred.dndx_err times pred.dndx (LF+MF), to first order; pred.dndx_err is the held-out rms of ln(prediction / truth)",
  "incidence_hr_simulations": 5,
  "incidence_record": true,
  "measurement": "DLA dN/dX of Ho, Bird and Garnett (2021), 68 per cent interval: docs/figures/data/ho21/dndx_all.txt, 18 redshift bins",

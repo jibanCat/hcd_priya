@@ -66,7 +66,9 @@ depend on the cosmological parameters or on the mean flux. At a redshift the tab
 between its neighbours and flagged (``incidence_mf_z_interpolated``); beyond the table it is held constant and flagged
 (``incidence_mf_z_clamped``), where the P1D MF below its tables is refused. The w_c map (a Poisson model with a small
 term per class fitted on LF counts) is applied unchanged to the corrected incidence; docs/release_format_h5.md says
-what was tested about that and what was not.
+what was tested about that and what was not. The map has no range check on dN/dX: the corrected dN/dX may lie
+outside the counts its fitted term was fitted on, and nothing flags that. ``w_c`` has no held-out error of its own:
+it inherits the error of the corrected ``dndx`` and the map's own error.
 
 **The column-density distribution.** With an incidence record a prediction also carries ``cddf``, the distribution
 f(N_HI) at the bin centres ``log_nhi`` that the record gives: the linear mean over the ensemble members of their
@@ -91,8 +93,8 @@ facts are on every prediction without any logging: the flags ``mf_applied`` and 
 ``provenance``.
 
 **The held-out error.** A corrected dN/dX or CDDF is not exact. An incidence record may carry a held-out error, and
-then every prediction carries it too: ``dndx_err`` and ``cddf_err``, the held-out rms of the fractional error, for
-the fidelity of the prediction (NaN where the record has no estimate; an error is never interpolated between
+then every prediction carries it too: ``dndx_err`` and ``cddf_err``, the held-out rms of ln(prediction / truth) (for
+small values it equals the fractional error), for the fidelity of the prediction (NaN where the record has no estimate; an error is never interpolated between
 redshifts). ``labels["incidence_mf_error"]`` says what the numbers are, in the record's own words. An LF+MF
 prediction that returns a corrected value without an estimate beside it emits ``HeldOutErrorWarning``, once per
 process for each record.
@@ -666,7 +668,9 @@ class Prediction:
     w_c : numpy.ndarray
         Shape (3,). The model's estimate of each HCD class's sightline fraction at these
         parameters and redshift, from ``dndx`` through the w_c map of the bundle.
-        With an incidence MF record (flag ``incidence_mf_applied``), from the corrected ``dndx``.
+        With an incidence MF record (flag ``incidence_mf_applied``), from the corrected ``dndx``;
+        it then has no held-out error of its own and inherits that of the corrected ``dndx``
+        (``dndx_err``) and the map's own error.
         Without one it is the low-fidelity model's also under LF+MF: the multi-fidelity
         correction of the spectra acts on ``P_class`` only, so ``add_hcd(pred, pred.w_c)`` then
         mixes corrected class spectra with LF fractions.
@@ -685,10 +689,11 @@ class Prediction:
     log_nhi : numpy.ndarray or None
         Shape (Nbin,). The bin centres, log10 of N_HI in cm^-2, from the incidence record.
     dndx_err : numpy.ndarray or None
-        Shape (3,), in the order of ``dndx``. The held-out rms of the fractional error of ``dndx``:
-        an indication of size, not the standard deviation of a known distribution; see
-        ``labels["incidence_mf_error"]`` for what it is and what it does not cover. Multiply by
-        ``dndx`` for an absolute size. For an LF prediction it is that of the uncorrected value,
+        Shape (3,), in the order of ``dndx``. The held-out rms of ln(prediction / truth) of
+        ``dndx``. For small values it equals the fractional error; the multiplicative range is
+        ``dndx * exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``. It is an indication of size, not
+        the standard deviation of a known distribution; see ``labels["incidence_mf_error"]`` for
+        what it is and what it does not cover. For an LF prediction it is that of the uncorrected value,
         for an LF+MF prediction that of the corrected one. NaN where the incidence record has no
         estimate (it carries no held-out error, or none at this redshift; an error is never
         interpolated between redshifts). None without an incidence record.
@@ -1164,7 +1169,8 @@ class _PredictorBase:
             out["w_c"] = (
                 labels["w_c"]
                 + "; the dN/dX is multiplied by the incidence MF factor R_c(z) before the map (the map itself "
-                "was fitted on LF counts)"
+                "was fitted on LF counts). w_c has no held-out error of its own: it inherits the error of the "
+                "corrected dN/dX (dndx_err) and the map's own error"
             )
             if _W_C_STAYS_LF not in labels["mf"]:
                 raise RuntimeError("the MF label no longer carries the statement about w_c")
@@ -1608,8 +1614,9 @@ class _PredictorBase:
         warnings.warn(
             HeldOutErrorWarning(
                 f"the corrected dN/dX and CDDF of this prediction are not exact, and {why}: dndx_err and cddf_err "
-                "are NaN there (labels['incidence_mf_error'] says what a held-out error is). This warning is shown "
-                "once per process for this record."
+                "are NaN there (labels['incidence_mf_error'] says what a held-out error is). w_c is computed from "
+                "the corrected dN/dX and never has a held-out error of its own: it inherits that of dN/dX and the "
+                "map's own error. This warning is shown once per process for this record."
             ),
             stacklevel=4,
         )

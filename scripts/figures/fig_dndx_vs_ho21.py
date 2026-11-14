@@ -16,7 +16,8 @@ What is drawn, on one axis:
 - bands: the lowest and the highest value over the 60 design points of the PRIYA suite
   (``docs/figures/data/priya_lf_design_60.csv``; another table with ``--design``, none with ``--no-band``);
 - bars on the model lines (only when the model's incidence record carries a held-out error): ``pred.dndx_err`` times
-  ``pred.dndx``, the held-out rms of the fractional error of the corrected dN/dX. It is an indication of size from
+  ``pred.dndx``: ``pred.dndx_err`` is the held-out rms of ln(prediction / truth) of the corrected dN/dX, and the bar
+  is drawn symmetric, to first order. It is an indication of size from
   a handful of held-out simulations, not the standard deviation of a known distribution;
 - points: the DLA dN/dX of Ho, Bird and Garnett (2021) in eighteen redshift bins, with the limits of the 68 per cent
   interval, from ``docs/figures/data/ho21/dndx_all.txt``.
@@ -126,8 +127,8 @@ def main(argv=None) -> int:
         ax.plot(
             z, stack.dndx[:, col], color=colour, lw=width, zorder=2, label=f"model (LF+MF): {name}"
         )
-        # the held-out rms of the fractional error of the corrected dN/dX, as a bar on the model line: the
-        # fractional error times the model value. Drawn only where the model carries an estimate.
+        # the held-out rms of ln(prediction / truth) of the corrected dN/dX, as a bar on the model line: to first
+        # order, that number times the model value. Drawn only where the model carries an estimate.
         err = None if stack.dndx_err is None else stack.dndx_err[:, col] * stack.dndx[:, col]
         if err is not None and np.any(np.isfinite(err)):
             ok = np.isfinite(err)
@@ -145,7 +146,8 @@ def main(argv=None) -> int:
             fontsize=8.5,
         )
     facts["heldout_error"] = (
-        "drawn on the model lines: pred.dndx_err times pred.dndx (LF+MF), the held-out rms of the fractional error"
+        "drawn on the model lines: pred.dndx_err times pred.dndx (LF+MF), to first order; pred.dndx_err is the held-out "
+        "rms of ln(prediction / truth)"
         if drew_error
         else "not drawn: the model carries no held-out error at these redshifts"
     )

@@ -551,6 +551,9 @@ def test_labels_and_provenance_say_what_was_applied(rel):
     p = two.predict(PARAMS, 3.0, tau_eff=0.4)
     assert "multiplied by the incidence MF factor" in p.labels["dndx"]
     assert "before the map" in p.labels["w_c"] and "fitted on LF counts" in p.labels["w_c"]
+    assert (
+        "no held-out error of its own" in p.labels["w_c"]
+    )  # it inherits that of the corrected dN/dX
     assert "w_c stays the LF backbone's" not in p.labels["mf"] and "incidence MF" in p.labels["mf"]
     # no held-out error is shipped; the text that says how one is computed comes with the prediction
     # and it says how many HR simulations this record lists (the synthetic record lists two)
