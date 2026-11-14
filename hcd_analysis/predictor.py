@@ -81,9 +81,12 @@ incidence record ``cddf`` and ``log_nhi`` are None: the model files do not
 say what the bins are. A release without that part has no such
 record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition.
 
-**Logging.** Each call of ``predict`` or ``predict_many`` that applies a correction emits one INFO record on the logger
-``hcd_analysis.predictor``: which correction (the P1D MF correction; with an incidence record also the correction of
-dN/dX and the CDDF) and the sha256 of each record. An LF prediction emits none, and neither do the research helpers
+**Logging.** A predictor says which corrections it applies in one INFO record on the logger
+``hcd_analysis.predictor``, at its first call of ``predict`` or ``predict_many`` that applies one while INFO records
+of that logger pass: which correction (the P1D MF correction; with an incidence record also the correction of
+dN/dX and the CDDF) and the sha256 of each record. Every later such call of the same predictor emits the same
+facts as one DEBUG record, so a sampler that calls a predictor at every step writes one line and not one per
+step. An LF prediction emits none, and neither do the research helpers
 of this module that evaluate a backbone directly. The library configures no logging; to
 see the records, let that logger's INFO records pass, for example
 ``logging.getLogger("hcd_analysis.predictor").setLevel(logging.INFO)`` after ``logging.basicConfig()``. The same
@@ -205,10 +208,12 @@ class MFRangeError(PredictorInputError):
     """
 
 
-# One INFO record per prediction call that applied a correction: which correction, with which record (sha256). The
+# Which correction a prediction applied, with which record (sha256): one INFO record per predictor, at its first
+# corrected call while INFO records pass; one DEBUG record for every later corrected call of that predictor. The
 # library configures no logging, so nothing is printed unless the application lets this logger's INFO records pass:
 #     logging.getLogger("hcd_analysis.predictor").setLevel(logging.INFO)   (with a handler, or logging.basicConfig)
 _log = logging.getLogger(__name__)
+_SAID_ONCE = " (said once per predictor at INFO; its later corrected predictions say it at DEBUG)"
 
 
 class HeldOutErrorWarning(UserWarning):
@@ -768,6 +773,10 @@ class Prediction:
 class _PredictorBase:
     """The forward shared by the production ``Bundle`` and the ``ResearchPredictor`` (moved unchanged from
     ``Bundle``): the members' checks, the jitted forward, the attributes, the labels, the flags."""
+
+    _corrections_said = (
+        False  # set on a predictor once its INFO record of the corrections is written
+    )
 
     def _setup(self, rb):
         for i, m in enumerate(rb.metas):
@@ -1538,16 +1547,25 @@ class _PredictorBase:
         if self._mf is not None:
             flags.update(self._mf_flags(zs, taus, use_mf))
             labels.update(self._mf_labels(labels, use_mf))
-        if use_mf:  # said in the log, once per call: which corrections this prediction carries
+        # Said in the log: which corrections this prediction carries. The corrections of a predictor are fixed when
+        # it is loaded, so it says them once at INFO (the first time INFO records pass: a call made before the
+        # application lets them pass does not use the one record up) and at DEBUG for every later call.
+        level = logging.DEBUG if self._corrections_said else logging.INFO
+        if use_mf and _log.isEnabledFor(level):
             applied = [f"the P1D MF correction (record sha256 {self._mf.record_sha256})"]
             if self._inc is not None:
                 applied.append(
                     "the MF correction of the incidence, dN/dX and CDDF (record sha256 "
                     f"{self._inc.record_sha256})"
                 )
-            _log.info(
-                "prediction at %d redshift(s), LF+MF: applied %s", len(zs), " and ".join(applied)
+            _log.log(
+                level,
+                "prediction at %d redshift(s), LF+MF: applied %s%s",
+                len(zs),
+                " and ".join(applied),
+                "" if self._corrections_said else _SAID_ONCE,
             )
+            self._corrections_said = True
         dndx_err = cddf_err = None
         if self._inc is not None:
             flags.update(self._incidence_flags(zs, use_mf, cddf_gap))

@@ -1053,38 +1053,52 @@ def test_a_record_without_a_held_out_error_gives_nan_and_warns_once(rel, monkeyp
 
 
 # ------------------------------------------------------------------------------------------------- the log
-def test_a_call_that_applies_a_correction_says_so_once_in_the_log(rel, caplog):
+def test_a_predictor_says_its_corrections_once_at_info_and_then_at_debug(rel, caplog):
     import logging
 
-    two, one, info = rel["two"], rel["one"], rel["info"]
+    info = rel["info"]
+    two = hp.load_release(
+        str(info["root"]), info["sha"]
+    )  # a new predictor: it has said nothing yet
+    one = rel["one"]
     name = "hcd_analysis.predictor"
     # the library configures no logging: its logger has no level and no handler of its own
     assert logging.getLogger(name).level == logging.NOTSET and not logging.getLogger(name).handlers
+    # at the default level (WARNING, from the root logger) nothing is recorded, and the one INFO record is not used up
+    with caplog.at_level(logging.WARNING):
+        two.predict(PARAMS, 3.0, tau_eff=0.4)
+    assert not [r for r in caplog.records if r.name == name]
     with caplog.at_level(logging.INFO, logger=name):
         two.predict(PARAMS, 3.0, tau_eff=0.4)
+        two.predict(PARAMS, 3.0, tau_eff=0.4)  # the same predictor again: no second INFO record
+        two.predict_many(PARAMS, [2.6, 3.0, 5.2], tau_eff=0.4)
+        two.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")  # nothing applied: nothing logged
     (record,) = [r for r in caplog.records if r.name == name]
     text = record.getMessage()
     assert record.levelno == logging.INFO and "LF+MF" in text and "at 1 redshift(s)" in text
     assert f"the P1D MF correction (record sha256 {info['mf_sha']})" in text
     assert f"dN/dX and CDDF (record sha256 {info['incidence_sha']})" in text
+    assert text.endswith(
+        "(said once per predictor at INFO; its later corrected predictions say it at DEBUG)"
+    )
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger=name):
-        two.predict_many(
-            PARAMS, [2.6, 3.0, 5.2], tau_eff=0.4
-        )  # one record for the call, not one per redshift
+    # afterwards: one DEBUG record per corrected call (not one per redshift), none for LF; and another predictor
+    # says its own corrections at INFO, once
+    with caplog.at_level(logging.DEBUG, logger=name):
+        two.predict_many(PARAMS, [2.6, 3.0, 5.2], tau_eff=0.4)
+        two.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")
         one.predict(
             PARAMS, 3.0, tau_eff=0.4
         )  # no incidence record: only the P1D correction is named
-        two.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")  # nothing applied: nothing logged
-    texts = [r.getMessage() for r in caplog.records if r.name == name]
-    assert len(texts) == 2 and "at 3 redshift(s)" in texts[0]
+        one.predict(PARAMS, 3.0, tau_eff=0.4)
+    records = [r for r in caplog.records if r.name == name]
+    assert [r.levelno for r in records] == [logging.DEBUG, logging.INFO, logging.DEBUG]
+    texts = [r.getMessage() for r in records]
+    assert "at 3 redshift(s)" in texts[0] and f"sha256 {info['incidence_sha']}" in texts[0]
+    assert "said once" not in texts[0] and "said once" in texts[1] and "said once" not in texts[2]
     assert "P1D MF correction" in texts[1] and "incidence" not in texts[1]
-    # so at the default level (WARNING, from the root logger) nothing is recorded
     caplog.clear()
     assert logging.getLogger(name).level == logging.NOTSET  # caplog put back what it found
-    with caplog.at_level(logging.WARNING):
-        two.predict(PARAMS, 3.0, tau_eff=0.4)
-    assert not [r for r in caplog.records if r.name == name]
     assert not logging.getLogger(name).handlers
 
 
