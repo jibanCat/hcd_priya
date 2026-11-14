@@ -66,6 +66,7 @@ __all__ = [
     "OutsideModesError",
     "P1DData",
     "interp_to_bins",
+    "load_xq100",
     "read_p1d_data",
     "write_p1d_data",
 ]
@@ -831,3 +832,187 @@ def read_p1d_data(path: str | os.PathLike, *, expected_sha256: str) -> P1DData:
     except (_S.SafeFormatError, OSError) as exc:
         raise LikelihoodInputError(f"{path}: not a readable data set file ({exc})") from None
     return _parse_p1d_data(raw, os.fspath(path), expected_sha256)
+
+
+# ------------------------------------------------------------------------------- XQ-100: a loader, and nothing more
+# The two files of the XQ-100 P1D that this loader reads, with the sha256 each must have. Neither is shipped: the
+# user supplies them. Public copies (2026-11): the data file in github.com/sbird/lya_emulator and in
+# github.com/jibanCat/InferenceLyaData under lyaemu/data/xq100/; the covariance file in the second only.
+XQ100_FILES = {
+    "data": (
+        "pk_obs_corrNR_offset_DLATrue_metalTrue_res0.csv",
+        "615048b825d3ba2f43f62c1e04969cfba050d761d1b07bde794810cbabf95b58",
+    ),
+    "covariance": (
+        "cov_xq100_lyb_corrected_onlyA_fromMCMC.txt",
+        "9e626de99692d483c6f641a72eac9f4a8b01714e921220e787d8d2a42dfb176b",
+    ),
+}
+XQ100_HEADER = "k,paa,ptt,pab,qab,pbb,npix_aa,npix_tt,npix_ab,z"
+XQ100_Z = (3.4, 3.6, 3.8, 4.0, 4.2)  # the redshifts the covariance file covers
+XQ100_NK = 13
+
+
+def _read_pinned(path, expected_sha256, what):
+    try:
+        raw = _S.read_regular(os.fspath(path), MAX_DATA_BYTES)
+    except (_S.SafeFormatError, OSError) as exc:
+        raise LikelihoodInputError(f"{path}: not a readable {what} ({exc})") from None
+    sha = hashlib.sha256(raw).hexdigest()
+    if sha != expected_sha256:
+        raise LikelihoodInputError(
+            f"{path}: sha256 {sha[:12]}... is not that of the {what} this loader reads "
+            f"({expected_sha256[:12]}...); the file was not parsed"
+        )
+    try:
+        return raw.decode("utf-8"), sha
+    except UnicodeDecodeError:
+        raise LikelihoodInputError(f"{path}: the {what} is not UTF-8 text") from None
+
+
+def load_xq100(
+    data_file: str | os.PathLike,
+    covariance_file: str | os.PathLike,
+    *,
+    cross_redshift: bool,
+    expected_sha256: Mapping[str, str] | None = None,
+) -> P1DData:
+    """Load the XQ-100 Lyman-alpha P1D from two files that you supply. A loader only.
+
+    Nothing is shipped and nothing is fitted: this reads the measurement and its covariance into
+    a ``P1DData`` and stops. No result of this package rests on these data, and a likelihood made
+    from the returned object carries none of the terms a real analysis needs (no emulator error,
+    no resolution or metal model, no inflation of the low wavenumbers).
+
+    The two files are named in ``XQ100_FILES`` with the sha256 each must have. The data file is a
+    table with the header ``k,paa,ptt,pab,qab,pbb,npix_aa,npix_tt,npix_ab,z``: 13 wavenumbers at
+    each of 7 redshifts. The loader takes the columns ``z``, ``k`` and ``paa`` (the Lyman-alpha
+    auto power) at the five redshifts 3.4 to 4.2, the ones the covariance covers: 65 bins; the
+    other columns are not read and may be empty. The
+    covariance file lists a 65 x 65 matrix as lines ``i j value`` in the same order (redshift
+    ascending, then wavenumber ascending). Wavenumbers are angular, in s/km; the power is in
+    km/s.
+
+    Parameters
+    ----------
+    data_file, covariance_file : str or os.PathLike
+        Your copies of the two files.
+    cross_redshift : bool
+        True keeps the full 65 x 65 matrix of the file. False keeps the five 13 x 13 blocks on
+        the diagonal and sets the covariance between redshifts to zero. There is no default: the
+        choice changes the likelihood, so it is yours to state.
+    expected_sha256 : dict, optional
+        ``{"data": sha256, "covariance": sha256}`` to read other files of the same layout. The
+        default is the two digests of ``XQ100_FILES``.
+
+    Returns
+    -------
+    P1DData
+        Five redshifts with 13 bins each. ``truth`` is None. ``provenance`` names the files, their
+        digests and the choice of ``cross_redshift``.
+
+    Raises
+    ------
+    LikelihoodInputError
+        If a file cannot be read, has another sha256, or does not have the layout described above.
+
+    Notes
+    -----
+    Where the files come from: the code they are distributed with attributes them to the XQ-100
+    analysis of Wilson, Irsic and McQuinn (2021, arXiv:2106.04837, "A measurement of the
+    Lyman-beta forest power spectrum and its cross with the Lyman-alpha forest in X-Shooter
+    XQ-100"). This project has NOT verified that attribution against the paper, nor the
+    definition of the column ``paa`` against it. The repositories that hold the files state no
+    licence.
+    """
+    if type(cross_redshift) is not bool:
+        raise LikelihoodInputError("cross_redshift must be True or False: state the choice")
+    pins = {k: v[1] for k, v in XQ100_FILES.items()}
+    if expected_sha256 is not None:
+        if set(expected_sha256) != set(pins) or not all(
+            _S.exact_hex64(v) for v in expected_sha256.values()
+        ):
+            raise LikelihoodInputError(
+                'expected_sha256 must be {"data": sha256, "covariance": sha256}, each 64 lowercase '
+                "hexadecimal digits"
+            )
+        pins = dict(expected_sha256)
+    text, data_sha = _read_pinned(data_file, pins["data"], "XQ-100 data file")
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != XQ100_HEADER:
+        raise LikelihoodInputError(f"{data_file}: the header is not {XQ100_HEADER!r}")
+    fields = [ln.split(",") for ln in lines[1:] if ln.strip()]
+    if not fields or any(len(f) != 10 for f in fields):
+        raise LikelihoodInputError(
+            f"{data_file}: every row must have the ten columns of the header"
+        )
+    try:  # only k, paa and z are read; the other columns may be empty
+        table = np.array([[float(f[0]), float(f[1]), float(f[9])] for f in fields])
+    except ValueError:
+        raise LikelihoodInputError(f"{data_file}: k, paa or z of a row is not a number") from None
+    if not np.all(np.isfinite(table)):
+        raise LikelihoodInputError(f"{data_file}: k, paa and z must be finite")
+    k_col, p_col, z_col = table[:, 0], table[:, 1], table[:, 2]
+    z_rows, k_rows, p_rows = [], [], []
+    for z in XQ100_Z:
+        at = np.where(np.abs(z_col - z) < 1e-6)[0]
+        if at.size != XQ100_NK or np.any(np.diff(at) != 1) or np.any(np.diff(k_col[at]) <= 0):
+            raise LikelihoodInputError(
+                f"{data_file}: z = {z:g} must have {XQ100_NK} consecutive rows with ascending k"
+            )
+        z_rows.append(float(z))
+        k_rows.append(k_col[at])
+        p_rows.append(p_col[at])
+    firsts = [int(np.where(np.abs(z_col - z) < 1e-6)[0][0]) for z in XQ100_Z]
+    if firsts != sorted(firsts):
+        raise LikelihoodInputError(f"{data_file}: the redshifts are not in ascending order")
+    n = XQ100_NK * len(XQ100_Z)
+    text, cov_sha = _read_pinned(covariance_file, pins["covariance"], "XQ-100 covariance file")
+    cov = np.full((n, n), np.nan)
+    rows = [ln.split() for ln in text.splitlines() if ln.strip()]
+    if len(rows) != n * n or any(len(r) != 3 for r in rows):
+        raise LikelihoodInputError(
+            f"{covariance_file}: expected {n * n} lines of the form 'i j value', got {len(rows)}"
+        )
+    try:
+        for i, j, v in rows:
+            cov[int(i), int(j)] = float(v)
+    except (ValueError, IndexError):
+        raise LikelihoodInputError(
+            f"{covariance_file}: a line is not two indices below {n} and a number"
+        ) from None
+    if not np.all(np.isfinite(cov)):
+        raise LikelihoodInputError(
+            f"{covariance_file}: not every element of the {n} x {n} matrix is given"
+        )
+    if not cross_redshift:
+        blocks = np.zeros_like(cov)
+        for a in range(0, n, XQ100_NK):
+            blocks[a : a + XQ100_NK, a : a + XQ100_NK] = cov[a : a + XQ100_NK, a : a + XQ100_NK]
+        cov = blocks
+    provenance = {
+        "what": "the XQ-100 Lyman-alpha P1D (column paa) at five redshifts, read from files supplied by the user",
+        "data_file": {"name": os.path.basename(os.fspath(data_file)), "sha256": data_sha},
+        "covariance_file": {
+            "name": os.path.basename(os.fspath(covariance_file)),
+            "sha256": cov_sha,
+        },
+        "covariance": (
+            "the full matrix of the file"
+            if cross_redshift
+            else "the blocks of the file on the diagonal; the covariance between redshifts is set to zero"
+        ),
+        "note": "a measurement, loaded as given: no emulator error, no resolution or metal model, no inflation",
+    }
+    try:
+        return P1DData(
+            z=tuple(z_rows),
+            k=tuple(k_rows),
+            p1d=np.concatenate(p_rows),
+            cov=cov,
+            provenance=provenance,
+        )
+    except LikelihoodInputError as exc:
+        raise LikelihoodInputError(
+            f"the XQ-100 files do not make a valid data set: {exc}"
+        ) from None

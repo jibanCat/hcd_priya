@@ -55,6 +55,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   covariance, the rule that brings the model to the data's wavenumbers (linear interpolation at each bin's k), the
   log likelihood with its normalisation, optional Gaussian terms on parameters, and a strict file format for a
   data set, read only against its sha256. No emulator error is added to the covariance. No data set is shipped yet.
+  `sampler_logp` gives a sampler minus infinity where the model refuses a point, and counts why. `load_xq100`
+  reads the XQ-100 P1D from two files the user supplies, each checked by its sha256: a loader only, nothing
+  fitted. An example, `examples/mock_recovery.py`, and a page, `docs/likelihood.md`.
 - **A research (fold) model can take an incidence record.** `load_research_bundle` accepts `incidence_dir` and
   `incidence_record_sha256`. The record is refused unless its table was built without the simulations the model
   holds out and its composition says so.

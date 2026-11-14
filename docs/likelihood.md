@@ -95,7 +95,30 @@ What the example fixes is written out at the top of the script:
 A research (fold) model, trained without the simulation the mock comes from, is loaded with `--research`, its fold
 MF record with `--mf` and an incidence record built without that simulation with `--incidence`.
 
+## A loader for the XQ-100 P1D, and nothing more
+
+`load_xq100(data_file, covariance_file, cross_redshift=...)` reads the XQ-100 Lyman-alpha P1D and its covariance
+from two files that you supply into a `P1DData`: five redshifts, 3.4 to 4.2, with 13 wavenumbers each.
+
+- **Nothing is shipped.** The two file names and the sha256 each must have are in `likelihood.XQ100_FILES`; a file
+  with another digest is refused. In November 2026 the data file is public in `sbird/lya_emulator` and in
+  `jibanCat/InferenceLyaData` under `lyaemu/data/xq100/`, and the covariance file in the second only. Neither
+  repository states a licence.
+- **Nothing is fitted, and no result of this package rests on these data.** A likelihood made from the returned
+  object has none of the terms a real analysis needs: no emulator error, no resolution or metal model, no inflation
+  of the low wavenumbers.
+- **`cross_redshift` has no default.** `True` keeps the full 65 x 65 matrix of the file; `False` keeps the five
+  blocks on the diagonal and sets the covariance between redshifts to zero. The choice changes a likelihood, so it
+  is the user's to state.
+- **Where the files come from: not verified here.** The code they are distributed with attributes them to the
+  XQ-100 analysis of Wilson, Irsic and McQuinn (2021). This project has not verified that attribution, or the
+  definition of the column it reads, against the paper.
+
 ## References
 
 Fernandez, M. A., Bird, S., Ho, M.-F. 2024, "Cosmological constraints from the eBOSS Lyman-alpha forest using the
 PRIYA simulations", JCAP 2024 (07) 029, [arXiv:2309.03943](https://arxiv.org/abs/2309.03943).
+
+Wilson, B., Irsic, V., McQuinn, M. 2021, "A measurement of the Lyman-beta forest power spectrum and its cross with
+the Lyman-alpha forest in X-Shooter XQ-100", [arXiv:2106.04837](https://arxiv.org/abs/2106.04837) (title and authors
+read from the arXiv page; the journal fields were not verified).

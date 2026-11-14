@@ -398,3 +398,100 @@ def test_a_covariance_between_redshifts_does_not_fit_the_file_format(tmp_path):
             tmp_path / "odd.json",
             L.P1DData(z=(2.6,), k=([0.01],), p1d=[1.0], cov=np.eye(1), provenance={"x": object()}),
         )
+
+
+# ------------------------------------------------------------------------------------- the XQ-100 loader
+def _xq100_stand_in(tmp_path, *, drop_row=False, header=None, asym=0.0):
+    """Synthetic stand-ins of the two XQ-100 files, in their layout, with made-up numbers. Returns the two paths
+    and their digests."""
+    zs = [3.0, 3.2, 3.4, 3.6, 3.8, 4.0, 4.2]
+    ks = np.geomspace(0.003, 0.06, 13)
+    rows = [header or L.XQ100_HEADER]
+    for z in zs:
+        for j, k in enumerate(ks):
+            if drop_row and z == 3.6 and j == 5:
+                continue
+            k, p = float(k), float(10.0 * (1 + z) / (1 + 100 * k))
+            rows.append(f"{k!r},{p!r},1.0,,3.0,,5,6,7,{z!r}")  # unused columns may be empty
+    data = tmp_path / L.XQ100_FILES["data"][0]
+    data.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    i = np.arange(65)
+    cov = 0.04 * 0.5 ** np.abs(i[:, None] - i[None, :])
+    cov[0, 1] *= 1.0 + asym
+    covf = tmp_path / L.XQ100_FILES["covariance"][0]
+    covf.write_text(
+        "".join(f"{a} {b} {float(cov[a, b])!r}\n" for a in range(65) for b in range(65)),
+        encoding="utf-8",
+    )
+    pins = {
+        "data": hashlib.sha256(data.read_bytes()).hexdigest(),
+        "covariance": hashlib.sha256(covf.read_bytes()).hexdigest(),
+    }
+    return data, covf, pins, cov
+
+
+def test_the_xq100_loader_reads_five_redshifts_of_thirteen_bins_from_the_users_files(tmp_path):
+    data, covf, pins, cov = _xq100_stand_in(tmp_path)
+    full = L.load_xq100(data, covf, cross_redshift=True, expected_sha256=pins)
+    assert full.z == (3.4, 3.6, 3.8, 4.0, 4.2) and full.sizes == (13,) * 5 and full.n == 65
+    assert full.truth is None and full.model_factor is None
+    np.testing.assert_array_equal(full.cov, cov)  # the matrix of the file, element by element
+    np.testing.assert_allclose(full.k[0], np.geomspace(0.003, 0.06, 13), rtol=1e-15)
+    assert full.p1d[0] == pytest.approx(
+        10.0 * 4.4 / (1 + 100 * 0.003)
+    )  # z 3.4 is the first redshift kept
+    blocks = L.load_xq100(data, covf, cross_redshift=False, expected_sha256=pins)
+    assert np.all(blocks.cov[:13, 13:] == 0) and np.array_equal(
+        blocks.cov[13:26, 13:26], cov[13:26, 13:26]
+    )
+    assert (
+        "set to zero" in blocks.provenance["covariance"]
+        and "full matrix" in full.provenance["covariance"]
+    )
+    assert full.provenance["data_file"] == {
+        "name": L.XQ100_FILES["data"][0],
+        "sha256": pins["data"],
+    }
+
+
+def test_the_xq100_loader_pins_the_two_files_and_states_no_default_choice(tmp_path):
+    data, covf, pins, _ = _xq100_stand_in(tmp_path)
+    with pytest.raises(E, match="is not that of the XQ-100 data file this loader reads"):
+        L.load_xq100(data, covf, cross_redshift=True)  # a stand-in is not the pinned file
+    with pytest.raises(TypeError):
+        L.load_xq100(data, covf)  # no default for the covariance between redshifts
+    with pytest.raises(E, match="state the choice"):
+        L.load_xq100(data, covf, cross_redshift=1, expected_sha256=pins)
+    with pytest.raises(E, match="expected_sha256 must be"):
+        L.load_xq100(data, covf, cross_redshift=True, expected_sha256={"data": pins["data"]})
+    with pytest.raises(E, match="not a readable XQ-100 data file"):
+        L.load_xq100(tmp_path / "absent.csv", covf, cross_redshift=True, expected_sha256=pins)
+
+
+@pytest.mark.parametrize(
+    "kw, why",
+    [
+        (dict(header="k,paa,z"), "the header is not"),
+        (dict(drop_row=True), "z = 3.6 must have 13 consecutive rows"),
+        (dict(asym=1e-6), "do not make a valid data set: cov must be symmetric"),
+    ],
+)
+def test_xq100_files_of_another_layout_are_refused(tmp_path, kw, why):
+    data, covf, pins, _ = _xq100_stand_in(tmp_path, **kw)
+    with pytest.raises(E, match=why):
+        L.load_xq100(data, covf, cross_redshift=True, expected_sha256=pins)
+
+
+def test_an_xq100_covariance_file_must_give_every_element_once(tmp_path):
+    data, covf, pins, _ = _xq100_stand_in(tmp_path)
+    lines = covf.read_text(encoding="utf-8").splitlines()
+    covf.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+    pins["covariance"] = hashlib.sha256(covf.read_bytes()).hexdigest()
+    with pytest.raises(E, match="expected 4225 lines"):
+        L.load_xq100(data, covf, cross_redshift=True, expected_sha256=pins)
+    covf.write_text(
+        "\n".join(lines[:-1] + [lines[0]]) + "\n", encoding="utf-8"
+    )  # one twice, one missing
+    pins["covariance"] = hashlib.sha256(covf.read_bytes()).hexdigest()
+    with pytest.raises(E, match="not every element"):
+        L.load_xq100(data, covf, cross_redshift=True, expected_sha256=pins)
