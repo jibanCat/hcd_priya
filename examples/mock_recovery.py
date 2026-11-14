@@ -8,8 +8,17 @@
    demonstration: it is NOT converged, and its numbers mean nothing beyond "the pieces work together". ``--full``
    runs one chain with the settings written out in ``FULL`` below until Cobaya's own convergence test stops it.
    Either chain starts at the truth of the mock. This script is a single process: it does not run under MPI.
-3. **The posterior predictive** (only after a chain): model vectors at points of the chain, with one noisy replicate
-   of the data for each, drawn as a band over the data vector.
+3. **The figures.** After a chain: the posterior predictive (model vectors at points of the chain, with one noisy
+   replicate of the data for each, drawn as a band over the data vector). With the example download: the stored
+   reference, a converged posterior for the same mock, drawn underneath, and the intervals of the eleven parameters
+   with the truth marked.
+
+**The example download** (``--download DIR``, or the environment variable ``HCD_PRIYA_EXAMPLE_DOWNLOAD``) is one
+directory with the mock, the model that goes with it and the stored reference; ``DOWNLOAD`` below names its items and
+the sha256 each must have. IT IS NOT PUBLISHED YET. The model in it is a fold model: it was trained without the
+simulation the mock was made from, so the recovery is a held-out one. It is not the release model. Without the
+download the example runs on a model and a mock of your own (the second and third command lines below), and then
+has no stored reference.
 
 What this example fixes, all written out below: flat boxes on the eleven parameters (``BOXES``), two Gaussian terms
 on ``hub`` and ``bhfeedback`` (``GAUSSIAN_TERMS``), and the sampler settings (``FULL``). The class spectra are mixed
@@ -19,6 +28,7 @@ one that accounts for the error of the emulator.
 
 Nothing is fitted to a measurement here: the data vector is a simulation's.
 
+    python examples/mock_recovery.py --download DOWNLOAD_DIR --demo 200 --out out/
     python examples/mock_recovery.py --release RELEASE_DIR SHA256 --data MOCK_FILE SHA256
     python examples/mock_recovery.py --research BUNDLE_DIR SHA256 --purpose "a held-out mock recovery" \\
         --mf MF_DIR SHA256 --incidence INCIDENCE_DIR SHA256 --data MOCK_FILE SHA256 --demo 200 --out out/
@@ -27,9 +37,8 @@ Nothing is fitted to a measurement here: the data vector is a simulation's.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import importlib.util
-import logging
+import json
 import os
 import sys
 
@@ -63,8 +72,8 @@ BOXES = {
 # Gaussian terms, (mean, standard deviation): this P1D alone does not constrain these two parameters. Fernandez, Bird
 # and Ho (2024) quote Gaussian priors of width 0.015 on h and 0.005 on the AGN feedback parameter. This example uses
 # standard deviations of 0.015 / sqrt(2) and 0.005 / sqrt(2), narrower by sqrt(2) than the quoted widths. They are the
-# widths of this project's own reference chains for such a mock (not shipped here), written as ordinary Gaussians with
-# their true standard deviations.
+# widths of this project's own reference chains for such a mock (the chains are not shipped; the stored reference of
+# the example download is a summary of one of them), written as ordinary Gaussians with their true standard deviations.
 GAUSSIAN_TERMS = {"hub": (0.70, 0.015 / np.sqrt(2.0)), "bhfeedback": (0.05, 0.005 / np.sqrt(2.0))}
 # The sampler of --full: Cobaya's Metropolis sampler, one chain, stopped by Cobaya's convergence test on that chain
 # (R-1 of the means below 0.01, of the bounds below 0.05). The proposal starts as a fixed fraction of each box and is
@@ -72,6 +81,37 @@ GAUSSIAN_TERMS = {"hub": (0.70, 0.015 / np.sqrt(2.0)), "bhfeedback": (0.05, 0.00
 FULL = {"Rminus1_stop": 0.01, "Rminus1_cl_stop": 0.05, "learn_proposal": True}
 PROPOSAL_FRACTION = 0.02  # the starting proposal width, as a fraction of each box: efficiency only
 BURN_IN_FRACTION = 0.3  # rows dropped from the start of a chain before anything is read from it
+
+# The example download: one directory, NOT PUBLISHED YET. Each item with its place in the directory and the sha256 it
+# must have; an item with another sha256 is refused by the loader that reads it.
+# - mock: the data set (hcd_analysis.likelihood.read_p1d_data). A simulation's P1D with a covariance; no measurement.
+# - model: a research bundle, a fold model trained WITHOUT the simulation the mock was made from. The sha256 is that
+#   of its manifest.json, which names every other file of the bundle by its own sha256.
+# - mf_record and incidence_record: the fold's MF record and its incidence record, built without that simulation too.
+#   The sha256 is that of the record.
+# - reference: the stored reference (hcd_analysis.likelihood.read_reference): a summary of a converged posterior for
+#   this mock and its posterior predictive band. Its provenance says how it was made.
+# The directory also holds a manifest (DOWNLOAD_MANIFEST) that states the format and the same five sha256; a
+# directory whose manifest states anything else was made for another version of this script, and is refused.
+DOWNLOAD_ENV = "HCD_PRIYA_EXAMPLE_DOWNLOAD"
+DOWNLOAD_FORMAT = "hcd_priya.example_download/1"
+DOWNLOAD_MANIFEST = "example_download.json"
+DOWNLOAD = {
+    "mock": ("mock.p1d.json", "6b5d17d091ad86337d00e863aee30297fb3cdcb692ad2540cbb32a4f0afe4a41"),
+    "model": ("model", "07ae506b4105350081692d460c4b623e9083045a6ebe8130257ba31db5a7d758"),
+    "mf_record": ("mf_record", "667548cfa5a745d5dfb8d7b669d6486860565efa5d78306c21231529ffbeb4c0"),
+    "incidence_record": (
+        "incidence_record",
+        "33b34ff8df3dcefb25756642dee1cc0c98db944909c79492ec9b24140adbdfe5",
+    ),
+    "reference": (
+        "reference.json",
+        "a3c74b2cc09c524ebe760560aaac2394238ac747b2e0ab9361a1c9b2524c4792",
+    ),
+}
+DOWNLOAD_PURPOSE = (
+    "the mock-recovery example: a held-out recovery of the mock of the example download"
+)
 
 
 def line(label: str, *values) -> None:
@@ -82,6 +122,12 @@ def line(label: str, *values) -> None:
 def parse(argv=None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0], formatter_class=argparse.RawTextHelpFormatter
+    )
+    ap.add_argument(
+        "--download",
+        metavar="DIR",
+        help="the example download: the mock, its model and the stored reference (not published yet).\n"
+        f"Without any model argument, the environment variable {DOWNLOAD_ENV} is read instead",
     )
     ap.add_argument(
         "--release", nargs=2, metavar=("DIR", "SHA256"), help="a release directory and its sha256"
@@ -105,7 +151,10 @@ def parse(argv=None) -> argparse.Namespace:
         help="with --research: its incidence record",
     )
     ap.add_argument(
-        "--data", nargs=2, metavar=("FILE", "SHA256"), required=True, help="the mock and its sha256"
+        "--data",
+        nargs=2,
+        metavar=("FILE", "SHA256"),
+        help="with --release or --research: the mock and its sha256",
     )
     ap.add_argument(
         "--demo", type=int, default=0, metavar="N", help="a demonstration chain of N accepted steps"
@@ -123,8 +172,20 @@ def parse(argv=None) -> argparse.Namespace:
         "--out", default="mock_recovery_out", help="the folder for the chain and the figure"
     )
     a = ap.parse_args(argv)
-    if (a.release is None) == (a.research is None):
-        ap.error("give the model once: --release DIR SHA256, or --research DIR SHA256")
+    if a.download is None and a.release is None and a.research is None:
+        a.download = (
+            os.environ.get(DOWNLOAD_ENV) or None
+        )  # only when no model is named on the command line
+    if sum(x is not None for x in (a.download, a.release, a.research)) != 1:
+        ap.error(
+            "give the model once: --download DIR, or --release DIR SHA256, or --research DIR SHA256"
+        )
+    if a.download is not None and (a.data or a.mf or a.incidence or a.purpose):
+        ap.error(
+            "--download brings its own mock and records: give no --data, --mf, --incidence, --purpose"
+        )
+    if a.download is None and a.data is None:
+        ap.error("--release and --research need --data FILE SHA256")
     if a.research is None and (a.mf or a.incidence or a.purpose):
         ap.error("--purpose, --mf and --incidence belong to --research")
     if a.research is not None and not a.purpose:
@@ -146,6 +207,48 @@ def load_model(a: argparse.Namespace):
     if a.incidence:
         kw.update(incidence_dir=a.incidence[0], incidence_record_sha256=a.incidence[1])
     return hp.load_research_bundle(a.research[0], a.research[1], purpose=a.purpose, **kw)
+
+
+def open_download(root: str):
+    """The model, the mock and the stored reference of the example download at ``root``, each read against the
+    sha256 written in ``DOWNLOAD``. The manifest is a first check only: what protects the read is that every loader
+    below refuses an item whose sha256 is not the one written in this script.
+    """
+    want = {"format": DOWNLOAD_FORMAT, "items": {name: sha for name, (_, sha) in DOWNLOAD.items()}}
+    try:
+        with open(os.path.join(root, DOWNLOAD_MANIFEST), "rb") as f:
+            stated = json.loads(f.read(1 << 16))
+    except (OSError, ValueError) as exc:
+        sys.exit(
+            f"refusing: {root} is not the example download: its manifest {DOWNLOAD_MANIFEST} cannot be read ({exc})"
+        )
+    if stated != want:
+        sys.exit(
+            f"refusing: the manifest of {root} does not state the format {DOWNLOAD_FORMAT} with the five sha256 "
+            "written in this script (DOWNLOAD); the download and the script are of different versions"
+        )
+    place = {name: os.path.join(root, rel) for name, (rel, _) in DOWNLOAD.items()}
+    sha = {name: digest for name, (_, digest) in DOWNLOAD.items()}
+    emu = hp.load_research_bundle(
+        place["model"],
+        sha["model"],
+        purpose=DOWNLOAD_PURPOSE,
+        mf_dir=place["mf_record"],
+        mf_record_sha256=sha["mf_record"],
+        incidence_dir=place["incidence_record"],
+        incidence_record_sha256=sha["incidence_record"],
+    )
+    data = L.read_p1d_data(place["mock"], expected_sha256=sha["mock"])
+    reference = L.read_reference(place["reference"], expected_sha256=sha["reference"])
+    reference.check_bins(data)
+    names = (*hp.PARAM_NAMES, *L.MEAN_FLUX_NAMES)
+    truth = [float((data.truth or {}).get(name, np.nan)) for name in reference.param_names]
+    if reference.param_names != names or not np.array_equal(reference.truth, truth):
+        sys.exit(
+            "refusing: the stored reference does not state the eleven parameters of the likelihood with the truth "
+            "of the mock"
+        )
+    return emu, data, reference
 
 
 def part_one(like: L.GaussianP1DLikelihood) -> dict:
@@ -234,23 +337,10 @@ def cobaya_info(
     }
 
 
-@contextlib.contextmanager
-def quiet_predictor_log():
-    """Switch off the INFO record that the predictor writes for each prediction that applies a correction, and put
-    the logger's level back afterwards. A sampler lets INFO records pass and calls the likelihood at every step, so
-    the record would be written once per step. The flags of a prediction say the same without any logging.
+def part_two(like, theta, a) -> dict | None:
+    """The chain. Returns None when no chain was asked for, else {"points": points of the chain after burn-in drawn
+    with its weights, shape (n, 11); "summary": the 16th, 50th and 84th percentile of each parameter, shape (11, 3)}.
     """
-    logger = logging.getLogger("hcd_analysis.predictor")
-    level = logger.level
-    logger.setLevel(logging.WARNING)
-    try:
-        yield
-    finally:
-        logger.setLevel(level)
-
-
-def part_two(like, theta, a) -> np.ndarray | None:
-    """The chain. Returns its points after burn-in, shape (n, 11), or None when no chain was asked for."""
     if not (a.demo or a.full):
         print("=== Part 2: no chain was asked for (--demo N, or --full)")
         return None
@@ -279,12 +369,7 @@ def part_two(like, theta, a) -> np.ndarray | None:
     )
     line("the chain starts at", "the truth of the mock")
     line("an earlier chain with the same prefix is overwritten", os.path.join(a.out, "chain"))
-    line(
-        "the library's log record for each corrected prediction",
-        "switched off while the sampler and the predictive draws run (it would be one line per likelihood call)",
-    )
-    with quiet_predictor_log():
-        _, sampler = run(cobaya_info(like, theta, demo=a.demo, seed=a.seed, out=a.out))
+    _, sampler = run(cobaya_info(like, theta, demo=a.demo, seed=a.seed, out=a.out))
     sample = sampler.products()["sample"]
     rows = np.column_stack([np.asarray(sample[name]) for name in like.param_names])
     weights = np.asarray(sample["weight"])
@@ -294,10 +379,12 @@ def part_two(like, theta, a) -> np.ndarray | None:
     line("points the model refused, by kind (count and first message)", like.refusals)
     line("the chain is written in Cobaya's format with the prefix", os.path.join(a.out, "chain"))
     rows, weights = rows[keep], weights[keep]
+    summary = np.empty((len(like.param_names), 3))
     for i, name in enumerate(like.param_names):
         order = np.argsort(rows[:, i])
         cdf = np.cumsum(weights[order]) / weights.sum()
         lo, mid, hi = (rows[order, i][np.searchsorted(cdf, q)] for q in (0.16, 0.5, 0.84))
+        summary[i] = lo, mid, hi
         line(
             f"{name}: 16th, 50th, 84th percentile of the chain | truth",
             lo,
@@ -310,12 +397,14 @@ def part_two(like, theta, a) -> np.ndarray | None:
     pick = rng.choice(
         len(rows), size=min(a.draws, len(rows)), replace=True, p=weights / weights.sum()
     )
-    return rows[pick]
+    return {"points": rows[pick], "summary": summary}
 
 
-def part_three(like, points, a) -> None:
-    """The posterior predictive of the data vector, as a figure."""
-    if points is None:
+def part_three(like, chain, reference, a) -> None:
+    """The figures: the posterior predictive of the data vector and, with a stored reference, the intervals of the
+    parameters. The stored reference is drawn underneath in grey, the chain of this run over it in colour.
+    """
+    if chain is None and reference is None:
         print("=== Part 3: no chain, so no posterior predictive")
         return
     import matplotlib
@@ -323,30 +412,74 @@ def part_three(like, points, a) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    print("=== Part 3: the posterior predictive of the data vector")
-    thetas = [dict(zip(like.param_names, row)) for row in points]
-    with quiet_predictor_log():
-        models, replicates = like.predictive(thetas, np.random.default_rng(a.seed + 1))
+    os.makedirs(a.out, exist_ok=True)
     data = like.data
     sigma = np.sqrt(np.diag(data.cov))
-    lo, hi = np.percentile(replicates, [16, 84], axis=0)
-    inside = float(np.mean((data.p1d >= lo) & (data.p1d <= hi)))
-    line("points of the chain used", len(thetas))
-    line(
-        "fraction of the bins whose data value lies in the central 68 per cent of the replicates",
-        inside,
-    )
-    fig, ax = plt.subplots(figsize=(8.0, 3.6), constrained_layout=True)
     x = np.arange(data.n)
-    ax.fill_between(
-        x,
-        (lo - data.p1d) / sigma,
-        (hi - data.p1d) / sigma,
-        alpha=0.3,
-        lw=0,
-        label="replicates, central 68 per cent",
-    )
-    ax.plot(x, (np.median(models, axis=0) - data.p1d) / sigma, lw=1.2, label="median model")
+    fig, ax = plt.subplots(figsize=(8.0, 3.6), constrained_layout=True)
+    print("=== Part 3: the posterior predictive of the data vector")
+    if reference is not None:
+        line(
+            "the stored reference holds",
+            f"the truth, the posterior mean and the central 68 and 95 per cent intervals of {len(reference.param_names)} "
+            f"parameters, and the percentiles {list(reference.percentiles)} of the posterior predictive on "
+            f"{reference.n} bins",
+        )
+        line("how the stored reference was made", reference.provenance.get("what", "not stated"))
+        for name, mean, (lo68, hi68), truth in zip(
+            reference.param_names, reference.mean, reference.interval68, reference.truth
+        ):
+            line(
+                f"stored reference, {name}: mean, lower and upper end of the central 68 per cent interval | truth",
+                mean,
+                lo68,
+                hi68,
+                "|",
+                truth,
+            )
+        for (lower, upper), shade in (((2.5, 97.5), 0.15), ((16.0, 84.0), 0.3)):
+            lo, hi = reference.band(lower, upper)
+            ax.fill_between(
+                x,
+                (lo - data.p1d) / sigma,
+                (hi - data.p1d) / sigma,
+                color="0.3",
+                alpha=shade,
+                lw=0,
+                label=f"stored reference, {lower:g} to {upper:g} per cent",
+            )
+    if chain is None:
+        line(
+            "the chain of this run",
+            "none (--demo N, or --full): the figures show the stored reference alone",
+        )
+    else:
+        thetas = [dict(zip(like.param_names, row)) for row in chain["points"]]
+        models, replicates = like.predictive(thetas, np.random.default_rng(a.seed + 1))
+        lo, hi = np.percentile(replicates, [16, 84], axis=0)
+        inside = float(np.mean((data.p1d >= lo) & (data.p1d <= hi)))
+        line("points of the chain used", len(thetas))
+        line(
+            "fraction of the bins whose data value lies in the central 68 per cent of the replicates",
+            inside,
+        )
+        ax.fill_between(
+            x,
+            (lo - data.p1d) / sigma,
+            (hi - data.p1d) / sigma,
+            color="C0",
+            alpha=0.3,
+            lw=0,
+            label="this run: replicates, central 68 per cent"
+            + (" (NOT CONVERGED)" if a.demo else ""),
+        )
+        ax.plot(
+            x,
+            (np.median(models, axis=0) - data.p1d) / sigma,
+            color="C0",
+            lw=1.2,
+            label="this run: median model",
+        )
     ax.axhline(0.0, color="k", lw=0.6)
     for sl in data.slices()[1:]:
         ax.axvline(sl.start - 0.5, color="k", lw=0.3, alpha=0.4)
@@ -355,17 +488,68 @@ def part_three(like, points, a) -> None:
     ax.legend(frameon=False, fontsize=8)
     path = os.path.join(a.out, "posterior_predictive.png")
     fig.savefig(path, dpi=150)
+    plt.close(fig)
+    line("figure written", path)
+    if reference is None:
+        return
+    # The intervals of the parameters, each on the scale of its flat box (0 and 1 are the edges of the box).
+    names = reference.param_names
+    lo_box = np.array([BOXES[n][0] for n in names])
+    width = np.array([BOXES[n][1] - BOXES[n][0] for n in names])
+
+    def unit(values):
+        return (np.asarray(values, dtype=float).T - lo_box).T / width[:, None]
+
+    y = np.arange(len(names))[::-1].astype(float)
+    fig, ax = plt.subplots(figsize=(6.4, 0.42 * len(names) + 1.2), constrained_layout=True)
+    r95, r68 = unit(reference.interval95), unit(reference.interval68)
+    ax.hlines(y, r95[:, 0], r95[:, 1], color="0.3", lw=1.2, label="stored reference, 95 per cent")
+    ax.hlines(y, r68[:, 0], r68[:, 1], color="0.3", lw=4.0, label="stored reference, 68 per cent")
+    ax.plot(
+        unit(reference.mean[:, None])[:, 0], y, "o", color="k", ms=4, label="stored reference, mean"
+    )
+    ax.plot(unit(reference.truth[:, None])[:, 0], y, "|", color="C3", ms=14, mew=1.6, label="truth")
+    if chain is not None:
+        c = unit(chain["summary"])
+        ax.hlines(
+            y - 0.3,
+            c[:, 0],
+            c[:, 2],
+            color="C0",
+            lw=2.5,
+            label="this run, 16th to 84th percentile" + (" (NOT CONVERGED)" if a.demo else ""),
+        )
+        ax.plot(c[:, 1], y - 0.3, "o", color="C0", ms=3)
+    ax.set_yticks(y)
+    ax.set_yticklabels(names)
+    ax.set_xlim(-0.02, 1.02)
+    ax.set_xlabel("position in the flat box of the parameter (0 and 1 are its edges)")
+    ax.legend(frameon=False, fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2)
+    path = os.path.join(a.out, "posterior_intervals.png")
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
     line("figure written", path)
 
 
 def main(argv=None) -> int:
     a = parse(argv)
-    emu = load_model(a)
-    data = L.read_p1d_data(a.data[0], expected_sha256=a.data[1])
+    if a.download is not None:
+        emu, data, reference = open_download(a.download)
+        line(
+            "the model, the mock and the stored reference",
+            f"the example download at {a.download}, each item read against the sha256 written in this script",
+        )
+        line(
+            "the model of the example download",
+            "a fold model, trained without the simulation of the mock; NOT the release model",
+        )
+    else:
+        emu, reference = load_model(a), None
+        data = L.read_p1d_data(a.data[0], expected_sha256=a.data[1])
     like = L.GaussianP1DLikelihood(emu, data, gaussian_terms=GAUSSIAN_TERMS)
     theta = part_one(like)
-    points = part_two(like, theta, a)
-    part_three(like, points, a)
+    chain = part_two(like, theta, a)
+    part_three(like, chain, reference, a)
     return 0
 
 

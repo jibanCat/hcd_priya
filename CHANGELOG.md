@@ -58,12 +58,22 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   `sampler_logp` gives a sampler minus infinity where the model refuses a point, and counts why. `load_xq100`
   reads the XQ-100 P1D from two files the user supplies, each checked by its sha256: a loader only, nothing
   fitted. An example, `examples/mock_recovery.py`, and a page, `docs/likelihood.md`.
+- **A stored reference of a mock recovery** (`likelihood.P1DReference`, `read_reference`, `write_reference`): the
+  truth, the posterior mean and two central intervals of each parameter, and percentiles of the posterior predictive
+  on the bins of a data set; a strict file format, read only against its sha256. No reference is shipped.
+- **The example download.** `examples/mock_recovery.py --download DIR` (or the environment variable
+  `HCD_PRIYA_EXAMPLE_DOWNLOAD`) reads the mock, a fold model trained without the mock's simulation, its two records
+  and a stored reference from one directory, each item against the sha256 written in the script, and draws the
+  chain of a run over the stored reference. The download is NOT published yet; `docs/likelihood.md` lists its items
+  and their sha256.
 - **A research (fold) model can take an incidence record.** `load_research_bundle` accepts `incidence_dir` and
   `incidence_record_sha256`. The record is refused unless its table was built without the simulations the model
   holds out and its composition says so.
-- **A log record when a correction is applied.** Each call of `predict` or `predict_many` that applies the P1D MF correction, and with
+- **A log record when a correction is applied.** A predictor that applies the P1D MF correction, and with
   an incidence record the correction of dN/dX and the CDDF, emits one INFO record on the logger
-  `hcd_analysis.predictor` with the sha256 of each record. The library configures no logging.
+  `hcd_analysis.predictor` with the sha256 of each record: once per predictor, at its first corrected call of
+  `predict` or `predict_many` while INFO records pass. Every later corrected call of that predictor emits the same
+  facts as a DEBUG record, so a sampler writes one line and not one per step. The library configures no logging.
 - **The held-out error on the output.** An incidence record may carry a held-out error of the dN/dX and the CDDF (an
   optional block, copied by the builder from a table and never computed by it; the block names that table file by
   its sha256). A prediction then returns it as

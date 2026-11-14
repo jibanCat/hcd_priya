@@ -5,8 +5,8 @@ computes, what it leaves out, and how the example that comes with it is run. The
 the [API page](api.md).
 
 **Nothing is fitted to a measurement by anything on this page.** The example recovers the parameters of a mock, a
-data vector made from a simulation at a known point. No mock and no model is shipped yet; the example takes both
-as files you name.
+data vector made from a simulation at a known point. No mock and no model is published yet. The example reads them
+from the example download described below, which is not published yet, or from files you name.
 
 ## What is computed
 
@@ -64,12 +64,26 @@ chi2 at the point the mock was made at: 0.0
 
 The docstring of `GaussianP1DLikelihood` holds this example, and a test runs it on a synthetic model.
 
+## A stored reference
+
+`P1DReference` holds what a figure needs to show a chain against a reference posterior for a mock, and nothing
+else: for each parameter the truth, the posterior mean and the central 68 and 95 per cent intervals; and for each bin
+of the data vector some percentiles of the posterior predictive. It holds no chain, no covariance and no likelihood
+value. `write_reference` writes one as a strict JSON file and `read_reference` reads it only against its sha256, as
+for a data set. `reference.check_bins(data)` refuses a data set whose redshifts and wavenumbers are not exactly the
+reference's, and `reference.band(16, 84)` returns two stored percentile rows; nothing is interpolated between stored
+levels. How a reference was made is stated in its `provenance`, which the class carries and does not interpret.
+
 ## The example: `examples/mock_recovery.py`
 
 ```text
+python examples/mock_recovery.py --download DOWNLOAD_DIR
+python examples/mock_recovery.py --download DOWNLOAD_DIR --demo 200 --out out/
 python examples/mock_recovery.py --release RELEASE_DIR SHA256 --data MOCK_FILE SHA256
-python examples/mock_recovery.py --release RELEASE_DIR SHA256 --data MOCK_FILE SHA256 --demo 200 --out out/
 ```
+
+The first two lines read the mock, its model and the stored reference from the example download (next section). The
+third runs on a model and a mock of your own, and then has no stored reference.
 
 - **Part 1** prints the chi-square and the log likelihood at the point the mock was made at, and the flags of that
   point. Every line is labelled.
@@ -77,10 +91,18 @@ python examples/mock_recovery.py --release RELEASE_DIR SHA256 --data MOCK_FILE S
   short chain of N accepted steps and labels it "A DEMONSTRATION CHAIN, NOT CONVERGED": its numbers are not results.
   `--full` runs one chain with the settings written out in the script until Cobaya's own convergence test stops it.
   Either chain starts at the truth of the mock, and the script says so; it is a single process and refuses to run
-  under MPI. While the sampler and the predictive draws run, the script switches off the predictor's log
-  record for each corrected prediction, which would otherwise be written at every step. Without Cobaya the part says so and is skipped.
-- **Part 3**, after a chain, draws the posterior predictive of the data vector: model vectors at points of the
-  chain, each with one replicate of the data drawn from the covariance.
+  under MPI. A sampler lets INFO records pass, so the predictor's record of the corrections it applies appears in the
+  sampler's output: once, because the library writes it once per predictor and at DEBUG afterwards. Without Cobaya
+  the part says so and is skipped.
+- **Part 3** draws the figures. After a chain: the posterior predictive of the data vector, `posterior_predictive.png`
+  (model vectors at points of the chain, each with one replicate of the data drawn from the covariance). With the
+  example download the stored reference is drawn underneath in grey (its 2.5 to 97.5 and 16 to 84 per cent bands),
+  and a second figure, `posterior_intervals.png`, shows for each of the eleven parameters the reference's mean and
+  its 68 and 95 per cent intervals, the truth, and the 16th to 84th percentile of the chain of the run, each on the
+  scale of the parameter's flat box. The part also prints the reference's mean and 68 per cent interval of each
+  parameter, labelled. Without a chain the figures show the stored reference alone. A `--demo` chain drawn over
+  the reference is labelled NOT CONVERGED in both figures: the reference is a converged posterior, a demonstration
+  chain is not, and the two are not expected to agree.
 
 What the example fixes is written out at the top of the script:
 
@@ -91,14 +113,54 @@ What the example fixes is written out at the top of the script:
   above 0.995 the training simulations are sparse too, and the predictor flags such a point (`ns_ridge`).
 - **Two Gaussian terms,** on `hub` (mean 0.70) and `bhfeedback` (mean 0.05), which this kind of data does not
   constrain. Their standard deviations are 0.015 / sqrt(2) and 0.005 / sqrt(2), narrower by sqrt(2) than the widths that
-  Fernandez, Bird and Ho (2024) quote: they are the widths of this project's own reference chains for such a mock,
-  which are not shipped.
+  Fernandez, Bird and Ho (2024) quote: they are the widths of this project's own reference chains for such a mock.
+  The chains are not shipped; the stored reference of the example download is a summary of one of them.
 - **The sampler settings of `--full`:** Cobaya's Metropolis sampler, one chain, stopped at R-1 < 0.01 for the means
   and R-1 < 0.05 for the bounds; the first 30 per cent of a chain is dropped before anything is read from it. The
   project's reference chains ran four chains; this script runs one.
 
-A research (fold) model, trained without the simulation the mock comes from, is loaded with `--research`, its fold
-MF record with `--mf` and an incidence record built without that simulation with `--incidence`.
+A research (fold) model of your own, trained without the simulation your mock comes from, is loaded with
+`--research`, its fold MF record with `--mf` and an incidence record built without that simulation with
+`--incidence`.
+
+## The example download
+
+**It is not published yet.** Where it will be hosted is decided with the release; until then the example runs only
+on a model and a mock of your own. This section says what the download is, so that the script and the files can be
+checked against each other when it exists.
+
+The download is one directory. `--download DIR` names it, or the environment variable `HCD_PRIYA_EXAMPLE_DOWNLOAD`
+when no model is named on the command line. Its items, each with the sha256 it must have (the values are also
+written in the script, as `DOWNLOAD`):
+
+| Item | Place in the directory | What it is | sha256 |
+|---|---|---|---|
+| `mock` | `mock.p1d.json` | The data set: the P1D of one PRIYA high-resolution simulation at 9 redshifts and 11 wavenumbers each (99 bins), times a resolution table, with a covariance per redshift derived from the KODIAQ-SQUAD P1D of Karacayli et al. (2022), and the truth. No measured P1D is in it. Its provenance names the inputs | `6b5d17d091ad86337d00e863aee30297fb3cdcb692ad2540cbb32a4f0afe4a41` |
+| `model` | `model/` | A research bundle: a fold model, trained WITHOUT the simulation of the mock. The sha256 is that of its `manifest.json`, which names every other file of the bundle by its own sha256 | `07ae506b4105350081692d460c4b623e9083045a6ebe8130257ba31db5a7d758` |
+| `mf_record` | `mf_record/` | The fold's MF record, built without that simulation. The sha256 is that of the record | `667548cfa5a745d5dfb8d7b669d6486860565efa5d78306c21231529ffbeb4c0` |
+| `incidence_record` | `incidence_record/` | The fold's incidence record, built without that simulation. The sha256 is that of the record | `33b34ff8df3dcefb25756642dee1cc0c98db944909c79492ec9b24140adbdfe5` |
+| `reference` | `reference.json` | The stored reference: a summary of a converged posterior for this mock on this model, and its posterior predictive band | `a3c74b2cc09c524ebe760560aaac2394238ac747b2e0ab9361a1c9b2524c4792` |
+
+- **The model is not the release model.** It is one fold of the cross-validation, trained without the simulation
+  the mock was made from, so that the recovery is a held-out one. It loads only through `load_research_bundle`, with
+  a stated purpose. Do not use it for anything but this example.
+- **What is checked.** The directory holds a manifest, `example_download.json`, that states the format
+  (`hcd_priya.example_download/1`) and the five sha256. The script refuses a directory whose manifest states
+  anything else: it was made for another version of the script. The manifest is a first check only. What protects
+  the read is that each loader refuses an item whose sha256 is not the one written in the script, and that the
+  reference must be on the bins of the mock and state the mock's truth.
+- **What the stored reference holds, and nothing more:** the truth of the mock, the posterior mean and the central
+  68 and 95 per cent intervals of the eleven parameters, and the percentiles 2.5, 16, 50, 84 and 97.5 of the
+  posterior predictive on the 99 bins. It comes from the project's own reference chains for this mock: Cobaya's MCMC
+  sampler, four chains, stopped at R-1 below 0.01 for the means and below 0.05 for the 95 per cent bounds, the first
+  30 per cent of each chain dropped; the flat boxes and the two Gaussian terms of the example; the model and the mock
+  of the download. The predictive percentiles are over 1,000 posterior draws of a replicate of the data vector (the
+  model vector at the draw plus noise from the data covariance). The chains were sampled with the project's private
+  reference likelihood, not with this module; the two were compared on this model and this mock and agree (to
+  rounding at the truth, and at the printed precision of the reference chain file at 32 points of the prior box).
+- **What the reference is not.** No emulator error is in the covariance, so its intervals are narrower than ones
+  that account for the error of the emulator. It is one mock on one model: it says that the pieces recover a known
+  point of a simulation, and nothing about any measurement.
 
 ## A loader for the XQ-100 P1D, and nothing more
 
