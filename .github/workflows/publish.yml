@@ -1,0 +1,135 @@
+# Publishing the two packages to the package index: hcd-priya-models (the trained models) and hcd-priya (the code).
+#
+# DISABLED, AND A DRAFT. Nothing here can publish:
+#   - it starts only by hand (workflow_dispatch): no push, tag or release starts it;
+#   - both jobs carry `if: false`, so a manual start does nothing either;
+#   - no trusted publisher is configured on the index for this repository, so an upload would be refused anyway.
+# It is enabled only with the maintainer's release approval, one package at a time, in this order: the accepted
+# model's entry is added to hcd_analysis/published_models.py; the code is merged and tagged with that entry;
+# hcd-priya-models on the test index, then on the index; then hcd-priya (docs/release_checklist.md, section 7).
+#
+# Before it is enabled: pin the publish action to a commit; bind the trusted publisher on the index to protected
+# environments of this repository with a required reviewer (a copy of this file edited on a branch could otherwise
+# be started by anyone with write access); decide where the accepted release archive is kept.
+#
+# How it is meant to work once enabled:
+#   - "trusted publishing": the index accepts an upload from this workflow of this repository, identified by a
+#     short-lived token that GitHub issues to the job (id-token: write). No password or API token is stored.
+#   - the model package is built from an accepted release that is NOT in git. The release archive is given by its
+#     URL and its sha256; model_package/prepare.py checks the sha256 of release.json and verifies every file before
+#     anything is built. Where that archive is kept is not decided yet: the inputs below are placeholders.
+#   - a model package built with a synthetic bundle (version 0+synthetic) cannot be uploaded: the index refuses a
+#     version with a local label.
+name: publish (disabled)
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Which package to publish
+        type: choice
+        options: [hcd-priya-models, hcd-priya]
+        required: true
+      index:
+        description: The test index first; the real index only after the dry run
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
+        required: true
+      release_archive_url:
+        description: "hcd-priya-models only: https URL of the accepted release (a .tar.gz of the release directory)"
+        required: false
+      release_archive_sha256:
+        description: "hcd-priya-models only: sha256 of that archive"
+        required: false
+      release_sha256:
+        description: "hcd-priya-models only: sha256 of the release's release.json"
+        required: false
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    if: false  # DISABLED: remove only with the maintainer's release approval
+    name: Build ${{ inputs.package }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    env:
+      JAX_PLATFORMS: cpu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build the code package
+        if: ${{ inputs.package == 'hcd-priya' }}
+        run: |
+          python -m pip install build
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist .
+          python tools/ci/check_dist.py dist
+          python tools/ci/check_dist_content.py dist --release
+      - name: Build the model package from the accepted release
+        if: ${{ inputs.package == 'hcd-priya-models' }}
+        env:
+          ARCHIVE_URL: ${{ inputs.release_archive_url }}
+          ARCHIVE_SHA256: ${{ inputs.release_archive_sha256 }}
+          RELEASE_SHA256: ${{ inputs.release_sha256 }}
+        run: |
+          case "$ARCHIVE_URL" in https://*) ;; *) echo "the release archive must be an https URL"; exit 1;; esac
+          curl --fail --location --proto '=https' --proto-redir '=https' \
+            --output "$RUNNER_TEMP/release.tar.gz" "$ARCHIVE_URL"
+          echo "$ARCHIVE_SHA256  $RUNNER_TEMP/release.tar.gz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/release" && tar -xzf "$RUNNER_TEMP/release.tar.gz" -C "$RUNNER_TEMP/release" --strip-components=1
+          # the code that verifies the release: this commit's hcd_analysis, with its dependencies but not the model package
+          python -m pip install build
+          python -m build --wheel --outdir "$RUNNER_TEMP/code" .
+          python tools/ci/wheel_requires.py "$(ls "$RUNNER_TEMP"/code/*.whl)" --without hcd-priya-models > "$RUNNER_TEMP/requirements.txt"
+          python -m pip install -c tools/ci/constraints-devenv.txt -r "$RUNNER_TEMP/requirements.txt"
+          python -m pip install --no-deps "$(ls "$RUNNER_TEMP"/code/*.whl)"
+          python model_package/prepare.py --release "$RUNNER_TEMP/release" --release-sha256 "$RELEASE_SHA256"
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist model_package
+          python tools/ci/check_dist_content.py dist --release
+          ls -l dist && sha256sum dist/*
+          # The blocking fresh install: only the two wheels, no test switch. It passes only if this commit's
+          # hcd_analysis/published_models.py holds the entry of the release that was just built.
+          python -m venv "$RUNNER_TEMP/fresh"
+          "$RUNNER_TEMP/fresh/bin/python" -m pip install -c tools/ci/constraints-devenv.txt \
+            "$(ls "$RUNNER_TEMP"/code/*.whl)" "$(ls dist/*.whl)"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/fresh/bin/python" -I "$GITHUB_WORKSPACE/tools/ci/readme_first_example.py" \
+            "$GITHUB_WORKSPACE/README.md"
+          "$RUNNER_TEMP/fresh/bin/python" -I -m hcd_analysis.check_release --published
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ inputs.package }}
+          path: dist
+          retention-days: 7
+
+  publish:
+    if: false  # DISABLED: remove only with the maintainer's release approval
+    name: Publish ${{ inputs.package }} to ${{ inputs.index }}
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.index }}
+    permissions:
+      id-token: write  # trusted publishing: the index checks this job's identity; no stored token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ inputs.package }}
+          path: dist
+      - name: Publish to the test index
+        if: ${{ inputs.index == 'testpypi' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+      - name: Publish to the index
+        if: ${{ inputs.index == 'pypi' }}
+        uses: pypa/gh-action-pypi-publish@release/v1

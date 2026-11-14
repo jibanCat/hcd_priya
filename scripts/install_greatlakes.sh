@@ -60,7 +60,15 @@ echo "Installing hcd-priya and its dependencies..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_ROOT"
-pip install -c tools/ci/constraints-devenv.txt -e ".[tutorials]"
+# hcd-priya requires the model package hcd-priya-models, which is not on the package index yet: build a stand-in
+# with a synthetic bundle (untrained networks; tests and development only) and install both, then make the install
+# editable. With a real model wheel in hand, install that file in place of the stand-in.
+pip install build
+python -m build --wheel --outdir dist .
+tools/ci/install_with_synthetic_models.sh python "$(ls -t dist/hcd_priya-*.whl | head -n 1)[tutorials]" \
+    dist/models -c tools/ci/constraints-devenv.txt
+pip install pytest  # the synthetic stand-in is written with the test suite's builder
+pip install --no-deps -e .
 
 # Verify
 python -c "import hcd_analysis; print('hcd_analysis OK:', hcd_analysis.__version__)"

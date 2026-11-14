@@ -188,7 +188,9 @@ rb = H.load_release("production_bundle", expected_manifest_sha256=digest)
 print("kind:", rb.kind, "| release_verified:", rb.release_verified)
 print("every member declares all_sims:", all(m["recipe"]["all_sims"] is True for m in rb.metas))
 
-params = {n: 0.5 * (lo + hi) for n, (lo, hi) in zip(hp.PARAM_NAMES, hp.PARAM_LIMITS)}
+# the nine PRIYA parameters, written out: the midpoint of each parameter's training range (not a fiducial cosmology)
+params = {"ns": 0.925, "Ap": 1.9e-9, "herei": 4.0, "heref": 2.7, "alphaq": 2.15,
+          "hub": 0.70, "omegamh2": 0.143, "hireionz": 7.25, "bhfeedback": 0.05}
 with np.errstate(all="ignore"):                # untrained synthetic networks: the values mean nothing
     pred = emu.predict(params, z=3.0, tau_eff=0.36)
 print("P_class:", pred.P_class.shape, "| research_model flag present:", "research_model" in pred.flags)

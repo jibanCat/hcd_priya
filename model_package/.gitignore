@@ -1,0 +1,5 @@
+# The model files and the version file are written by prepare.py at build time; they are never committed.
+src/hcd_priya_models/data/
+src/hcd_priya_models/_version.py
+build/
+*.egg-info/

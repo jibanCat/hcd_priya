@@ -722,7 +722,7 @@ gate of that research path; neither it nor a fit to real data is part of this re
 
 ![Per-mock closure coverage detail](../../figures/analysis/06_validation_summary/coverage_summary.png)
 
-*The **per-mock closure-coverage detail** (distinct from the root README's Leg-B / closure coverage
+*The **per-mock closure-coverage detail** (distinct from the Leg-B / closure coverage of `docs/pipeline.md`
 headline, despite the similar filename). Left: the HCD DESI-like mock closure bias `z = (θ̂ − θ_true)/σ`
 per mock. Middle: the α_subDLA mean bias (a known subDLA↔DLA degeneracy
 that is harmless to cosmology and covered by the error model). Right: the eBOSS-like mock low-k recovery.
