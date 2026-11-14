@@ -35,10 +35,14 @@ import numpy as np
 import hcd_analysis.predictor as hp
 from hcd_analysis import likelihood as L
 
-# The flat boxes of the eleven parameters, written out. A point outside a box has zero prior.
-# - herei and heref: the original PRIYA ranges, narrower than the box the model was trained on (3.5 to 4.5 and 2.2 to
-#   3.2); the model is sparsely trained in the widened corners.
-# - tau0_amp and dtau0: PRIYA's two mean-flux parameters (hp.tau_eff_priya).
+# The flat boxes of the eleven parameters, written out. A point outside a box has zero prior. They are the parameter
+# limits of Table 2 of Fernandez, Bird and Ho (2024, arXiv:2309.03943; read in the arXiv version), which that paper
+# uses as uniform priors:
+# - herei and heref: narrower than the box the model was trained on (3.5 to 4.5 and 2.2 to 3.2), and equal to the
+#   package's own sampling box (emulator.data.SAMPLING_LIMITS); the model is sparsely trained in the widened corners.
+# - alphaq: up to 3.0, the edge of the trained box. That is beyond the package's own sampling box, which stops at 2.5
+#   because the training simulations are sparse above it.
+# - tau0_amp and dtau0: PRIYA's two mean-flux parameters (hp.tau_eff_priya); the paper's tau_0 and d tau_0.
 BOXES = {
     "ns": (0.8, 1.05),
     "Ap": (1.2e-9, 2.6e-9),
@@ -52,7 +56,10 @@ BOXES = {
     "tau0_amp": (0.75, 1.25),
     "dtau0": (-0.4, 0.25),
 }
-# Gaussian terms, (mean, standard deviation): this P1D alone does not constrain these two parameters.
+# Gaussian terms, (mean, standard deviation): this P1D alone does not constrain these two parameters. Fernandez, Bird
+# and Ho (2024) quote Gaussian priors of width 0.015 on h and 0.005 on the AGN feedback parameter. This example uses
+# standard deviations of 0.015 / sqrt(2) and 0.005 / sqrt(2): the widths of the reference chains its stored posterior
+# was made with, written here as ordinary Gaussians with their true standard deviations.
 GAUSSIAN_TERMS = {"hub": (0.70, 0.015 / np.sqrt(2.0)), "bhfeedback": (0.05, 0.005 / np.sqrt(2.0))}
 # The sampler of --full: Cobaya's Metropolis sampler, four chains under MPI (mpirun -n 4), stopped by Cobaya's
 # convergence test. The proposal starts as a fixed fraction of each box and is then learned from the chain.
