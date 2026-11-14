@@ -200,7 +200,8 @@ def w_c_corrected(
             HistoricalMapWarning(
                 "w_c_corrected was called without delta_map and uses the HISTORICAL map, fitted to counts made "
                 "before a catalogue fix: it does not reproduce a released model's own w_c. For a released model "
-                "call emu.wc_map.w_c(dndx, z), or pass delta_map=emu.wc_map.delta_c_map()."
+                "call emu.wc_map.w_c(dndx, z) (or pass both Xbar=emu.wc_map.xbar(z) and "
+                "delta_map=emu.wc_map.delta_c_map())."
             ),
             stacklevel=2,
         )

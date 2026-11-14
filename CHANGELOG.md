@@ -64,7 +64,13 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)): what was compared, the numbers, and what the
   comparison is not.
 - **`python -m hcd_analysis.check_release`**: loads a model from a fresh install, predicts, and compares with
-  reference predictions.
+  reference predictions. Before its last line it prints what was checked.
+- **Said where a user reads first.** A prediction of a synthetic test build carries the flag and the label
+  `synthetic_build`. `w_c_corrected` without a map warns that it uses the historical map (`HistoricalMapWarning`).
+  A model that records no trained mean-flux range says so once when it is loaded. The flags `mf_z_clamped` and
+  `mf_tau0_clamped` are False on an LF prediction, which applies no correction (they were set from the redshift
+  and the mean flux alone). The README and the docstrings state the convention of `k` and of the P1D, and that the
+  mixture `add_hcd(pred, pred.w_c)` is not the full P1D of a sightline sample.
 - **Examples in the docstrings of the user entry points**, run by a test; type annotations on the loaders,
   `predict`, `predict_many` and `add_hcd`.
 - **Runtime data inputs** (`hcd_analysis.runtime_data`): the observed P1D legs and the multi-fidelity

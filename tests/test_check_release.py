@@ -53,6 +53,9 @@ def test_a_release_loads_predicts_and_agrees_with_its_own_reference(release, run
     out = run(str(release["root"]), release["sha"], "--write-reference", str(ref))
     assert out.returncode == 0, out.stdout + out.stderr
     assert out.stdout.rstrip().splitlines()[-1] == "PASSED" and "imported from" in out.stdout
+    said = out.stdout.rstrip().splitlines()[-2]  # what the check covered, said before the last line
+    assert said.startswith("what was checked:") and "no reference was given" in said
+    assert said.endswith("not a scientific validation of the model.")
     assert (
         "SYNTHETIC BUILD" not in out.stdout
     )  # a release directory given by path and digest is not that route
@@ -62,6 +65,9 @@ def test_a_release_loads_predicts_and_agrees_with_its_own_reference(release, run
     assert {c["product"] for c in doc["cases"] if c["fidelity"] == "LF+MF"} == {"LF+MF"}
     again = run(str(release["root"]), release["sha"], "--reference", str(ref))
     assert again.returncode == 0 and f"{len(doc['cases'])} cases agree" in again.stdout
+    assert (
+        "agree with the reference to a relative tolerance of 1e-06" in again.stdout.splitlines()[-2]
+    )
     refused = run(str(release["root"]), release["sha"], "--write-reference", str(ref))
     assert refused.returncode == 1 and "FAILED: the reference was not written" in refused.stdout
     assert "PASSED" not in refused.stdout and ref.read_text() == json.dumps(doc)  # not replaced

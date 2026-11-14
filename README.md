@@ -163,9 +163,10 @@ What goes in and what comes out:
   mixture leaves out two contributions that the filter removed, the power of the subDLA cores and the DLA
   damping-wing core (`pred.labels["omissions"]`).
 - **Conventions.** `pred.k` is the angular wavenumber, 2 pi divided by the wavelength in velocity, in s/km.
-  `pred.P_class` is the power spectrum of F / <F> - 1, with <F> the mean flux of the whole sample, in km/s
-  ([`docs/p1d_definition.md`](docs/p1d_definition.md)). A spectrum in the other common convention, with k as one
-  over the wavelength, differs by a factor of 2 pi in both k and P.
+  `pred.P_class` is the power spectrum of `F / mean(F) - 1`, with `mean(F)` the mean flux of the whole sample, in
+  km/s ([`docs/p1d_definition.md`](docs/p1d_definition.md); that page writes k in the other common convention, one
+  over the wavelength). A spectrum in that other convention has a k smaller by a factor of 2 pi and the same P at
+  the corresponding k: only k is converted, never P.
 - **Read `pred.flags` before using the numbers**: a parameter outside the training box, or an LF+MF prediction
   above z 4.6, is returned and flagged, not refused.
 
@@ -226,7 +227,7 @@ code: it needs the raw PRIYA sightlines, which are not distributed, and it is no
   located, and regions closer than a velocity gap are merged into one system (`hcd_analysis/catalog.py`).
 - **Column densities and classes:** the column density N_HI of each system is estimated (a sum-rule inversion in
   production; a Voigt fit is the alternative), and the system is classed as LLS, subDLA or DLA by the boundaries
-  given above.
+  given above; a system below 10^17.2 cm⁻² is discarded as forest.
 - **Out:** the absorber catalogue of every simulation and redshift, and from it the column-density distribution
   function and the P1D of each class of sightlines, which are what the emulator is trained on.
 
