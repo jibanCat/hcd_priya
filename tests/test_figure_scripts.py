@@ -366,7 +366,27 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
     monkeypatch.setattr(
         dndx, "REDSHIFTS", (2.6, 3.0, 5.0)
     )  # 3.0 and 5.0 have a synthetic estimate, 2.6 has none
+    drawn = []
+    from matplotlib.axes import Axes
+
+    real_errorbar = Axes.errorbar
+
+    def errorbar(self, x, y, yerr=None, **kw):
+        drawn.append((np.asarray(x), np.asarray(y), yerr, kw.get("fmt")))
+        return real_errorbar(self, x, y, yerr=yerr, **kw)
+
+    monkeypatch.setattr(Axes, "errorbar", errorbar)
     assert dndx.main(_args(with_error) + ["--no-band", "--out", out2]) == 0
+    # the bars themselves: per class, at the redshifts with an estimate, the fractional error times the model
+    # value. The synthetic LF+MF table of the block, in the column order LLS, subDLA, DLA:
+    table = SR.heldout_error()["dndx"]["lfmf"]
+    bars = [d for d in drawn if d[3] == "none"]
+    assert len(bars) == len(dndx.CLASSES) == 3
+    for (x, y, yerr, _), (name, column, _, _) in zip(bars, dndx.CLASSES):
+        want = {z: row[column] for z, row in zip((3.0, 5.0), table) if row[column] is not None}
+        assert list(x) == sorted(want), name  # no bar at 2.6, and none where the cell is null
+        np.testing.assert_allclose(np.asarray(yerr) / y, [want[z] for z in x], rtol=1e-12, atol=0)
+        assert np.all(y > 0)
     assert _facts(out2)["heldout_error"].startswith(
         "drawn on the model lines: pred.dndx_err times pred.dndx"
     )

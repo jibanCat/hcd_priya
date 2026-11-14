@@ -403,8 +403,9 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   `scripts/build_incidence_mf.py` builds one from two digest-pinned inputs: the LF training cache, and an HR
   incidence product derived from the rebuilt HR absorber catalogues. The HR cache is not read: its catalogue-derived
   columns stay refused, as stated above.
-- **Layout.** One directory with one file, `incidence_mf_record.json`: strict UTF-8 JSON, a closed key set, finite
-  numbers, the tables included as lists. The record is anchored by the sha256 of that file.
+- **Layout.** One directory with one file, `incidence_mf_record.json`: strict UTF-8 JSON, a closed key set (one key,
+  `heldout_error`, is optional), finite numbers (a cell of the held-out error without an estimate is null), the
+  tables included as lists. The record is anchored by the sha256 of that file.
 
 ```text
 {"format": "hcd_priya.incidence_mf_record/1", "version": "<text>", "model_form": "<the code's statement>",
@@ -451,11 +452,14 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   without it is valid, and its bytes are what they were before the key existed. The block holds what the numbers are
   (`kind`, today only `rms_log_error_heldout`, and a `definition` in words), how the uncorrected (`lf`) and the
   corrected (`lfmf`) values were held out, `what_it_does_not_cover`, the number of HR simulations of the correction
-  it was measured for (`n_hr_simulations`), its redshifts `z`, and two sets of tables: `dndx` (per redshift and
+  it was measured for (`n_hr_simulations`), its redshifts `z` (each must be a row of the correction table), and
+  two sets of tables: `dndx` (per redshift and
   class) and `cddf` (per redshift and bin), each with `lf`, `lfmf` and the number of held-out simulations behind
-  every cell (`lf_n`, `lfmf_n`). A cell is a finite number >= 0, or null exactly where its count is 0. `source` names
-  the file the tables were copied from, by sha256. The record builder copies the tables
-  (`--heldout-error FILE SHA256`) and computes none of them; it refuses a table measured for another number of HR
+  every cell (`lf_n`, `lfmf_n`). A cell is a finite number >= 0, or null exactly where its count is 0. `source` is the
+  table's own statement of the product its numbers were taken from (a file name, a sha256 and a sentence); the
+  builder copies it and verifies none of it. The record builder copies the tables
+  (`--heldout-error FILE SHA256`) and computes none of them; it checks the table file against the digest given on
+  the command line and writes that file's name and digest into the block as `copied_from`; it refuses a table measured for another number of HR
   simulations than the record uses unless that is said to be intended, and it refuses to run unless the held-out
   error is stated one way or the other (`--no-heldout-error`). The block is inside the record's bytes, so the
   record's digest covers it.
@@ -463,7 +467,8 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   and `cddf`, for the fidelity of the prediction: the `lf` tables for an LF prediction, the `lfmf` tables for an
   LF+MF one. It is an indication of size from a handful of held-out simulations, not the standard deviation of a
   known distribution; `labels["incidence_mf_error"]` gives the record's definition word for word, and
-  `provenance["incidence_mf"]["heldout_error"]` its texts, redshifts, counts and source. A value is NaN where the
+  `provenance["incidence_mf"]["heldout_error"]` its texts, redshifts, the counts behind the dN/dX tables,
+  its `source` and `copied_from`. A value is NaN where the
   record has no estimate: no block, a redshift that is not one of the block's (an error is never interpolated), a
   cell with a count of 0, or a CDDF bin that is itself NaN. The flag `incidence_heldout_error_available` is True when
   every class of `dndx` has its estimate.
@@ -500,8 +505,8 @@ An LF+MF release is published under ONE digest, the sha256 of a small `release.j
 `backbone.dir` holds the `hcd_priya.h5/2` production bundle and `mf.dir` the `hcd_priya.mf_record/1` record; each
 `dir` is one plain directory name inside the release directory (never a path, `..` or a symlink), and the two differ.
 The key set is closed and the `mf` part is required: an LF-only bundle is not a release of this format and loads with
-`load_bundle` as before. Only `release.json` is anchored by the release digest: the loader reads the two parts it
-names and ignores every other file in the release directory, which is not part of the release.
+`load_bundle` as before. Only `release.json` is anchored by the release digest: the loader reads the parts it
+names (the two required ones and, when present, the optional one below) and ignores every other file in the release directory, which is not part of the release.
 `predictor.load_release(release_dir, "<published release sha256>")` reads `release.json`
 through a no-follow descriptor, compares its sha256 before parsing, validates it, and loads both parts through
 `load_bundle(..., mf_dir=..., mf_record_sha256=...)` with the digests it names; since the record pins its backbone's

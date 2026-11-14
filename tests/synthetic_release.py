@@ -63,6 +63,7 @@ def heldout_error(n_bins=30):
         },
         "cddf": {"lf": cddf, "lf_n": cddf_n, "lfmf": cddf_mf, "lfmf_n": cddf_mf_n},
         "source": {"file": "synthetic_heldout.npz", "sha256": "ef" * 32, "how": "made up"},
+        "copied_from": {"file": "synthetic_heldout_table.json", "sha256": "cd" * 32},
     }
 
 

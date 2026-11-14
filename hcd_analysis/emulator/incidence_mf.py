@@ -26,7 +26,8 @@ verifies no lineage of the HR product: how it was derived is the statement of wh
 (``HR_SOURCE`` says exactly this).
 
 **Layout.** One record directory holds exactly one file, ``incidence_mf_record.json``: strict UTF-8 JSON with a closed
-key set (``RECORD_KEYS``) and finite numbers, the numbers of the tables included (they are a few hundred). A published
+key set (``RECORD_KEYS``, and the optional ``heldout_error``) and finite numbers (a cell of the held-out error that
+has no estimate is null), the numbers of the tables included (they are a few hundred). A published
 record is anchored by the sha256 of that file. Nothing is pickled or evaluated.
 """
 
@@ -34,7 +35,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import types
 import warnings
 from typing import NamedTuple
 
@@ -144,9 +147,13 @@ _HELDOUT_KEYS = {
     "dndx",
     "cddf",
     "source",
+    "copied_from",
 }
 _HELDOUT_TABLE_KEYS = {"lf", "lf_n", "lfmf", "lfmf_n"}
 _HELDOUT_SOURCE_KEYS = {"file", "sha256", "how"}
+# What the builder itself states about the block: the table file it read, by the digest it was pinned to. The
+# key "source" beside it is the table's own statement of where its numbers came from, which nothing here verifies.
+_HELDOUT_COPIED_KEYS = {"file", "sha256"}
 _HELDOUT_Z_TOL = (
     1e-6  # an error is looked up at a tabulated redshift only; it is never interpolated
 )
@@ -360,6 +367,14 @@ def _check_tables(t, where):
     return a
 
 
+def _finite(x):
+    """True for an int or float that is a finite float64 (an integer too large for one is not)."""
+    try:
+        return math.isfinite(float(x))
+    except OverflowError:
+        return False
+
+
 def _heldout_table(block, shape, where, what):
     """One block of a held-out error (``dndx`` or ``cddf``): four tables of ``shape``. A value is a finite number
     >= 0, or null exactly where its count is 0. Returns {name: array}; a null becomes NaN."""
@@ -393,7 +408,7 @@ def _heldout_table(block, shape, where, what):
                             f"{where}: heldout_error.{what}.{fid} is null where its count is {c}"
                         )
                     continue
-                if type(x) not in (int, float) or not np.isfinite(x) or x < 0 or c == 0:
+                if type(x) not in (int, float) or not _finite(x) or x < 0 or c == 0:
                     raise MFRecordError(
                         f"{where}: heldout_error.{what}.{fid} must be a finite number >= 0 with a count >= 1, or "
                         "null with a count of 0"
@@ -433,24 +448,34 @@ def _check_heldout(h, where, n_bins):
     _MR._hex(src["sha256"], 64, f"{where}: heldout_error.source.sha256")
     if not isinstance(src["how"], str) or not src["how"].strip():
         raise MFRecordError(f"{where}: heldout_error.source.how must be a non-empty text")
+    cp = h["copied_from"]
+    _MR._keys(cp, _HELDOUT_COPIED_KEYS, f"{where}: heldout_error.copied_from")
+    if not isinstance(cp["file"], str) or not _MR._PLAIN.match(cp["file"]):
+        raise MFRecordError(f"{where}: heldout_error.copied_from.file must be a plain file name")
+    _MR._hex(cp["sha256"], 64, f"{where}: heldout_error.copied_from.sha256")
     return out
 
 
-# Keys of a held-out error table FILE beyond those of the record's block: the two it is checked against, and one
-# that is for documentation and is not copied.
+# Keys of a held-out error table FILE beyond those it shares with the record's block: the two it is checked against,
+# and one that is for documentation and is not copied. The block's "copied_from" is not a key of the file: the builder
+# states it.
 _HELDOUT_FILE_CHECKED = {"class_names", "log_nhi_centres"}
 _HELDOUT_FILE_IGNORED = {"pooled_dndx_z2p2_to_4p6"}
 
 
-def heldout_block_from_table(doc, *, log_nhi_centres, n_train_sims, other_composition=False):
+def heldout_block_from_table(
+    doc, *, log_nhi_centres, n_train_sims, table_file, table_sha256, other_composition=False
+):
     """The record's ``heldout_error`` block from a held-out error table (the parsed JSON file that whoever measured
     the error supplies). Nothing is computed: the numbers and the texts are copied. Checked first: the keys; that
     the table's classes are this code's, in order; that its column-density bins are the record's; and that the
     number of HR simulations the error was measured for (``n_hr_simulations``) is the number the record's table is
-    built from (``n_train_sims``), unless ``other_composition`` says that a difference is intended.
+    built from (``n_train_sims``), unless ``other_composition`` says that a difference is intended. ``table_file``
+    and ``table_sha256`` are the name and the sha256 of the file ``doc`` was parsed from, as whoever calls this
+    verified them; they become the block's ``copied_from``.
     """
     where = "the held-out error table"
-    want = _HELDOUT_KEYS | _HELDOUT_FILE_CHECKED
+    want = (_HELDOUT_KEYS - {"copied_from"}) | _HELDOUT_FILE_CHECKED
     got = set(doc) if isinstance(doc, dict) else set()
     if not want <= got or got - want - _HELDOUT_FILE_IGNORED:
         raise MFRecordError(
@@ -463,7 +488,8 @@ def heldout_block_from_table(doc, *, log_nhi_centres, n_train_sims, other_compos
     theirs = _numbers(doc["log_nhi_centres"], (centres.size,), where, "log_nhi_centres")
     if not np.allclose(theirs, centres, rtol=0.0, atol=1e-9):
         raise MFRecordError(f"{where}: its column-density bins are not the record's")
-    block = {k: doc[k] for k in sorted(_HELDOUT_KEYS)}
+    block = {k: doc[k] for k in sorted(_HELDOUT_KEYS - {"copied_from"})}
+    block["copied_from"] = {"file": table_file, "sha256": table_sha256}
     _check_heldout(block, where, centres.size)
     if block["n_hr_simulations"] != int(n_train_sims) and not other_composition:
         raise MFRecordError(
@@ -542,6 +568,14 @@ def check_record(rec, where="incidence MF record"):
         if "heldout_error" in rec
         else None
     )
+    if arrays["heldout"] is not None:
+        # an error belongs to a row of the correction table: at any other redshift the ratio is interpolated or
+        # held at an edge row, and no error was measured for that
+        gap = np.abs(arrays["heldout"]["z"][:, None] - arrays["z"][None, :]).min(axis=1)
+        if np.any(gap > _HELDOUT_Z_TOL):
+            raise MFRecordError(
+                f"{where}: heldout_error.z holds a redshift that is not a row of the correction table"
+            )
     return arrays
 
 
@@ -743,6 +777,7 @@ class IncidenceMF(NamedTuple):
                             "n_hr_simulations",
                             "z",
                             "source",
+                            "copied_from",
                         )
                     },
                     "dndx_lf_n": self.heldout["dndx_lf_n"].tolist(),
@@ -786,7 +821,7 @@ def parse_record(raw, where="<incidence MF record>", *, expected_sha256=None):
         a["cddf_n_pairs"],
         expected_sha256 is not None,
         raw,
-        heldout,
+        None if heldout is None else types.MappingProxyType(heldout),
     )
 
 
@@ -824,7 +859,7 @@ def _same_heldout(a, b):
     if a is None or b is None:
         return a is None and b is None
     return (
-        isinstance(a, dict)
+        isinstance(a, (dict, types.MappingProxyType))
         and set(a) == set(b)
         and all(np.array_equal(np.asarray(a[k]), b[k], equal_nan=True) for k in b)
     )

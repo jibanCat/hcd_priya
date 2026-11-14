@@ -240,9 +240,11 @@ def test_the_held_out_error_is_stated_and_copied_never_computed(inputs, tmp_path
         ).record_sha256,
     )
     n_bins, n_train = plain.log_nhi_centres.size, len(plain.record["train_sims"])
+    held_z = [float(plain.z[0]), float(plain.z[-1])]
     doc = dict(
-        heldout_error(n_bins),
+        {k: v for k, v in heldout_error(n_bins).items() if k != "copied_from"},
         n_hr_simulations=n_train,
+        z=held_z,  # an error belongs to a row of the correction table
         class_names=["LLS", "subDLA", "DLA"],
         log_nhi_centres=plain.log_nhi_centres.tolist(),
     )
@@ -253,9 +255,13 @@ def test_the_held_out_error_is_stated_and_copied_never_computed(inputs, tmp_path
         _argv(inputs, tmp_path / "with", extra=["--heldout-error", str(table), sha]), _code=CLEAN
     )
     s = json.loads(capsys.readouterr().out)
-    assert s["heldout_error"] == {"kind": "rms_log_error_heldout", "z": [3.0, 5.0]}
+    assert s["heldout_error"] == {"kind": "rms_log_error_heldout", "z": held_z}
     inc = IM.load_record(tmp_path / "with", expected_record_sha256=s["record_sha256"])
     assert inc.record["heldout_error"]["dndx"] == doc["dndx"]  # the numbers of the file, unchanged
+    # the record names the table file the builder read, by the digest it was pinned to; "source" is the file's own
+    assert inc.record["heldout_error"]["copied_from"] == {"file": "heldout.json", "sha256": sha}
+    assert inc.record["heldout_error"]["source"] == doc["source"]
+    assert inc.provenance()["heldout_error"]["copied_from"]["sha256"] == sha
     np.testing.assert_array_equal(
         inc.dndx_ratio, plain.dndx_ratio
     )  # the correction itself is the same
@@ -277,3 +283,51 @@ def test_the_held_out_error_is_stated_and_copied_never_computed(inputs, tmp_path
         _code=CLEAN,
     )
     assert json.loads(capsys.readouterr().out)["heldout_error"]["kind"] == "rms_log_error_heldout"
+    # the options exclude each other, and the word about the composition needs a table
+    for name, extra, why in (
+        ("both", ["--heldout-error", str(table), sha], "state the held-out error"),
+        ("lone", ["--heldout-error-other-composition"], "needs --heldout-error"),
+    ):
+        with pytest.raises(SystemExit) as e:
+            B.main(_argv(inputs, tmp_path / name) + extra, _code=CLEAN)
+        assert (
+            e.value.code == 2 and why in capsys.readouterr().err and not (tmp_path / name).exists()
+        )
+    # a table that is not the project's strict JSON: not JSON at all, or a key given twice
+    twice = json.dumps(doc)[:-1] + ', "kind": "rms_log_error_heldout"}'
+    for name, text in (("not_json", "not json"), ("twice", twice)):
+        bad = tmp_path / (name + ".json")
+        bad.write_text(text, encoding="utf-8")
+        pin = hashlib.sha256(bad.read_bytes()).hexdigest()
+        with pytest.raises(SystemExit, match="held-out error table is not strict JSON"):
+            B.main(
+                _argv(inputs, tmp_path / name, extra=["--heldout-error", str(bad), pin]),
+                _code=CLEAN,
+            )
+        assert not (tmp_path / name).exists()
+
+
+def test_a_held_out_table_that_changes_while_the_inputs_are_read_is_refused(
+    inputs, tmp_path, monkeypatch
+):
+    import hashlib
+
+    from tests.synthetic_release import heldout_error
+
+    table = tmp_path / "heldout.json"
+    table.write_text(json.dumps(heldout_error()), encoding="utf-8")
+    sha = hashlib.sha256(table.read_bytes()).hexdigest()
+    real = B.importlib.import_module("hcd_analysis.emulator.incidence_mf").hr_snap_from_product
+
+    def read_then_change(path):
+        out = real(path)
+        with open(table, "ab") as f:
+            f.write(b" ")
+        return out
+
+    monkeypatch.setattr("hcd_analysis.emulator.incidence_mf.hr_snap_from_product", read_then_change)
+    with pytest.raises(SystemExit, match="the held-out error table changed while it was read"):
+        B.main(
+            _argv(inputs, tmp_path / "out", extra=["--heldout-error", str(table), sha]), _code=CLEAN
+        )
+    assert not (tmp_path / "out").exists()

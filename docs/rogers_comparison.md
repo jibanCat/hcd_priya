@@ -16,7 +16,7 @@ the training simulations with and without the filter, which are not distributed.
 ## What was compared
 
 - **Simulations only.** No survey data enters, and no emulator prediction.
-- **The simulation side.** The ratio `R = P_class / P_clean` from the 60 low-resolution training simulations (48 simulations of Bird et al. (2023) and 12 added by Fernandez, Bird and Ho (2024), who describe them as extending alpha_q to 2.5-3.0 and n_P to 1.0-1.05; in the design table used here those 12 rows also reach beyond the original range in the two helium reionisation redshifts), taken
+- **The simulation side.** The ratio `R = P_class / P_clean` from the 60 low-resolution training simulations (the design points of the emulator files of Fernandez, Bird and Ho (2024): 48 are the design of Bird et al. (2023) and 12 were added by Fernandez et al., whose paper states "a total of 60 low fidelity (LF) and 3 high fidelity (HF) simulations"), taken
   on the mean over the simulations, at the mean-flux rung nearest a tau0 amplitude of 1, at redshifts 2.6 to 4.2 and
   wavenumbers k < 0.03 s/km.
 - **With the filtered troughs restored.** The class spectra that the predictor returns are PRIYA-filtered with

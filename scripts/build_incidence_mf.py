@@ -116,10 +116,6 @@ def parse(argv=None):
     return a
 
 
-def _no_constant(name):
-    raise ValueError(f"{name} is not a number of strict JSON")
-
-
 def main(argv=None, *, _code=None):
     a = parse(argv)
     out = os.path.abspath(a.out_dir)
@@ -147,6 +143,7 @@ def main(argv=None, *, _code=None):
     import hcd_analysis.emulator  # noqa: F401  (float64)
     from hcd_analysis.emulator import incidence_mf as IM
     from hcd_analysis.emulator import multifidelity as MF
+    from hcd_analysis.emulator import safe_io as S
 
     composition = {
         "id": a.composition_id,
@@ -166,14 +163,16 @@ def main(argv=None, *, _code=None):
                 raw = fh.read()
             if hashlib.sha256(raw).hexdigest() != a.heldout_error[1]:
                 sys.exit("refusing: the held-out error table changed while it was read")
-            try:
-                doc = json.loads(raw.decode("utf-8"), parse_constant=_no_constant)
-            except ValueError as e:
+            try:  # the project's strict reader: UTF-8, no duplicate key, no NaN or Infinity
+                doc = S._json_loads(raw, "the held-out error table")
+            except S.SafeFormatError as e:
                 sys.exit(f"refusing: the held-out error table is not strict JSON ({e})")
             heldout = IM.heldout_block_from_table(
                 doc,
                 log_nhi_centres=tables["log_nhi_centres"],
                 n_train_sims=len(train),
+                table_file=os.path.basename(a.heldout_error[0]),
+                table_sha256=a.heldout_error[1],
                 other_composition=a.heldout_error_other_composition,
             )
         path, sha = IM.write_record(

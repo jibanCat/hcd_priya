@@ -81,9 +81,10 @@ incidence record ``cddf`` and ``log_nhi`` are None: the model files do not
 say what the bins are. A release without that part has no such
 record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition.
 
-**Logging.** Each prediction call that applies a correction emits one INFO record on the logger
+**Logging.** Each call of ``predict`` or ``predict_many`` that applies a correction emits one INFO record on the logger
 ``hcd_analysis.predictor``: which correction (the P1D MF correction; with an incidence record also the correction of
-dN/dX and the CDDF) and the sha256 of each record. An LF prediction emits none. The library configures no logging; to
+dN/dX and the CDDF) and the sha256 of each record. An LF prediction emits none, and neither do the research helpers
+of this module that evaluate a backbone directly. The library configures no logging; to
 see the records, let that logger's INFO records pass, for example
 ``logging.getLogger("hcd_analysis.predictor").setLevel(logging.INFO)`` after ``logging.basicConfig()``. The same
 facts are on every prediction without any logging: the flags ``mf_applied`` and ``incidence_mf_applied`` and
@@ -638,6 +639,8 @@ class Prediction:
         w_c, dndx     (3,)        (n_z, 3)
         cddf          (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         log_nhi       (Nbin,)     (Nbin,)         only with an incidence record; else None
+        dndx_err      (3,)        (n_z, 3)        only with an incidence record; else None
+        cddf_err      (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         member_std    (4, K)      (n_z, 4, K)
         tau_eff       float       (n_z,)
 
@@ -1597,7 +1600,6 @@ class _PredictorBase:
         key = self._inc.record_sha256
         if not missing or key in _HELDOUT_WARNED:
             return
-        _HELDOUT_WARNED.add(key)
         why = (
             "the incidence record carries no held-out error"
             if self._inc.heldout is None
@@ -1611,6 +1613,8 @@ class _PredictorBase:
             ),
             stacklevel=4,
         )
+        # only after the warning returned: under an "error" filter it raises, and then every call raises
+        _HELDOUT_WARNED.add(key)
 
     def _warn_off_ladder(self, zs, taus):
         """One ``MeanFluxRangeWarning`` for a call whose mean flux lies outside the trained ladder: the same

@@ -104,7 +104,7 @@ python scripts/figures/fig_cddf_vs_ho21.py --published
 python scripts/figures/fig_cddf_vs_ho21.py --release RELEASE_DIR SHA256
 ```
 
-The band is drawn over the 60 design points of `docs/figures/data/priya_lf_design_60.csv`: 48 simulations of Bird et al. (2023) and 12 added by Fernandez, Bird and Ho (2024), who describe them as extending alpha_q to 2.5-3.0 and n_P to 1.0-1.05; in the design table used here those 12 rows also reach beyond the original range in the two helium reionisation redshifts (the
+The band is drawn over the 60 design points of `docs/figures/data/priya_lf_design_60.csv`, which are those of the emulator files of Fernandez, Bird and Ho (2024): 48 are the design of Bird et al. (2023) and 12 were added by Fernandez et al., whose paper states "a total of 60 low fidelity (LF) and 3 high fidelity (HF) simulations" (the
 last 12 rows of the table, which are the 12 points the predictor flags `outside_sampling_box`). `--design FILE` takes another table (one header line with the nine parameter names, one row
 per point; read without a digest check), and `--no-band` draws the line and the points only.
 

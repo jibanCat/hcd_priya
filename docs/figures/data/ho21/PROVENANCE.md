@@ -56,7 +56,7 @@ figure `docs/figures/dndx_vs_ho21.png` (`scripts/figures/fig_dndx_vs_ho21.py`).
     can show as a bar. The figure here does not draw these bins.
   - **The file for 3 <= z < 4.** `ho21_cddf` opens `ho21/cddf_z253.txt` for both 2.5 <= z < 3 and 3 <= z < 4, in
     the origin and in the fork. The figure here takes `ho21/cddf_z34.txt` for the bin 3 to 4, the file named for
-    that range; the two files hold different numbers. The paper's first author confirmed on 2026-11-14 that
+    that range; the two files hold different numbers. The paper's first author confirmed in November 2026 that
     `cddf_z34.txt` is the table of the bin 3 to 4.
 - **What the rows of `dndx_all.txt` are.** Neither repository has a reader for this file. The first author of
   the paper, who owns the fork and maintains this project, confirmed the rows on 2026-11-13: six rows

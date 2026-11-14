@@ -849,6 +849,10 @@ def test_a_record_carries_its_held_out_error_and_gives_it_only_at_a_tabulated_re
     assert np.isnan(c[0]) and np.all(c[1:] == 0.21) and c.shape == (30,)
     with pytest.raises(ValueError):  # read-only, like every table of the record
         inc.heldout["dndx_lf"][0, 0] = 9.0
+    with pytest.raises(
+        TypeError
+    ):  # and so is the container: a table cannot be swapped after the load
+        inc.heldout["dndx_lfmf"] = inc.heldout["dndx_lf"]
     prov = inc.provenance()["heldout_error"]
     assert prov["kind"] == "rms_log_error_heldout" and prov["z"] == [3.0, 5.0]
     assert (
@@ -871,16 +875,21 @@ def test_a_record_carries_its_held_out_error_and_gives_it_only_at_a_tabulated_re
         (("n_hr_simulations",), 0, "n_hr_simulations must be an integer >= 1"),
         (("z",), [5.0, 3.0], "strictly ascending"),
         (("z",), [3.0], "must have shape \\(1, 3\\)"),
+        (("z",), [3.0, 4.0], "not a row of the correction table"),
         (("dndx", "lfmf", 0, 0), None, "null where its count is 5"),
         (("dndx", "lfmf", 1, 1), 0.2, "or null with a count of 0"),
         (("dndx", "lf", 0, 0), -0.1, "finite number >= 0"),
         (("dndx", "lf", 0, 0), True, "finite number >= 0"),
+        (("dndx", "lf", 0, 0), 10**400, "finite number >= 0"),  # an integer too large for a float
         (("dndx", "lf_n", 0, 0), 6.0, "not an integer >= 0"),
         (("cddf", "lf", 0), [0.3] * 29, "must have shape \\(2, 30\\)"),
         (("cddf", "extra"), [], "unknown \\['extra'\\]"),
         (("source", "file"), "../x.npz", "plain file name"),
         (("source", "sha256"), "ef" * 31, "sha256"),
         (("source",), KeyError, "missing \\['source'\\]"),
+        (("copied_from", "file"), "../t.json", "plain file name"),
+        (("copied_from", "sha256"), "cd" * 31, "sha256"),
+        (("copied_from",), KeyError, "missing \\['copied_from'\\]"),
     ],
 )
 def test_a_malformed_held_out_error_is_refused_before_anything_is_written(
@@ -895,30 +904,38 @@ def test_a_malformed_held_out_error_is_refused_before_anything_is_written(
 
 def test_a_table_file_becomes_the_block_only_if_it_fits_the_record():
     centres = INCIDENCE_TABLES["log_nhi_centres"]
+    stated = heldout_error()["copied_from"]  # what the builder states: not a key of the file
     doc = dict(
-        heldout_error(),
+        {k: v for k, v in heldout_error().items() if k != "copied_from"},
         class_names=["LLS", "subDLA", "DLA"],
         log_nhi_centres=list(centres),
         pooled_dndx_z2p2_to_4p6={"lf": [0.1, 0.1, 0.1]},  # for documentation: not copied
     )
-    block = IM.heldout_block_from_table(doc, log_nhi_centres=centres, n_train_sims=2)
+    kw = dict(
+        log_nhi_centres=centres,
+        n_train_sims=2,
+        table_file=stated["file"],
+        table_sha256=stated["sha256"],
+    )
+    block = IM.heldout_block_from_table(doc, **kw)
     assert block == heldout_error() and "pooled_dndx_z2p2_to_4p6" not in block
-    kw = dict(log_nhi_centres=centres, n_train_sims=2)
     for bad, why in (
         (dict(doc, class_names=["DLA", "subDLA", "LLS"]), "class_names must be"),
         (dict(doc, log_nhi_centres=[c + 0.1 for c in centres]), "bins are not the record's"),
         (dict(doc, something="else"), "unknown \\['something'\\]"),
         ({k: v for k, v in doc.items() if k != "class_names"}, "missing \\['class_names'\\]"),
         (dict(doc, kind="another"), "this code reads"),
+        (
+            dict(doc, copied_from=stated),
+            "unknown \\['copied_from'\\]",
+        ),  # the file cannot state it itself
     ):
         with pytest.raises(E, match=why):
             IM.heldout_block_from_table(bad, **kw)
     # measured for another number of HR simulations than the record uses: refused unless it is said to be intended
     with pytest.raises(E, match="measured for a correction of 2 HR simulations"):
-        IM.heldout_block_from_table(doc, log_nhi_centres=centres, n_train_sims=3)
-    same = IM.heldout_block_from_table(
-        doc, log_nhi_centres=centres, n_train_sims=3, other_composition=True
-    )
+        IM.heldout_block_from_table(doc, **dict(kw, n_train_sims=3))
+    same = IM.heldout_block_from_table(doc, **dict(kw, n_train_sims=3), other_composition=True)
     assert same == block
 
 
@@ -1028,8 +1045,11 @@ def test_a_record_without_a_held_out_error_gives_nan_and_warns_once(rel, monkeyp
     with warnings.catch_warnings():  # the standard filter turns it into an error
         warnings.simplefilter("error", hp.HeldOutErrorWarning)
         monkeypatch.setattr(hp, "_HELDOUT_WARNED", set())
-        with pytest.raises(hp.HeldOutErrorWarning):
-            two.predict(PARAMS, 3.0, tau_eff=0.4)
+        for _ in range(
+            2
+        ):  # an error every time: a caller that catches the first is not left without a word
+            with pytest.raises(hp.HeldOutErrorWarning):
+                two.predict(PARAMS, 3.0, tau_eff=0.4)
 
 
 # ------------------------------------------------------------------------------------------------- the log
@@ -1038,6 +1058,8 @@ def test_a_call_that_applies_a_correction_says_so_once_in_the_log(rel, caplog):
 
     two, one, info = rel["two"], rel["one"], rel["info"]
     name = "hcd_analysis.predictor"
+    # the library configures no logging: its logger has no level and no handler of its own
+    assert logging.getLogger(name).level == logging.NOTSET and not logging.getLogger(name).handlers
     with caplog.at_level(logging.INFO, logger=name):
         two.predict(PARAMS, 3.0, tau_eff=0.4)
     (record,) = [r for r in caplog.records if r.name == name]
@@ -1057,9 +1079,9 @@ def test_a_call_that_applies_a_correction_says_so_once_in_the_log(rel, caplog):
     texts = [r.getMessage() for r in caplog.records if r.name == name]
     assert len(texts) == 2 and "at 3 redshift(s)" in texts[0]
     assert "P1D MF correction" in texts[1] and "incidence" not in texts[1]
-    # the library configures no logging: at the default level nothing is recorded
+    # so at the default level (WARNING, from the root logger) nothing is recorded
     caplog.clear()
-    logging.getLogger(name).setLevel(logging.NOTSET)
+    assert logging.getLogger(name).level == logging.NOTSET  # caplog put back what it found
     with caplog.at_level(logging.WARNING):
         two.predict(PARAMS, 3.0, tau_eff=0.4)
     assert not [r for r in caplog.records if r.name == name]
