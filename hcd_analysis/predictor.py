@@ -140,6 +140,7 @@ import copy
 import dataclasses
 import logging
 import os
+import re
 import warnings
 from typing import Any, Mapping, Sequence
 
@@ -1773,6 +1774,46 @@ class Bundle(_PredictorBase):
             self._attach_mf(mf, kind="release")
 
 
+_RUN_NAME = re.compile(
+    "".join(rf"{name}(?P<{name}>[0-9.]+(?:e[-+]?[0-9]+)?)" for name in PARAM_NAMES) + r"\Z"
+)
+SAME_RUN_RTOL = 0.015
+
+
+def same_run(a: str, b: str) -> bool:
+    """Whether two simulation names are the same run.
+
+    True for equal strings. Otherwise both names must be of the PRIYA form, the nine parameters
+    in the order of ``PARAM_NAMES`` each followed by its value (``ns0.9Ap1.5e-09herei3.9...``),
+    and every parameter must agree within ``SAME_RUN_RTOL`` (1.5 per cent). The high- and the
+    low-resolution run of one design point can differ in the last printed digit of a parameter;
+    two different design points differ by far more in at least one. A name of another form is
+    equal only to itself.
+
+    Examples
+    --------
+    >>> import hcd_analysis.predictor as hp
+    >>> lf = "ns0.9Ap1.5e-09herei3.9heref2.8alphaq1.57hub0.7omegamh20.141hireionz7.1bhfeedback0.05"
+    >>> hr = "ns0.9Ap1.5e-09herei3.9heref2.8alphaq1.58hub0.7omegamh20.142hireionz7.1bhfeedback0.05"
+    >>> print("two spellings of one run:", hp.same_run(lf, hr))
+    two spellings of one run: True
+    >>> other = lf.replace("ns0.9", "ns0.95")
+    >>> print("another run:", hp.same_run(lf, other), "| a name of another form:", hp.same_run("simA", "simB"))
+    another run: False | a name of another form: False
+    """
+    if a == b:
+        return True
+    ma, mb = _RUN_NAME.match(str(a)), _RUN_NAME.match(str(b))
+    if not (ma and mb):
+        return False
+    try:
+        va = np.array([float(ma[n]) for n in PARAM_NAMES])
+        vb = np.array([float(mb[n]) for n in PARAM_NAMES])
+    except ValueError:
+        return False
+    return bool(np.all(np.abs(va - vb) <= SAME_RUN_RTOL * np.maximum(np.abs(va), np.abs(vb))))
+
+
 class ResearchPredictor(_PredictorBase):
     """A research model, ready to predict. ``load_research_bundle`` returns it.
 
@@ -1852,6 +1893,38 @@ class ResearchPredictor(_PredictorBase):
             research=self.research,
             load_purpose=self._rb.load_purpose,
         )
+
+    def _attach_incidence(self, inc):
+        """As the base, after the held-out guard of a research model: the record's table must be built without the
+        simulations this backbone holds out (as re-derived from the member metas), and the record must say so.
+
+        Refused: a record with a name in ``train_sims`` that is the same run as a held-out simulation
+        (``same_run``: the same string, or the same nine parameters within 1.5 per cent, because the high- and the
+        low-resolution run of one design point can be named with two digits of difference); and a record whose
+        ``composition.excluded_sims`` does not list every held-out simulation by the exact string the backbone
+        holds.
+
+        Limits. The guard compares the names the record declares about itself; it cannot see which simulations
+        the table was really built from. And since ``excluded_sims`` can only name simulations that have a
+        high-resolution run, a backbone that holds out a simulation without one gets no record from the builder
+        that passes here: a refusal, the safe side."""
+        inc = _IM.reverify(inc)
+        held = set(self._backbone_identity()["held_out_sims"])
+        seen = sorted(
+            name for name in inc.record["train_sims"] if any(same_run(name, h) for h in held)
+        )
+        if seen:
+            raise _MR.MFRecordError(
+                f"refusing the incidence MF record {inc.record_sha256[:12]}: its table was built with the "
+                f"simulations {seen}, which this research backbone holds out: not a held-out prediction"
+            )
+        unstated = sorted(held - set(inc.record["composition"]["excluded_sims"]))
+        if unstated:
+            raise _MR.MFRecordError(
+                f"refusing the incidence MF record {inc.record_sha256[:12]}: it does not state that it excludes "
+                f"the simulations {unstated}, which this research backbone holds out (composition.excluded_sims)"
+            )
+        super()._attach_incidence(inc)
 
     def labels(self):
         sp = self._rb.split
@@ -2052,6 +2125,8 @@ def load_research_bundle(
     purpose: str,
     mf_dir: str | os.PathLike[str] | None = None,
     mf_record_sha256: str | None = None,
+    incidence_dir: str | os.PathLike[str] | None = None,
+    incidence_record_sha256: str | None = None,
 ) -> ResearchPredictor:
     """Load a research model bundle, checked against its manifest digest.
 
@@ -2072,6 +2147,13 @@ def load_research_bundle(
         grouped cross-validation. Give it together with ``mf_record_sha256``.
     mf_record_sha256 : str, optional
         The sha256 of that MF record.
+    incidence_dir : str or os.PathLike, optional
+        The directory of an incidence MF record whose table was built without this bundle's
+        held-out simulations, for held-out predictions of the corrected ``dndx`` and ``w_c``.
+        It is applied only together with the fold MF record. Give it together with
+        ``incidence_record_sha256``.
+    incidence_record_sha256 : str, optional
+        The sha256 of that incidence MF record.
 
     Returns
     -------
@@ -2086,7 +2168,11 @@ def load_research_bundle(
         is a production bundle (use ``load_bundle``).
     MFRecordError
         If only one of ``mf_dir`` and ``mf_record_sha256`` is given; if the record is not a fold
-        record of this bundle; or if its held-out simulations were used to train this bundle.
+        record of this bundle; or if its held-out simulations were used to train this bundle. If
+        only one of ``incidence_dir`` and ``incidence_record_sha256`` is given; if the incidence
+        record is given without the fold MF record, or was fitted on another LF cache; if its
+        table was built with a simulation this bundle holds out; or if it does not state that it
+        excludes every one of them.
 
     Examples
     --------
@@ -2104,10 +2190,20 @@ def load_research_bundle(
     >>> print("and names the simulations the model was trained without:", same)
     and names the simulations the model was trained without: True
     """
+    if (incidence_dir is None) != (incidence_record_sha256 is None):
+        raise _MR.MFRecordError(
+            "give both incidence_dir and incidence_record_sha256 (the record's published sha256), "
+            "or neither"
+        )
     rb = _H.load_research(
         bundle_dir, expected_manifest_sha256=expected_manifest_sha256, purpose=purpose
     )
-    return ResearchPredictor(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "fold"))
+    rp = ResearchPredictor(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "fold"))
+    if incidence_dir is not None:
+        rp._attach_incidence(
+            _IM.load_record(incidence_dir, expected_record_sha256=incidence_record_sha256)
+        )
+    return rp
 
 
 # -------------------------------------------------------------------------------------------- published models

@@ -58,6 +58,7 @@ include_patterns = [
     "release_format_h5.md",
     "rogers_comparison.md",
     "model_figures.md",
+    "likelihood.md",
     "tutorials/production_and_research_bundles.md",
     "api.md",
     "contributing.md",
@@ -94,6 +95,7 @@ SITE_PAGES = {
     "docs/release_format_h5.md": "release_format_h5",
     "docs/rogers_comparison.md": "rogers_comparison",
     "docs/model_figures.md": "model_figures",
+    "docs/likelihood.md": "likelihood",
     "docs/release_checklist.md": "release_checklist",
     "docs/tutorials/production_and_research_bundles.md": "tutorials/production_and_research_bundles",
 }

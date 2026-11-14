@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 import hcd_analysis.predictor as hp
+from hcd_analysis import likelihood
 from hcd_analysis.emulator import dndx_wc, wc_map
 from hcd_analysis.emulator import release_testing as RT
 from tests.synthetic_release import make_release
@@ -36,6 +37,10 @@ OBJECTS = [
     dndx_wc.w_c_corrected,
     dndx_wc.dndx_powerlaw,
     wc_map.WcMap.w_c,
+    likelihood.P1DData.from_blocks,
+    likelihood.interp_to_bins,
+    likelihood.GaussianP1DLikelihood,
+    hp.same_run,
 ]
 
 
