@@ -47,7 +47,7 @@ clamped there. Above the highest redshift and outside the
 tau0 tables it is held constant and flagged (``mf_z_clamped``, ``mf_tau0_clamped``). Above z 4.6
 (``mf_release.VALIDATED_Z_MAX``, the upper edge of the frozen grouped-validation domain (z 2.2-4.6; the held-out validation is reported separately)) an LF+MF prediction is
 served with the same values but flagged ``mf_z_above_validated``, inside the tables too: it lies outside that domain. ``w_c`` and ``dndx`` stay the LF
-backbone's. ``fidelity`` ("LF" or "LF+MF"; None: the bundle's own) selects the output; "LF+MF" without a record raises
+backbone's unless the release also carries an incidence MF record (next paragraph). ``fidelity`` ("LF" or "LF+MF"; None: the bundle's own) selects the output; "LF+MF" without a record raises
 ``MFUnavailableError``. The record's provenance (version, composition and ruling ids, cache digests and their
 provenance statements, fit commit, the settled mean-flux convention of its targets, the HR inputs used) is in
 ``provenance["mf"]``. Without an MF record nothing here changes. A FOLD record (a held-out fit for grouped cross-validation) applies only on its research backbone
@@ -55,6 +55,47 @@ provenance statements, fit commit, the settled mean-flux convention of its targe
 fold's held-out LF and MF predictions at cache inputs from the same object. ``backbone_identity(pred)`` is what an MF
 record must declare about a backbone, derived from its member metas; ``lf_P_filt_at`` and ``native_modes`` serve the
 MF builder. These are module functions, so the public surface of ``Bundle`` is unchanged.
+
+**The MF correction of the incidence.** A release may also name an incidence MF record, an optional part of its manifest
+(format ``hcd_priya.incidence_mf_record/1``, ``emulator.incidence_mf``): a fixed table R_c(z), the mean over the matched
+HR simulations of (dN/dX)_HR / (dN/dX)_LF per HCD class and redshift. ``load_release`` loads it, anchored on the digest
+the manifest gives, and refuses one fitted on another LF cache than the backbone's training cache. An LF+MF prediction
+then returns ``dndx = dndx_LF R_c(z)``, and ``w_c`` is the w_c map of that corrected ``dndx``; ``P_class`` is not
+touched by it, so a mixed spectrum changes only through the fractions. An LF prediction is unchanged. R_c does not
+depend on the cosmological parameters or on the mean flux. At a redshift the table does not hold it is linear
+between its neighbours and flagged (``incidence_mf_z_interpolated``); beyond the table it is held constant and flagged
+(``incidence_mf_z_clamped``), where the P1D MF below its tables is refused. The w_c map (a Poisson model with a small
+term per class fitted on LF counts) is applied unchanged to the corrected incidence; docs/release_format_h5.md says
+what was tested about that and what was not.
+
+**The column-density distribution.** With an incidence record a prediction also carries ``cddf``, the distribution
+f(N_HI) at the bin centres ``log_nhi`` that the record gives: the linear mean over the ensemble members of their
+CDDF output, and under LF+MF that mean times the record's second table R(z, N_HI), the mean HR/LF ratio per bin. A
+bin is NaN, never a number, in two cases. Under both fidelities: where no HR/LF simulation pair has absorbers at
+any tabulated redshift (that includes every bin the model was never trained on, such as the bin below the
+catalogue's column-density threshold). Under LF+MF also: where no pair has them at the redshift used, so that no
+correction was measured (flag ``cddf_bins_without_support``). Under LF the support of the LF training simulations at
+each redshift is not checked. The dN/dX table row that rests on one simulation pair is flagged
+``incidence_mf_single_pair`` (the pairs behind each CDDF bin are in the provenance, ``cddf_n_pairs``). Without an
+incidence record ``cddf`` and ``log_nhi`` are None: the model files do not
+say what the bins are. A release without that part has no such
+record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition.
+
+**Logging.** Each call of ``predict`` or ``predict_many`` that applies a correction emits one INFO record on the logger
+``hcd_analysis.predictor``: which correction (the P1D MF correction; with an incidence record also the correction of
+dN/dX and the CDDF) and the sha256 of each record. An LF prediction emits none, and neither do the research helpers
+of this module that evaluate a backbone directly. The library configures no logging; to
+see the records, let that logger's INFO records pass, for example
+``logging.getLogger("hcd_analysis.predictor").setLevel(logging.INFO)`` after ``logging.basicConfig()``. The same
+facts are on every prediction without any logging: the flags ``mf_applied`` and ``incidence_mf_applied`` and
+``provenance``.
+
+**The held-out error.** A corrected dN/dX or CDDF is not exact. An incidence record may carry a held-out error, and
+then every prediction carries it too: ``dndx_err`` and ``cddf_err``, the held-out rms of the fractional error, for
+the fidelity of the prediction (NaN where the record has no estimate; an error is never interpolated between
+redshifts). ``labels["incidence_mf_error"]`` says what the numbers are, in the record's own words. An LF+MF
+prediction that returns a corrected value without an estimate beside it emits ``HeldOutErrorWarning``, once per
+process for each record.
 
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
 k_p = 0.78 Mpc^-1, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
@@ -65,7 +106,8 @@ the mode axis, kcoord.bind / at_data). Values outside the training box are evalu
 above the original PRIYA design box (``NS_RIDGE``, where the design is sparse) is flagged ``ns_ridge``.
 
 **Outputs** (``Prediction``; host numpy, float64):
-  * ``k`` (K,) s/km; ``P_class`` (4, K): clean, LLS, subDLA, DLA, PRIYA-filtered (tau > 1e6 troughs filled), the mean
+  * ``k`` (K,) s/km; ``P_class`` (4, K): clean, LLS, subDLA, DLA, PRIYA-filtered (on a sightline whose largest
+    optical depth exceeds 1e6, the region around that maximum where tau > 0.25 + tau_eff is set to tau_eff), the mean
     over the ensemble members of their reconstructed spectra;
   * ``template`` (3, K) = P_c / P_clean - 1 for LLS, subDLA, DLA;
   * ``w_c`` (3,): an estimate of the simulation's own sightline fractions (LLS, subDLA, DLA) at (params, z), from the
@@ -96,6 +138,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import logging
 import os
 import warnings
 from typing import Any, Mapping, Sequence
@@ -108,6 +151,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from .emulator import incidence_mf as _IM
 from .emulator import kcoord as _K
 from .emulator import mf_release as _MR
 from .emulator import safe_h5 as _H
@@ -158,6 +202,34 @@ class MFRangeError(PredictorInputError):
     extrapolated or held constant there. Ask for ``fidelity="LF"`` instead. The message gives the
     edge and the redshifts you asked for.
     """
+
+
+# One INFO record per prediction call that applied a correction: which correction, with which record (sha256). The
+# library configures no logging, so nothing is printed unless the application lets this logger's INFO records pass:
+#     logging.getLogger("hcd_analysis.predictor").setLevel(logging.INFO)   (with a handler, or logging.basicConfig)
+_log = logging.getLogger(__name__)
+
+
+class HeldOutErrorWarning(UserWarning):
+    """A corrected dN/dX or CDDF was returned without a held-out error beside it.
+
+    With an incidence MF record an LF+MF prediction returns a corrected ``dndx`` and ``cddf``. They are not exact.
+    When the record carries a held-out error, the prediction carries it too (``dndx_err``, ``cddf_err``), and
+    nothing is warned. When the record carries none, or has no estimate for a class or bin at the redshift asked
+    for, those fields are NaN there and this warning says so: once per process for each incidence record, not
+    once per call, because a sampler calls the predictor thousands of times.
+
+    To make it an error, or to silence it, use the standard filter::
+
+        import warnings
+        import hcd_analysis.predictor as hp
+        warnings.simplefilter("error", hp.HeldOutErrorWarning)     # stop at the first one
+        warnings.simplefilter("ignore", hp.HeldOutErrorWarning)    # or never show it
+    """
+
+
+# the incidence records (by sha256) for which HeldOutErrorWarning was emitted in this process
+_HELDOUT_WARNED: set = set()
 
 
 class MeanFluxRangeWarning(UserWarning):
@@ -519,7 +591,18 @@ def _members_forward(ens, pf, dn_mean, dn_std, x, tau):
     return P, dn
 
 
+def _members_cddf(ens, fn_mean, fn_std, x, tau):
+    """Per member: the physical column-density distribution f(N_HI) of the CDDF head, (M, Nbin). It is a second
+    evaluation of the members, used only when an incidence record gives the bins a meaning; the spectra and the
+    dN/dX of ``_members_forward`` are not touched by it."""
+    return jnp.stack([jnp.exp(m(x, tau)["f_nhi"] * fn_std + fn_mean) for m in ens.members])
+
+
 _forward_one = eqx.filter_jit(_members_forward)
+_cddf_one = eqx.filter_jit(_members_cddf)
+_cddf_many = eqx.filter_jit(eqx.filter_vmap(_members_cddf, in_axes=(None, None, None, 0, 0)))
+# the P1D MF label's statement about w_c; replaced when the incidence is corrected too
+_W_C_STAYS_LF = "w_c stays the LF backbone's"
 _mf_g = eqx.filter_jit(lambda mf, x, tau: mf(x, tau))  # the MF correction g (4, K) at one input
 _forward_many = eqx.filter_jit(
     eqx.filter_vmap(_members_forward, in_axes=(None, None, None, None, 0, 0))
@@ -554,6 +637,10 @@ class Prediction:
         P_class       (4, K)      (n_z, 4, K)
         template      (3, K)      (n_z, 3, K)
         w_c, dndx     (3,)        (n_z, 3)
+        cddf          (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
+        log_nhi       (Nbin,)     (Nbin,)         only with an incidence record; else None
+        dndx_err      (3,)        (n_z, 3)        only with an incidence record; else None
+        cddf_err      (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         member_std    (4, K)      (n_z, 4, K)
         tau_eff       float       (n_z,)
 
@@ -571,18 +658,42 @@ class Prediction:
     P_class : numpy.ndarray
         Shape (4, K). The one-dimensional flux power spectrum (P1D, in km/s; the power of
         F / <F> - 1 with <F> the mean flux of the whole sample) of each class, in the
-        order clean, LLS, subDLA, DLA. It is the PRIYA-filtered spectrum (pixels with optical depth
-        above 1e6 are filled), averaged over the ensemble members.
+        order clean, LLS, subDLA, DLA. It is the PRIYA-filtered spectrum (on a sightline whose
+        largest pixel optical depth exceeds 1e6, the region around that maximum where
+        tau > 0.25 + tau_eff is set to tau_eff), averaged over the ensemble members.
     template : numpy.ndarray
         Shape (3, K): P_c / P_clean - 1 for LLS, subDLA and DLA.
     w_c : numpy.ndarray
         Shape (3,). The model's estimate of each HCD class's sightline fraction at these
-        parameters and redshift, from ``dndx`` through the w_c map of the bundle. Under LF+MF it
-        is still the low-fidelity model's: the multi-fidelity correction acts on ``P_class``
-        only, so ``add_hcd(pred, pred.w_c)`` mixes corrected class spectra with LF fractions.
+        parameters and redshift, from ``dndx`` through the w_c map of the bundle.
+        With an incidence MF record (flag ``incidence_mf_applied``), from the corrected ``dndx``.
+        Without one it is the low-fidelity model's also under LF+MF: the multi-fidelity
+        correction of the spectra acts on ``P_class`` only, so ``add_hcd(pred, pred.w_c)`` then
+        mixes corrected class spectra with LF fractions.
     dndx : numpy.ndarray
         Shape (3,). The predicted incidence dN/dX of each HCD class (absorbers per unit absorption
-        distance X), averaged over the members. Under LF+MF it is the low-fidelity model's.
+        distance X), averaged over the members. In an LF+MF prediction of a release that carries
+        an incidence MF record it is multiplied by that record's factor R_c(z), the HR/LF ratio
+        of the incidence (flag ``incidence_mf_applied``; ``labels["incidence_mf"]``). Without
+        such a record it is the low-fidelity model's also under LF+MF.
+    cddf : numpy.ndarray or None
+        Shape (Nbin,). The column-density distribution f(N_HI) of the absorbers, per unit column
+        density and absorption distance, at the bin centres ``log_nhi``. It exists only for a
+        release that carries an incidence MF record, which names the bins. The mean over the
+        members; in an LF+MF prediction multiplied by the record's HR/LF ratio per bin. A bin
+        without HR/LF simulation pairs is NaN (``labels["cddf"]`` states the rule).
+    log_nhi : numpy.ndarray or None
+        Shape (Nbin,). The bin centres, log10 of N_HI in cm^-2, from the incidence record.
+    dndx_err : numpy.ndarray or None
+        Shape (3,), in the order of ``dndx``. The held-out rms of the fractional error of ``dndx``:
+        an indication of size, not the standard deviation of a known distribution; see
+        ``labels["incidence_mf_error"]`` for what it is and what it does not cover. Multiply by
+        ``dndx`` for an absolute size. For an LF prediction it is that of the uncorrected value,
+        for an LF+MF prediction that of the corrected one. NaN where the incidence record has no
+        estimate (it carries no held-out error, or none at this redshift; an error is never
+        interpolated between redshifts). None without an incidence record.
+    cddf_err : numpy.ndarray or None
+        Shape (Nbin,). The same for ``cddf``, per column-density bin; NaN also where ``cddf`` is.
     member_std : numpy.ndarray or None
         Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
         members disagree. It is not a calibrated emulator error and not a covariance. None for a
@@ -647,6 +758,10 @@ class Prediction:
     labels: dict[str, Any]
     provenance: dict[str, Any]
     stacked: bool
+    cddf: np.ndarray | None = None
+    log_nhi: np.ndarray | None = None
+    dndx_err: np.ndarray | None = None
+    cddf_err: np.ndarray | None = None
 
 
 class _PredictorBase:
@@ -682,6 +797,12 @@ class _PredictorBase:
             jnp.asarray(np.asarray(n["dndx"]["mean"], dtype=np.float64)),
             jnp.asarray(np.asarray(n["dndx"]["std"], dtype=np.float64)),
         )
+        fn_mean = np.asarray(n["f_nhi"]["mean"], dtype=np.float64)
+        fn_std = np.asarray(n["f_nhi"]["std"], dtype=np.float64)
+        self._fn = (jnp.asarray(fn_mean), jnp.asarray(fn_std))
+        # a bin of the CDDF head that no training simulation ever populated keeps the placeholder normalisation
+        # (mean 0, std 1; data.fit_norm): the network's output there was never trained
+        self._fn_untrained = (fn_mean == 0.0) & (fn_std == 1.0)
         settings = (rb.lineage.get("cache") or {}).get("settings") or {}
         ar = settings.get("alpha_range")
         self._alpha_range = None if ar is None else (float(ar[0]), float(ar[1]))
@@ -727,6 +848,8 @@ class _PredictorBase:
         }
         if self._mf is not None:
             out["mf"] = self._mf.provenance()
+        if self._inc is not None:
+            out["incidence_mf"] = self._inc.provenance()
         if self._release is not None:
             out["release"] = copy.deepcopy(self._release)
         return out
@@ -913,6 +1036,144 @@ class _PredictorBase:
         # grouped-validation domain); at build time this is the domain edge, not a passed validation.
         self._mf_vzmin = float(rec["validated_z_min"])
 
+    # ------------------------------------------------------------------ the MF correction of the incidence
+    _inc = None
+
+    def _attach_incidence(self, inc):
+        """Bind a loaded incidence MF record (``incidence_mf.load_record``, anchored; re-derived from its sealed
+        bytes by ``incidence_mf.reverify``). Its LF cache must be this backbone's training cache, as re-derived from
+        the member metas: the table's denominators are that cache's dN/dX. It is applied only together with the P1D
+        MF record, so a bundle without one refuses it."""
+        inc = _IM.reverify(inc)
+        if self._mf is None:
+            raise _MR.MFRecordError(
+                "the incidence MF record is applied with the P1D MF record (fidelity LF+MF); this bundle "
+                "carries none"
+            )
+        cache = self._backbone_identity()["cache_sha256"]
+        if inc.record["lf_cache"]["sha256"] != cache:
+            raise _MR.MFRecordError(
+                f"the incidence MF record was fitted on the LF cache {inc.record['lf_cache']['sha256'][:12]}, "
+                f"not on this bundle's training cache {cache[:12]}"
+            )
+        if inc.log_nhi_centres.size != self._fn_untrained.size:
+            raise _MR.MFRecordError(
+                f"the incidence MF record has {inc.log_nhi_centres.size} column-density bins, this "
+                f"model's CDDF head has {self._fn_untrained.size}"
+            )
+        never = np.array(inc.cddf_never_supported())
+        stray = np.where(self._fn_untrained & ~never)[0]
+        if stray.size:  # the record would give a meaning to a bin the model was never trained on
+            raise _MR.MFRecordError(
+                f"the incidence MF record has simulation pairs in column-density bins {stray.tolist()}, "
+                "which this model was never trained on: the record is not of this model's training data"
+            )
+        self._inc = inc
+        # what is applied: immutable copies of the two ratio tables, not the record's arrays (the pair counts
+        # that decide which bins are NaN are read from the record, which nothing here writes to)
+        self._inc_tab = {"z": jnp.asarray(inc.z), "ratio": jnp.asarray(inc.dndx_ratio)}
+        self._inc_cddf_tab = {
+            "z": jnp.asarray(inc.z),
+            "log_nhi": jnp.asarray(inc.log_nhi_centres),
+            "ratio": jnp.asarray(inc.cddf_ratio),
+        }
+        self._inc_z = tuple(float(v) for v in inc.z)
+        self._inc_never = never | self._fn_untrained
+
+    def _cddf(self, ens, x, taus, zs, use_mf, single):
+        """The column-density distribution of a prediction, (n_z, Nbin), and whether a bin was left out because no
+        correction was measured there. The linear mean over the members of their CDDF; under LF+MF multiplied by
+        the incidence record's factor R(z, N_HI) (``multifidelity.cddf_res_factor``). A bin is NaN, never a
+        number, in two cases: under both fidelities where no HR/LF simulation pair has absorbers at any tabulated
+        redshift (that includes every bin the model was never trained on); under LF+MF also where no pair has
+        them at this redshift (no correction was measured, so the value would be the LF value under another
+        name). Under LF the support of the LF training simulations at each redshift is not checked.
+        """
+        from .emulator.multifidelity import cddf_res_factor
+
+        if single:
+            f = np.asarray(_cddf_one(ens, *self._fn, jnp.asarray(x[0]), jnp.asarray(taus[0])))[None]
+        else:
+            f = np.asarray(_cddf_many(ens, *self._fn, jnp.asarray(x), jnp.asarray(taus)))
+        cddf = np.array(
+            f.mean(axis=1), dtype=np.float64
+        )  # (n_z, Nbin): the linear mean over the members
+        cddf[:, self._inc_never] = np.nan
+        gap_any = False
+        if use_mf:
+            for i, z in enumerate(zs):
+                fac = cddf_res_factor(self._inc_cddf_tab, jnp.asarray(float(z)))
+                cddf[i] = cddf[i] * np.asarray(fac, dtype=np.float64)
+                gap = np.array(self._inc.cddf_uncorrected(z)) & ~self._inc_never
+                cddf[i, gap] = np.nan
+                gap_any = gap_any or bool(gap.any())
+        return cddf, gap_any
+
+    def _incidence_flags(self, zs, use_mf, cddf_gap):
+        z = self._inc_z
+        clamped = [v < z[0] - Z_TOL or v > z[-1] + Z_TOL for v in zs]
+        between = [not c and not any(abs(v - t) <= Z_TOL for t in z) for v, c in zip(zs, clamped)]
+        return {
+            "incidence_mf_applied": bool(use_mf),
+            # how the table was looked up: only when it was applied (an LF prediction applies nothing, so its
+            # three lookup flags are False)
+            "incidence_mf_z_clamped": bool(use_mf and any(clamped)),
+            "incidence_mf_z_interpolated": bool(use_mf and any(between)),
+            # the dN/dX table row used rests on one simulation pair: a ratio of one simulation, not a mean (the
+            # pairs behind each CDDF bin are in the provenance, cddf_n_pairs, and are not flagged one by one)
+            "incidence_mf_single_pair": bool(use_mf and any(self._inc.single_pair(v) for v in zs)),
+            # an LF+MF CDDF bin is NaN because no correction was measured there at this redshift
+            "cddf_bins_without_support": bool(cddf_gap),
+        }
+
+    def _incidence_labels(self, labels, use_mf):
+        out = {
+            "incidence_mf": "the MF correction of the incidence of the loaded incidence record: dndx_MF = dndx_LF "
+            "R_c(z), R_c(z) the mean over the matched HR simulations of (dN/dX)_HR / (dN/dX)_LF per class and "
+            "redshift (theta-independent; at a redshift the table does not hold it is linear in z between its "
+            "neighbours, flagged incidence_mf_z_interpolated, and beyond the table held constant, flagged "
+            "incidence_mf_z_clamped); applied with the P1D MF correction, never to an LF prediction",
+            "incidence_mf_error": _IM.heldout_error_label(
+                len(self._inc.record["train_sims"]), self._inc.record.get("heldout_error")
+            ),
+        }
+        out["cddf"] = (
+            "the column-density distribution f(N_HI), per unit column density and absorption distance, at the "
+            "bin centres log_nhi (log10 of N_HI in cm^-2; from the incidence record): the linear mean over the "
+            "ensemble members"
+            + (
+                ", multiplied by the incidence record's factor R(z, N_HI), the mean over the matched HR "
+                "simulations of f_HR / f_LF in that bin"
+                if use_mf
+                else ""
+            )
+            + ". A bin is NaN where no HR/LF simulation pair has absorbers at any tabulated redshift (that "
+            "includes every bin the model was never trained on)"
+            + (
+                ", and where no pair has them at this redshift, so that no correction was measured (flag "
+                "cddf_bins_without_support)"
+                if use_mf
+                else "; the support of the LF training simulations at this redshift is not checked"
+            )
+            + ". The number of pairs behind each bin and redshift is in provenance incidence_mf cddf_n_pairs"
+        )
+        if use_mf:
+            out["dndx"] = (
+                "the members' mean Head-A dN/dX, multiplied by the incidence MF factor R_c(z)"
+            )
+            out["w_c"] = (
+                labels["w_c"]
+                + "; the dN/dX is multiplied by the incidence MF factor R_c(z) before the map (the map itself "
+                "was fitted on LF counts)"
+            )
+            if _W_C_STAYS_LF not in labels["mf"]:
+                raise RuntimeError("the MF label no longer carries the statement about w_c")
+            out["mf"] = labels["mf"].replace(
+                _W_C_STAYS_LF,
+                "dndx and w_c carry the incidence MF correction (labels incidence_mf)",
+            )
+        return out
+
     def _use_mf(self, fidelity):
         if fidelity is None:
             return self._mf is not None
@@ -964,7 +1225,7 @@ class _PredictorBase:
             "highest z and outside its tau0 tables it is held constant and flagged; above z "
             f"{_MR.VALIDATED_Z_MAX:g}, the upper edge of the frozen grouped-validation domain (z 2.2-4.6; the held-out "
             "validation is reported separately), it is applied unchanged but "
-            "flagged mf_z_above_validated); w_c stays the LF backbone's"
+            "flagged mf_z_above_validated); " + _W_C_STAYS_LF
         }
         if use_mf:
             out["product"] = f"{labels.get('product') or 'LF'}+MF"
@@ -1076,6 +1337,16 @@ class _PredictorBase:
           prediction above z 4.6, outside the frozen grouped-validation domain (z 2.2-4.6). The
           values there are served unchanged. The two "held constant" flags are False on an LF
           prediction, which applies no correction.
+        - With an incidence MF record: ``incidence_mf_applied``, ``dndx`` was multiplied by the
+          HR/LF ratio of the incidence and ``w_c`` follows; ``incidence_mf_z_interpolated``, the
+          table does not hold this redshift and the ratio is interpolated between its neighbours;
+          ``incidence_mf_z_clamped``, the ratio is held constant beyond its table;
+          ``incidence_mf_single_pair``, the dN/dX table row used rests on one simulation pair
+          (these three say how the table was looked up, so they are False on an LF prediction);
+          ``cddf_bins_without_support``, some bins of ``cddf`` are NaN because no correction was
+          measured there at this redshift; ``incidence_heldout_error_available``, every class of
+          ``dndx`` has a held-out error beside it in ``dndx_err`` (the per-bin gaps of ``cddf_err``
+          are NaN in that array).
         - ``synthetic_build``: present, and True, only for a model package built with untrained
           networks for tests; ``labels["synthetic_build"]`` says so in words.
 
@@ -1241,6 +1512,18 @@ class _PredictorBase:
         Pm = P.mean(axis=1)  # (n_z, 4, K)
         std = P.std(axis=1, ddof=1) if P.shape[1] > 1 else None
         dmean = dn.mean(axis=1)  # (n_z, 3)
+        if (
+            use_mf and self._inc is not None
+        ):  # dndx_MF = dndx_LF R_c(z), before the map to fractions
+            from .emulator.multifidelity import apply_dndx_res_corr
+
+            zv = jnp.asarray(np.asarray(zs, dtype=np.float64))
+            dmean = np.asarray(
+                apply_dndx_res_corr(self._inc_tab, jnp.asarray(dmean), zv), dtype=np.float64
+            )
+        cddf, cddf_gap = (
+            (None, False) if self._inc is None else self._cddf(ens, x, taus, zs, use_mf, single)
+        )
         w4 = np.stack([self._rb.wc_map.w_c(dmean[i], z) for i, z in enumerate(zs)])
         template = Pm[:, 1:, :] / Pm[:, :1, :] - 1.0
         flags, labels, prov = self._flags(pv, th, zs, taus, kout), self.labels(), self.provenance
@@ -1254,6 +1537,24 @@ class _PredictorBase:
         if self._mf is not None:
             flags.update(self._mf_flags(zs, taus, use_mf))
             labels.update(self._mf_labels(labels, use_mf))
+        if use_mf:  # said in the log, once per call: which corrections this prediction carries
+            applied = [f"the P1D MF correction (record sha256 {self._mf.record_sha256})"]
+            if self._inc is not None:
+                applied.append(
+                    "the MF correction of the incidence, dN/dX and CDDF (record sha256 "
+                    f"{self._inc.record_sha256})"
+                )
+            _log.info(
+                "prediction at %d redshift(s), LF+MF: applied %s", len(zs), " and ".join(applied)
+            )
+        dndx_err = cddf_err = None
+        if self._inc is not None:
+            flags.update(self._incidence_flags(zs, use_mf, cddf_gap))
+            labels.update(self._incidence_labels(labels, use_mf))
+            dndx_err, cddf_err = self._heldout_errors(zs, use_mf, cddf)
+            flags["incidence_heldout_error_available"] = bool(np.all(np.isfinite(dndx_err)))
+            if use_mf:
+                self._warn_no_heldout_error(dndx_err, cddf_err, cddf)
         # a mean flux outside what the model covers is served, flagged, and said aloud: once per call
         if flags["mean_flux_off_ladder"]:
             self._warn_off_ladder(zs, taus)
@@ -1274,7 +1575,46 @@ class _PredictorBase:
             labels=labels,
             provenance=prov,
             stacked=not single,
+            cddf=None if cddf is None else _frozen(sel(cddf)),
+            log_nhi=None if cddf is None else _frozen(self._inc.log_nhi_centres),
+            dndx_err=None if dndx_err is None else _frozen(sel(dndx_err)),
+            cddf_err=None if cddf_err is None else _frozen(sel(cddf_err)),
         )
+
+    def _heldout_errors(self, zs, use_mf, cddf):
+        """The held-out error of ``dndx`` (n_z, 3) and of ``cddf`` (n_z, Nbin) from the incidence record: its
+        tables for the corrected prediction under LF+MF, for the uncorrected one under LF; NaN where the record has
+        no estimate, and where the CDDF itself is NaN."""
+        d = np.stack([self._inc.heldout_dndx(z, use_mf) for z in zs])
+        c = np.stack([self._inc.heldout_cddf(z, use_mf) for z in zs])
+        c[np.isnan(cddf)] = np.nan
+        return d, c
+
+    def _warn_no_heldout_error(self, dndx_err, cddf_err, cddf):
+        """``HeldOutErrorWarning``, once per process for this incidence record, when a corrected value is returned
+        without an estimate beside it: a class of ``dndx``, or a bin of ``cddf`` that holds a number.
+        """
+        missing = bool(
+            np.any(~np.isfinite(dndx_err)) or np.any(np.isfinite(cddf) & ~np.isfinite(cddf_err))
+        )
+        key = self._inc.record_sha256
+        if not missing or key in _HELDOUT_WARNED:
+            return
+        why = (
+            "the incidence record carries no held-out error"
+            if self._inc.heldout is None
+            else "the incidence record has no held-out estimate for some class, bin or redshift asked for"
+        )
+        warnings.warn(
+            HeldOutErrorWarning(
+                f"the corrected dN/dX and CDDF of this prediction are not exact, and {why}: dndx_err and cddf_err "
+                "are NaN there (labels['incidence_mf_error'] says what a held-out error is). This warning is shown "
+                "once per process for this record."
+            ),
+            stacklevel=4,
+        )
+        # only after the warning returned: under an "error" filter it raises, and then every call raises
+        _HELDOUT_WARNED.add(key)
 
     def _warn_off_ladder(self, zs, taus):
         """One ``MeanFluxRangeWarning`` for a call whose mean flux lies outside the trained ladder: the same
@@ -1629,7 +1969,10 @@ def load_release(release_dir: str | os.PathLike[str], expected_release_sha256: s
 
     A release directory holds ``release.json`` (format ``hcd_priya.release/1``) and the two parts
     it names with their sha256: the backbone bundle and the MF record. The one published sha256,
-    that of ``release.json``, anchors the whole release.
+    that of ``release.json``, anchors the whole release. A release may name an optional third
+    part, the incidence MF record: with it, an LF+MF prediction's ``dndx`` is multiplied by the
+    HR/LF ratio of the incidence, R_c(z), and ``w_c`` follows through the w_c map. A release
+    without that part has no such record: its ``dndx`` and ``w_c`` are the LF model's.
 
     Parameters
     ----------
@@ -1688,6 +2031,12 @@ def load_release(release_dir: str | os.PathLike[str], expected_release_sha256: s
         mf_dir=parts["mf"],
         mf_record_sha256=m["mf"]["record_sha256"],
     )
+    if "incidence" in parts:  # the optional part: the MF correction of the incidence
+        b._attach_incidence(
+            _IM.load_record(
+                parts["incidence"], expected_record_sha256=m["incidence"]["record_sha256"]
+            )
+        )
     b._release = {
         "format": m["format"],
         "release_version": m["release_version"],
@@ -2059,6 +2408,10 @@ def load_published(name: str = DEFAULT_MODEL) -> Bundle:
 
     # 5. Load. load_release verifies release.json against the digest and then every file it names.
     emu = load_release(root, anchor)
+    if emu._release["format"] != fmt:
+        raise ModelPackageError(
+            f"{name!r}: the release is {emu._release['format']}, but it is listed as {fmt}"
+        )
     if synthetic:  # visible in every prediction's provenance, also when warnings are filtered
         emu._release = dict(emu._release, synthetic_build=True)
     return emu
@@ -2104,7 +2457,8 @@ def add_hcd(pred: Prediction, A: ArrayLike) -> np.ndarray:
     of its class spectra, to the accuracy of the w_c map. It is NOT the full P1D of a sightline
     sample: the class spectra are PRIYA-filtered, so the power of the subDLA cores and the DLA
     damping-wing core are left out (``pred.labels["omissions"]``); and under LF+MF the class
-    spectra carry the multi-fidelity correction while ``pred.w_c`` is the low-fidelity model's.
+    spectra carry the multi-fidelity correction while ``pred.w_c`` is the low-fidelity model's,
+    unless the release carries an incidence MF record (flag ``incidence_mf_applied``).
 
     Parameters
     ----------

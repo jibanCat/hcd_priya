@@ -383,6 +383,114 @@ container, read with `allow_pickle=False` by `products.load_mf_product`, which c
 cache digests and the composition (`"all"` for a product that records none). It is not a release record and the
 release loader refuses it.
 
+## The incidence MF record (`hcd_priya.incidence_mf_record/1`)
+
+The P1D record above corrects the class spectra only. The incidence dN/dX of the three HCD classes, and the
+column-density distribution f(N_HI) (the CDDF), also differ between the low- and high-resolution simulations. Their
+correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`):
+
+- **What it holds.** A fixed table `R_c(z)`: at each redshift, the mean over the matched HR simulations of
+  `(dN/dX)_HR / (dN/dX)_LF`, per class (LLS, subDLA, DLA). And the same kind of table per column-density bin,
+  `R(z, N_HI)`, for the CDDF, with the bin centres. The tables do not depend on cosmology or on the mean flux.
+- **How it is used.** `dndx_MF = dndx_LF * R_c(z)`: linear in z between the tabulated redshifts, held constant beyond
+  them. The predictor applies it to an LF+MF prediction before the map from dN/dX to sightline fractions, so `w_c`
+  follows; the class spectra are not touched. The predictor also returns the column-density distribution,
+  `pred.cddf`, at the record's bin centres (`pred.log_nhi`): the linear mean over the ensemble members, and under
+  LF+MF that mean times `R(z, N_HI)`.
+- **Where the numbers come from.** The tables are built and evaluated by the functions that have been in
+  `hcd_analysis/emulator/multifidelity.py` since June 2026 (`build_dndx_res_corr`, `build_cddf_res_corr`,
+  `dndx_res_factor`, `apply_dndx_res_corr`, `cddf_res_factor`); the record is their container.
+  `scripts/build_incidence_mf.py` builds one from two digest-pinned inputs: the LF training cache, and an HR
+  incidence product derived from the rebuilt HR absorber catalogues. The HR cache is not read: its catalogue-derived
+  columns stay refused, as stated above.
+- **Layout.** One directory with one file, `incidence_mf_record.json`: strict UTF-8 JSON, a closed key set (one key,
+  `heldout_error`, is optional), finite numbers (a cell of the held-out error without an estimate is null), the
+  tables included as lists. The record is anchored by the sha256 of that file.
+
+```text
+{"format": "hcd_priya.incidence_mf_record/1", "version": "<text>", "model_form": "<the code's statement>",
+ "class_order": ["LLS", "subDLA", "DLA"],
+ "tables": {"z": [Nz], "n_sims": [Nz], "dndx_ratio": [[3] x Nz],
+            "log_nhi_centres": [Nbin], "cddf_ratio": [[Nbin] x Nz], "cddf_n_pairs": [[Nbin] x Nz]},
+ "lf_cache": {"file": "<name>", "sha256": "<64 hex>", "source": "<the code's statement>"},
+ "hr_incidence": {"file": "<name>", "sha256": "<64 hex>", "source": "<the code's statement>",
+                  "groups_not_in_product": ["<an HR snapshot group the product does not hold>", ...]},
+ "composition": {"id": "<text>", "excluded_sims": [...], "ruling_ids": [...]},
+ "train_sims": [...], "n_pairs": N, "fit_code": {"commit": "<40 hex>", "dirty": false}}
+```
+
+- **Bins without support are NaN, never a number.** `cddf_n_pairs` counts, for each redshift and bin, the pairs
+  with absorbers on both sides. A bin with no pair at any redshift (the first bin lies below the catalogue's
+  column-density threshold) was never trained on: the network's output there means nothing, and `pred.cddf` is NaN
+  there under both fidelities. A bin with no pair at one redshift holds the ratio 1 in the table, which means "no
+  correction measured"; under LF+MF `pred.cddf` is NaN there (flag `cddf_bins_without_support`), and under LF it
+  keeps the LF value (whether the LF training simulations have absorbers in that bin at that redshift is not
+  checked). A bin with fewer pairs than its redshift keeps the mean over the pairs that exist. The loader refuses a
+  record whose number of bins is not the model's (the model files hold no bin centres, so the centres themselves
+  cannot be compared), or that claims pairs in a bin the model was never trained on.
+- `n_sims` is the number of matched pairs behind each redshift's dN/dX mean, and `n_pairs` their sum. The fit refuses
+  a pair whose dN/dX is not finite and positive, so every pair counts in every class and no cell is filled in. A
+  redshift with one pair is a ratio of one simulation, not a mean. A CDDF cell is the mean over the pairs with both
+  values positive, and 1 where there is none.
+- `lf_cache.source` and `hr_incidence.source` are the code's statements of what it establishes about each input,
+  and it is little: both files are pinned by their sha256. The code verifies no lineage of the HR incidence product;
+  that it was derived from the rebuilt HR catalogues is the statement of whoever built the record.
+  `groups_not_in_product` is recorded as given, and is not compared with the product.
+- `composition` says which HR simulations were left out and under which ruling; `train_sims` are those used. The
+  builder has no default composition.
+- The loader (`incidence_mf.load_record`) compares the file's sha256 with the published one before parsing, refuses
+  any other file in the directory, an unknown key, a statement that differs from the code's, a table that is not
+  finite, positive and consistent in shape, and a record fitted from a tree with uncommitted changes.
+- The predictor applies a record only when its `lf_cache.sha256` equals the training cache of the backbone, as
+  re-derived from the member metas, and only together with the P1D MF record.
+- **Redshifts outside the table.** At a snapshot redshift the table does not hold, the factor is interpolated
+  between the neighbouring rows and the LF+MF prediction is flagged `incidence_mf_z_interpolated`; beyond the table
+  it is held at the edge row and flagged `incidence_mf_z_clamped`. An LF prediction applies no table and has both
+  flags False. This differs from the P1D record, which is refused
+  below its tables.
+- **The held-out error, an optional part of the record.** A record may carry a block `heldout_error`; a record
+  without it is valid, and its bytes are what they were before the key existed. The block holds what the numbers are
+  (`kind`, today only `rms_log_error_heldout`, and a `definition` in words), how the uncorrected (`lf`) and the
+  corrected (`lfmf`) values were held out, `what_it_does_not_cover`, the number of HR simulations of the correction
+  it was measured for (`n_hr_simulations`), its redshifts `z` (each must be a row of the correction table), and
+  two sets of tables: `dndx` (per redshift and
+  class) and `cddf` (per redshift and bin), each with `lf`, `lfmf` and the number of held-out simulations behind
+  every cell (`lf_n`, `lfmf_n`). A cell is a finite number >= 0, or null exactly where its count is 0. `source` is the
+  table's own statement of the product its numbers were taken from (a file name, a sha256 and a sentence); the
+  builder copies it and verifies none of it. The record builder copies the tables
+  (`--heldout-error FILE SHA256`) and computes none of them; it checks the table file against the digest given on
+  the command line and writes that file's name and digest into the block as `copied_from`; it refuses a table measured for another number of HR
+  simulations than the record uses unless that is said to be intended, and it refuses to run unless the held-out
+  error is stated one way or the other (`--no-heldout-error`). The block is inside the record's bytes, so the
+  record's digest covers it.
+- **On a prediction:** `dndx_err` (3,) and `cddf_err` (Nbin,) are the held-out rms of the fractional error of `dndx`
+  and `cddf`, for the fidelity of the prediction: the `lf` tables for an LF prediction, the `lfmf` tables for an
+  LF+MF one. It is an indication of size from a handful of held-out simulations, not the standard deviation of a
+  known distribution; `labels["incidence_mf_error"]` gives the record's definition word for word, and
+  `provenance["incidence_mf"]["heldout_error"]` its texts, redshifts, the counts behind the dN/dX tables,
+  its `source` and `copied_from`. A value is NaN where the
+  record has no estimate: no block, a redshift that is not one of the block's (an error is never interpolated), a
+  cell with a count of 0, or a CDDF bin that is itself NaN. The flag `incidence_heldout_error_available` is True when
+  every class of `dndx` has its estimate.
+- **A warning when a corrected value has no estimate beside it.** An LF+MF prediction that returns a corrected
+  `dndx` or `cddf` value without a held-out error emits `HeldOutErrorWarning`, once per process for each record (not
+  once per call). With an estimate beside every corrected value nothing is warned.
+- **The w_c map at the corrected incidence.** The map from dN/dX to the class fractions is a Poisson model with a
+  small term per class fitted on LF counts, and it is applied unchanged to the corrected dN/dX.
+  Tested on the training simulations. Evaluated as the predictor evaluates it, at each high-resolution run's
+  own dN/dX, the shipped map returns that run's counted class fractions with an rms relative error of 0.5 to 0.6 per
+  cent for LLS, subDLA and DLA at z 2.2 to 4.6 (largest 1.3 per cent), the same as for the low-resolution runs (0.5
+  per cent). Matched pairs differ by about 0.1 per cent between the two resolutions, and there is no trend with
+  incidence up to 23 per cent above the low-resolution range. Mixing the class spectra with the map's fractions
+  instead of the counted ones changes the total by at most 0.1 per cent below k = 0.02 s/km. Not tested: the
+  emulator's own dN/dX times the correction table carried through the map; redshifts between snapshots.
+- **A known bias of the map itself.** Its fitted term was calibrated with the geometric path per sightline and is
+  applied with the effective mean path `Xbar(z)`. As shipped, the HCD class fractions are 0.4 to 0.65 per cent low at
+  z 2.0 to 3.0 and 0.4 to 0.95 per cent high at z 4.6 to 5.2; with one path in both places the bias is gone (rms 0.3,
+  0.2 and 0.2 per cent for the three classes). The residuals stored in the map's own record are those of the
+  consistent form and understate what the predictor returns (about sixfold for DLA). The map and its record are
+  unchanged by this.
+
 ## The release manifest (`hcd_priya.release/1`)
 
 An LF+MF release is published under ONE digest, the sha256 of a small `release.json` in the release directory
@@ -397,8 +505,8 @@ An LF+MF release is published under ONE digest, the sha256 of a small `release.j
 `backbone.dir` holds the `hcd_priya.h5/2` production bundle and `mf.dir` the `hcd_priya.mf_record/1` record; each
 `dir` is one plain directory name inside the release directory (never a path, `..` or a symlink), and the two differ.
 The key set is closed and the `mf` part is required: an LF-only bundle is not a release of this format and loads with
-`load_bundle` as before. Only `release.json` is anchored by the release digest: the loader reads the two parts it
-names and ignores every other file in the release directory, which is not part of the release.
+`load_bundle` as before. Only `release.json` is anchored by the release digest: the loader reads the parts it
+names (the two required ones and, when present, the optional one below) and ignores every other file in the release directory, which is not part of the release.
 `predictor.load_release(release_dir, "<published release sha256>")` reads `release.json`
 through a no-follow descriptor, compares its sha256 before parsing, validates it, and loads both parts through
 `load_bundle(..., mf_dir=..., mf_record_sha256=...)` with the digests it names; since the record pins its backbone's
@@ -406,6 +514,35 @@ manifest, a manifest naming a mismatched pair is refused. The returned bundle's 
 format, the release version and the release sha256. `release_manifest.write_release_manifest` writes the file once,
 into a directory that already holds both parts. The two-digest call (`load_bundle` with `mf_dir` and
 `mf_record_sha256`) keeps working.
+
+**Optional parts.** Beside the two required parts a manifest may name optional parts from a closed list. Today the
+list has one entry, the incidence MF record:
+
+```json
+{"format": "hcd_priya.release/1", "release_version": "<text>",
+ "backbone": {"dir": "<name>", "manifest_sha256": "<64 hex>"},
+ "mf": {"dir": "<name>", "record_sha256": "<64 hex>"},
+ "incidence": {"dir": "<name>", "record_sha256": "<64 hex>"}}
+```
+
+There is one release format. A manifest without an optional part is byte for byte what it was before optional parts
+existed. A part outside the list is refused; so a reader that does not know a part never ignores it, and a reader
+from before optional parts existed refuses a release that names one.
+
+`load_release` loads the incidence record against the digest the manifest gives and binds it to the backbone's
+training cache; an LF+MF prediction of such a release has its `dndx` multiplied by `R_c(z)` (flag
+`incidence_mf_applied`, `provenance["incidence_mf"]`). Only `load_release` applies it: the two-digest call
+(`load_bundle` with `mf_dir`) on the parts of a release with an incidence record does not read that record, and
+returns the LF `dndx` and `w_c` with no incidence flag. What a release gives with and without the part:
+
+| | without an incidence record | with an incidence record |
+|---|---|---|
+| `P_class` under LF+MF | LF times exp(g) | the same |
+| `dndx` under LF+MF | the LF model's | the LF model's times `R_c(z)` |
+| `w_c` under LF+MF | the map of the LF `dndx` | the map of the corrected `dndx` |
+| `cddf`, `log_nhi` | `None` | the CDDF at the record's bins (LF: the member mean; LF+MF: times `R(z, N_HI)`) |
+| `P_class`, `dndx`, `w_c` under `fidelity="LF"` | the LF model's | the same |
+| flag `incidence_mf_applied` | absent | present |
 
 ## What the loader guarantees
 

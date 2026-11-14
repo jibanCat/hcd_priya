@@ -27,10 +27,43 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   the nine parameters out; `example_params` gives the midpoint of the training range of each parameter and prints
   that statement and the values when it is called. No model is published yet, so the list is empty; tests
   and CI use a model package built with a synthetic bundle.
+- **Three figures with their scripts and data** ([`docs/model_figures.md`](docs/model_figures.md)): the model's
+  incidence dN/dX and its column-density distribution against the DLA measurements of Ho, Bird and Garnett (2021),
+  and the class power ratio
+  of the training simulations (as ranges over the simulations and the mean-flux rungs) against Eq. 6 of Rogers et al.
+  (2018), drawn with a band for a free amplitude of its k-dependent term. `scripts/figures/` draws them; the data files
+  are in `docs/figures/data/`, each with its origin and sha256. The class-ratio figure regenerates from the
+  repository alone. The dN/dX and CDDF figures need a model with an incidence record (none is published yet);
+  their measured points and the 60 PRIYA design points of their bands are committed figure data.
 - **A warning for a mean flux outside the trained range.** A prediction whose `tau_eff` lies outside the range of
   mean flux the model was trained on, or outside the tables of the multi-fidelity correction, emits a
   `MeanFluxRangeWarning` that gives the range. The prediction is still
   returned, with the flag `mean_flux_off_ladder` as before.
+- **The multi-fidelity correction of the incidence.** A release can carry an incidence MF record
+  (`hcd_priya.incidence_mf_record/1`, an optional named part of the release manifest; the manifest keeps its one
+  format, `hcd_priya.release/1`, and a manifest without the part is unchanged): the
+  fixed HR/LF ratio of dN/dX per HCD class and redshift, built by the functions that `multifidelity.py` has held
+  since June 2026 and by the new `scripts/build_incidence_mf.py`. With it, an LF+MF prediction's `dndx` is
+  multiplied by that ratio and `w_c` follows through the shipped map (flag `incidence_mf_applied`). A release
+  without that part loads and predicts as before. No such record is released yet.
+- **The column-density distribution as an output.** With an incidence record a prediction carries `cddf` and
+  `log_nhi`: the CDDF at the record's bin centres, the linear mean over the ensemble members, and under LF+MF that
+  mean times the record's HR/LF ratio per bin. A bin is NaN, never a number, where no HR/LF simulation pair has
+  absorbers at any tabulated redshift, and under LF+MF also where none has them at the redshift used.
+  Without an incidence record both are `None`.
+- **A log record when a correction is applied.** Each call of `predict` or `predict_many` that applies the P1D MF correction, and with
+  an incidence record the correction of dN/dX and the CDDF, emits one INFO record on the logger
+  `hcd_analysis.predictor` with the sha256 of each record. The library configures no logging.
+- **The held-out error on the output.** An incidence record may carry a held-out error of the dN/dX and the CDDF (an
+  optional block, copied by the builder from a table and never computed by it; the block names that table file by
+  its sha256). A prediction then returns it as
+  `dndx_err` and `cddf_err`: the held-out rms of the fractional error, for the fidelity of the prediction, NaN where
+  no estimate exists. An LF+MF prediction that returns a corrected value without an estimate beside it emits the new
+  `HeldOutErrorWarning`, once per process for each record. The builder refuses to run unless the held-out error is
+  stated (`--heldout-error FILE SHA256` or `--no-heldout-error`).
+- **A documentation page on the class spectra against the per-class model of Rogers et al. (2018)**
+  ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)): what was compared, the numbers, and what the
+  comparison is not.
 - **`python -m hcd_analysis.check_release`**: loads a model from a fresh install, predicts, and compares with
   reference predictions. Before its last line it prints what was checked.
 - **Said where a user reads first.** A prediction of a synthetic test build carries the flag and the label

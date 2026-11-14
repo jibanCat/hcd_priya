@@ -402,3 +402,23 @@ def test_the_codes_entry_may_spell_the_name_like_a_user(release, tmp_path, monke
         hp.ModelPackageError, match="accepts for 'lfmf'"
     ):  # two entries for one version
         hp.load_published()
+
+
+# --------------------------------------------------------------------- a release with an incidence record
+def test_a_pinned_release_with_an_incidence_record_loads_with_it(tmp_path, monkeypatch):
+    rel2 = make_release(tmp_path / "release2", incidence=True)
+    model_package(tmp_path, rel2, version="8.0.0", synthetic=False)
+    use_model_package(monkeypatch, tmp_path)
+    pin = _pin(rel2, "8.0.0")
+    monkeypatch.setattr(PM, "MODELS", [pin])
+    emu = hp.load_published("lfmf")
+    p = emu.predict(PARAMS, 3.0, tau0_amp=1.0, dtau0=0.0)
+    assert p.flags["incidence_mf_applied"] is True
+    assert p.provenance["incidence_mf"]["record_sha256"] == rel2["incidence_sha"]
+    assert (
+        p.provenance["release"]["format"] == "hcd_priya.release/1"
+    )  # one format, with or without the part
+    # a release listed under a format that load_published does not load is refused before any file is read
+    monkeypatch.setattr(PM, "MODELS", [dict(pin, format="hcd_priya.release/2")])
+    with pytest.raises(hp.ModelPackageError, match="is not one load_published loads"):
+        hp.load_published("lfmf")

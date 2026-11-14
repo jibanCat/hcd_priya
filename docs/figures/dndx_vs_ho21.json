@@ -1,0 +1,52 @@
+{
+ "design_point_flags": {
+  "ns_ridge": 3,
+  "outside_sampling_box": 12
+ },
+ "design_points": 60,
+ "design_points_flagged": 12,
+ "design_points_in_band_at_every_redshift": 60,
+ "design_points_refused": 0,
+ "design_table": "docs/figures/data/priya_lf_design_60.csv, sha256 a47f23bfce73b3d765206cef5b116cf42b3705c9a0df85a5e665cda185255d42",
+ "figure": "dN/dX against redshift",
+ "flags_set": [
+  "cddf_bins_without_support",
+  "incidence_heldout_error_available",
+  "incidence_mf_applied",
+  "k_downweighted",
+  "mf_applied"
+ ],
+ "heldout_error": "drawn on the model lines: pred.dndx_err times pred.dndx (LF+MF), the held-out rms of the fractional error",
+ "incidence_hr_simulations": 5,
+ "incidence_record": true,
+ "measurement": "DLA dN/dX of Ho, Bird and Garnett (2021), 68 per cent interval: docs/figures/data/ho21/dndx_all.txt, 18 redshift bins",
+ "measurement_source": "Ho, Bird and Garnett (2021), doi:10.1093/mnras/stab2169; tables of github.com/sbird/DLA_data (commit 147c616), fetched from the fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/ho21/PROVENANCE.md",
+ "parameters": {
+  "Ap": 1.9e-09,
+  "alphaq": 2.15,
+  "bhfeedback": 0.05,
+  "heref": 2.7,
+  "herei": 4.0,
+  "hireionz": 7.25,
+  "hub": 0.7,
+  "ns": 0.925,
+  "omegamh2": 0.143
+ },
+ "redshifts": [
+  2.2,
+  2.4,
+  2.6,
+  2.8,
+  3.0,
+  3.2,
+  3.4,
+  3.6,
+  3.8,
+  4.0,
+  4.2,
+  4.4,
+  4.6
+ ],
+ "release_format": "hcd_priya.release/1",
+ "synthetic_build": false
+}

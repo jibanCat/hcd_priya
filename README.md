@@ -158,7 +158,8 @@ What goes in and what comes out:
 - **Result.** `pred.k`, `pred.P_class` (clean, LLS, subDLA, DLA), `pred.w_c` and `pred.dndx` (the model's
   sightline fractions and incidence of the three HCD classes). `hp.add_hcd(pred, pred.w_c)` mixes the class spectra
   with those fractions. **That mixture is not the full P1D of a sightline sample.** Under LF+MF the class spectra
-  carry the multi-fidelity correction, while `pred.dndx` and `pred.w_c` are those of the low-fidelity model; and the
+  carry the multi-fidelity correction, while `pred.dndx` and `pred.w_c` are those of the low-fidelity model unless
+  the release carries an incidence record (then they are corrected too, flag `incidence_mf_applied`); and the
   mixture leaves out two contributions that the filter removed, the power of the subDLA cores and the DLA
   damping-wing core (`pred.labels["omissions"]`).
 - **Conventions.** `pred.k` is the angular wavenumber, 2 pi divided by the wavelength in velocity, in s/km.
@@ -231,6 +232,56 @@ code: it needs the raw PRIYA sightlines, which are not distributed, and it is no
   function and the P1D of each class of sightlines, which are what the emulator is trained on.
 
 The details, the commands and the checks of the catalogue are in [`docs/pipeline.md`](docs/pipeline.md).
+
+---
+
+## Figures
+
+Drawn by the scripts in [`scripts/figures/`](scripts/figures/); the data files are in
+[`docs/figures/data/`](docs/figures/data/). The class-ratio figure regenerates from the repository alone. The dN/dX
+and CDDF figures need a model with an incidence record; their measured points and the 60
+design points of their bands are in the repository. No model is published yet: the two model figures were drawn
+from the candidate LF+MF release (staged, not yet public). The full captions and what each figure does not test:
+[`docs/model_figures.md`](docs/model_figures.md).
+
+![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS against redshift, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/dndx_vs_ho21.png)
+
+**The incidence dN/dX against redshift.** Lines: the LF+MF model (`pred.dndx`) for DLAs, subDLAs and LLS at the
+midpoint of each parameter's training range (the nine values are written in the script; nothing is fitted), at the
+snapshots from z = 2.2 to 4.6, the range that the grouped validation of the model's P1D correction covers (the
+correction of the incidence drawn here is not validated at any redshift). Bands: the lowest and the
+highest value over the 60 design points of the training simulations; they are not an uncertainty. Points: the DLAs
+of Ho, Bird and Garnett (2021, [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals,
+from the tables of the DLA data collection [sbird/DLA_data](https://github.com/sbird/DLA_data)
+([provenance](docs/figures/data/ho21/PROVENANCE.md)).
+The measurement covers DLAs only. Bars on the lines: the model's held-out error (the rms over five held-out
+simulations; an indication of size, not a standard deviation).
+
+![The column-density distribution of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/cddf_vs_ho21.png)
+
+**The column-density distribution f(N_HI).** Line: the LF+MF model (`pred.cddf`) at the midpoint of each
+parameter's training range (the nine values are written in the script; nothing is fitted), at the snapshots z = 2.2,
+2.8 and 3.4. Band: the lowest and the highest value over the 60 design points of the training simulations; it is
+not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
+[arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) in three redshift bins, with 68 per cent intervals (bins
+where the measured value is zero are not drawn). One
+snapshot stands beside each bin (z = 3.4 for the bin 3 to 4). The bin 4 to 5 is left out because it reaches beyond
+z = 4.6, the edge of the range that the grouped validation of the model's P1D correction covers; the correction of
+the CDDF itself is not validated at any redshift. The model's held-out error is not drawn here; a prediction
+carries it per bin (`pred.cddf_err`).
+
+![The class power ratio at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](docs/figures/class_ratio_vs_rogers18.png)
+
+**The class power ratio P_class / P_clean at z = 3.** Blue: the low-resolution PRIYA training simulations with the
+filtered troughs restored (z = 3.0): the range over the 60 simulations at all mean-flux rungs (lighter), the range
+over the 60 simulations at the rung nearest 1 (darker) and its median (line). Orange line: Eq. 6 of Rogers et al.
+(2018, [arXiv:1706.08532](https://arxiv.org/abs/1706.08532)) as published, from
+`hcd_analysis.hcd_template.class_ratio` at z = 3.0 (their snapshot is at z = 3.01). Orange band: the same with the
+amplitude of its k-dependent term between 0.5 and 2 times; a fit leaves that amplitude free, and the range is this
+figure's choice, not a prior from the paper. Shaded: below 7.85e-4 s/km, the lowest mode of their 8000 km/s box, where
+the template is evaluated by extrapolation. This figure holds no emulator prediction: the emulator predicts the
+filtered class spectra and was not tested with the troughs restored
+([`docs/rogers_comparison.md`](docs/rogers_comparison.md)).
 
 ---
 
