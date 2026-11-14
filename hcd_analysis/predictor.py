@@ -1853,6 +1853,28 @@ class ResearchPredictor(_PredictorBase):
             load_purpose=self._rb.load_purpose,
         )
 
+    def _attach_incidence(self, inc):
+        """As the base, after the held-out guard of a research model: the record's table must be built without the
+        simulations this backbone holds out (as re-derived from the member metas), and the record must say so. A
+        held-out name among its ``train_sims`` is refused; so is a held-out name that its
+        ``composition.excluded_sims`` does not list (the names are compared as strings, so a record that names a
+        simulation in another way is refused here and never passes unseen)."""
+        inc = _IM.reverify(inc)
+        held = set(self._backbone_identity()["held_out_sims"])
+        seen = sorted(held & set(inc.record["train_sims"]))
+        if seen:
+            raise _MR.MFRecordError(
+                f"refusing the incidence MF record {inc.record_sha256[:12]}: its table was built with the "
+                f"simulations {seen}, which this research backbone holds out: not a held-out prediction"
+            )
+        unstated = sorted(held - set(inc.record["composition"]["excluded_sims"]))
+        if unstated:
+            raise _MR.MFRecordError(
+                f"refusing the incidence MF record {inc.record_sha256[:12]}: it does not state that it excludes "
+                f"the simulations {unstated}, which this research backbone holds out (composition.excluded_sims)"
+            )
+        super()._attach_incidence(inc)
+
     def labels(self):
         sp = self._rb.split
         return dict(
@@ -2052,6 +2074,8 @@ def load_research_bundle(
     purpose: str,
     mf_dir: str | os.PathLike[str] | None = None,
     mf_record_sha256: str | None = None,
+    incidence_dir: str | os.PathLike[str] | None = None,
+    incidence_record_sha256: str | None = None,
 ) -> ResearchPredictor:
     """Load a research model bundle, checked against its manifest digest.
 
@@ -2072,6 +2096,13 @@ def load_research_bundle(
         grouped cross-validation. Give it together with ``mf_record_sha256``.
     mf_record_sha256 : str, optional
         The sha256 of that MF record.
+    incidence_dir : str or os.PathLike, optional
+        The directory of an incidence MF record whose table was built without this bundle's
+        held-out simulations, for held-out predictions of the corrected ``dndx`` and ``w_c``.
+        It is applied only together with the fold MF record. Give it together with
+        ``incidence_record_sha256``.
+    incidence_record_sha256 : str, optional
+        The sha256 of that incidence MF record.
 
     Returns
     -------
@@ -2086,7 +2117,11 @@ def load_research_bundle(
         is a production bundle (use ``load_bundle``).
     MFRecordError
         If only one of ``mf_dir`` and ``mf_record_sha256`` is given; if the record is not a fold
-        record of this bundle; or if its held-out simulations were used to train this bundle.
+        record of this bundle; or if its held-out simulations were used to train this bundle. If
+        only one of ``incidence_dir`` and ``incidence_record_sha256`` is given; if the incidence
+        record is given without the fold MF record, or was fitted on another LF cache; if its
+        table was built with a simulation this bundle holds out; or if it does not state that it
+        excludes every one of them.
 
     Examples
     --------
@@ -2104,10 +2139,20 @@ def load_research_bundle(
     >>> print("and names the simulations the model was trained without:", same)
     and names the simulations the model was trained without: True
     """
+    if (incidence_dir is None) != (incidence_record_sha256 is None):
+        raise _MR.MFRecordError(
+            "give both incidence_dir and incidence_record_sha256 (the record's published sha256), "
+            "or neither"
+        )
     rb = _H.load_research(
         bundle_dir, expected_manifest_sha256=expected_manifest_sha256, purpose=purpose
     )
-    return ResearchPredictor(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "fold"))
+    rp = ResearchPredictor(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "fold"))
+    if incidence_dir is not None:
+        rp._attach_incidence(
+            _IM.load_record(incidence_dir, expected_record_sha256=incidence_record_sha256)
+        )
+    return rp
 
 
 # -------------------------------------------------------------------------------------------- published models

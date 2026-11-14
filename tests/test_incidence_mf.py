@@ -1086,3 +1086,118 @@ def test_a_call_that_applies_a_correction_says_so_once_in_the_log(rel, caplog):
         two.predict(PARAMS, 3.0, tau_eff=0.4)
     assert not [r for r in caplog.records if r.name == name]
     assert not logging.getLogger(name).handlers
+
+
+# ------------------------------------------------------------------------- a fold model with an incidence record
+def _fold(tmp_path):
+    """A synthetic research bundle that holds out synthsim2, with its fold MF record: (bundle, the loader keywords,
+    the cache sha256)."""
+    from hcd_analysis.emulator import release_testing as RT
+    from tests.test_predictor_mf import write_mf
+
+    res = RT.write_synthetic_research_bundle(
+        str(tmp_path / "res"), held_out_sims=("synthsim2",), n_groups=3
+    )
+    cache = res.lineage["cache"]["sha256"]
+    s = write_mf(
+        tmp_path / "fold",
+        manifest=res.manifest_sha256,
+        cache=cache,
+        kind="fold",
+        backbone_kind="research",
+        held_out=["synthsim2"],
+        fold={"fold_id": "f0", "holdout_sims": ["synthsim2"]},
+    )
+    return res, dict(purpose="a test", mf_dir=str(tmp_path / "fold"), mf_record_sha256=s), cache
+
+
+def _fold_incidence(path, cache, *, train, excluded):
+    return write_incidence(
+        path,
+        cache=cache,
+        train_sims=train,
+        composition={
+            "id": "synthetic-fold-composition",
+            "excluded_sims": excluded,
+            "ruling_ids": ["synthetic ruling"],
+        },
+    )
+
+
+def test_a_fold_model_takes_an_incidence_record_built_without_its_held_out_simulations(
+    tmp_path, monkeypatch
+):
+    """``load_research_bundle(..., incidence_dir=..., incidence_record_sha256=...)``: the fold model's LF+MF dN/dX
+    is multiplied by the record's factor, the class spectra are untouched, an LF prediction is untouched, and without
+    the two keywords the loader does what it did."""
+    import warnings
+
+    monkeypatch.setattr(hp, "_HELDOUT_WARNED", set())
+    res, kw, cache = _fold(tmp_path)
+    sha = _fold_incidence(
+        tmp_path / "inc", cache, train=["synthsim0", "synthsim1"], excluded=["synthsim2"]
+    )
+    plain = hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, **kw)
+    rp = hp.load_research_bundle(
+        res.bundle_dir,
+        res.manifest_sha256,
+        **kw,
+        incidence_dir=str(tmp_path / "inc"),
+        incidence_record_sha256=sha,
+    )
+    assert type(rp) is hp.ResearchPredictor and plain._inc is None
+    a = plain.predict(PARAMS, 3.0, tau_eff=0.4)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        p = rp.predict(PARAMS, 3.0, tau_eff=0.4)
+    assert len(_heldout_warnings(caught)) == 1  # the synthetic record carries no held-out error
+    assert p.flags["research_model"] is True and p.flags["mf_applied"] is True
+    assert p.flags["incidence_mf_applied"] is True and "incidence_mf_applied" not in a.flags
+    np.testing.assert_allclose(
+        p.dndx, a.dndx * np.array(INCIDENCE_TABLES["dndx_ratio"][1]), rtol=1e-13, atol=0
+    )
+    assert p.P_class.tobytes() == a.P_class.tobytes()  # the class spectra are not touched
+    assert not np.array_equal(p.w_c, a.w_c)  # the fractions follow the corrected incidence
+    assert p.provenance["incidence_mf"]["record_sha256"] == sha
+    assert p.provenance["model_kind"] == "research" and "incidence_mf" not in a.provenance
+    lf, lf0 = (m.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF") for m in (rp, plain))
+    assert lf.flags["incidence_mf_applied"] is False
+    assert lf.dndx.tobytes() == lf0.dndx.tobytes() and lf.w_c.tobytes() == lf0.w_c.tobytes()
+
+
+def test_a_fold_model_refuses_an_incidence_record_that_is_not_held_out(tmp_path):
+    """Refused: one keyword without the other; a record whose table was built with a held-out simulation; a record
+    that does not state that it excludes every held-out simulation; a record without the fold MF record.
+    """
+    res, kw, cache = _fold(tmp_path)
+    good = _fold_incidence(
+        tmp_path / "good", cache, train=["synthsim0", "synthsim1"], excluded=["synthsim2"]
+    )
+    leak = _fold_incidence(
+        tmp_path / "leak", cache, train=["synthsim1", "synthsim2"], excluded=["synthsim0"]
+    )
+    silent = _fold_incidence(
+        tmp_path / "silent", cache, train=["synthsim0", "synthsim1"], excluded=[]
+    )
+
+    def load(name, sha, **over):
+        return hp.load_research_bundle(
+            res.bundle_dir,
+            res.manifest_sha256,
+            **dict(kw, **over),
+            incidence_dir=None if name is None else str(tmp_path / name),
+            incidence_record_sha256=sha,
+        )
+
+    for name, sha in (("good", None), (None, good)):
+        with pytest.raises(E, match="both incidence_dir and incidence_record_sha256"):
+            load(name, sha)
+    with pytest.raises(E, match="not a held-out prediction"):
+        load("leak", leak)
+    with pytest.raises(E, match="does not state that it excludes"):
+        load("silent", silent)
+    with pytest.raises(E, match="applied with the P1D MF record"):
+        load("good", good, mf_dir=None, mf_record_sha256=None)
+    with pytest.raises(E, match="sha256 does not match"):
+        load("good", leak)
+    assert load("good", good).provenance["incidence_mf"]["record_sha256"] == good
