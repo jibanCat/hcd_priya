@@ -88,7 +88,11 @@ def test_a_data_set_from_blocks_is_ordered_redshift_by_redshift_and_read_only():
         (dict(p1d=[[10.0], [12.0, 9.0, 7.0]]), "p1d at z = 2.6 must have shape \\(2,\\)"),
         (dict(p1d=[[10.0, np.nan], [12.0, 9.0, 7.0]]), "p1d must be finite"),
         (dict(cov_blocks=[np.eye(3), np.eye(3)]), "covariance block at z = 2.6 must have shape"),
-        (dict(cov_blocks=[np.array([[1.0, 0.5], [0.4, 1.0]]), np.eye(3)]), "symmetric"),
+        (dict(cov_blocks=[np.array([[1.0, 0.5], [0.4, 1.0]]), np.eye(3)]), "must be symmetric"),
+        (
+            dict(cov_blocks=[np.array([[1.0, 0.0], [0.0, -1.0]]), np.eye(3)]),
+            "a variance is not positive",
+        ),
         (dict(cov_blocks=[np.array([[1.0, 2.0], [2.0, 1.0]]), np.eye(3)]), "positive definite"),
         (dict(model_factor=[[1.0, 0.0], [1.0, 1.0, 1.0]]), "model_factor must be positive"),
         (dict(cov_blocks=[np.eye(2)]), "one entry per redshift"),
@@ -104,6 +108,24 @@ def test_a_malformed_data_set_is_refused(change, why):
     kw.update(change)
     with pytest.raises(E, match=why):
         L.P1DData.from_blocks(**kw)
+
+
+def test_a_covariance_that_is_symmetric_up_to_rounding_is_kept_as_given(emu):
+    """A matrix that was summed or inverted differs from its transpose in the last digits. It is accepted and stored
+    as given, the likelihood uses its symmetric part, and a larger difference is refused."""
+    rows = _bins(emu)
+    exact = [_cov(rows[0].size, 0.04), _cov(rows[1].size, 0.09)]
+    rounded = [b.copy() for b in exact]
+    rounded[0][0, 1] *= 1.0 + 4e-14  # the transpose keeps the other value
+    d = _data(emu, cov_blocks=rounded)
+    assert d.cov[0, 1] != d.cov[1, 0] and d.cov[0, 1] == rounded[0][0, 1]  # kept as given
+    sym = _data(emu, cov_blocks=[0.5 * (b + b.T) for b in rounded])
+    a, b = L.GaussianP1DLikelihood(emu, d), L.GaussianP1DLikelihood(emu, sym)
+    assert a.loglike(THETA) == b.loglike(THETA) and a.logdet == b.logdet
+    bad = [b.copy() for b in exact]
+    bad[0][0, 1] *= 1.0 + 1e-6
+    with pytest.raises(E, match="differ by more than rounding"):
+        _data(emu, cov_blocks=bad)
 
 
 def test_a_full_covariance_may_couple_redshifts():

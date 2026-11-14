@@ -75,6 +75,9 @@ MEAN_FLUX_NAMES = ("tau0_amp", "dtau0")
 DATA_FORMAT = "hcd_priya.p1d_data/1"
 DATA_KEYS = ("format", "z", "k", "p1d", "cov_blocks", "model_factor", "truth", "provenance")
 MAX_DATA_BYTES = 8 << 20
+# A covariance is taken as symmetric when |C_ij - C_ji| <= SYMMETRY_RTOL * sqrt(C_ii C_jj) for every pair: the size
+# of rounding in a matrix that was summed or inverted, far below anything that matters.
+SYMMETRY_RTOL = 1e-10
 
 
 class LikelihoodInputError(ValueError):
@@ -119,7 +122,10 @@ class P1DData:
     p1d : numpy.ndarray
         Shape (N,), N the total number of bins. The data vector in km/s.
     cov : numpy.ndarray
-        Shape (N, N). The covariance of ``p1d``, symmetric and positive definite.
+        Shape (N, N). The covariance of ``p1d``, symmetric and positive definite. It is kept as
+        given. A difference between ``cov`` and its transpose at the level of rounding
+        (``SYMMETRY_RTOL``) is accepted, and the likelihood then uses the symmetric part,
+        ``(cov + cov.T) / 2``; a larger difference is refused.
     model_factor : numpy.ndarray or None
         Shape (N,). A factor by which the model vector is multiplied before it is compared with
         ``p1d`` (for example a resolution table that the data carry). None means no factor.
@@ -168,12 +174,17 @@ class P1DData:
             raise LikelihoodInputError(
                 f"cov must be a finite matrix of shape ({n}, {n}), got shape {cov.shape}"
             )
-        if not np.array_equal(cov, cov.T):
+        diag = np.diag(cov)
+        if np.any(diag <= 0):
+            raise LikelihoodInputError("cov must be positive definite (a variance is not positive)")
+        scale = np.sqrt(np.outer(diag, diag))
+        if np.any(np.abs(cov - cov.T) > SYMMETRY_RTOL * scale):
             raise LikelihoodInputError(
-                "cov must be symmetric (exactly: cov equal to its transpose)"
+                "cov must be symmetric: cov and its transpose differ by more than rounding "
+                f"({SYMMETRY_RTOL:g} of sqrt(C_ii C_jj))"
             )
         try:
-            np.linalg.cholesky(cov)
+            np.linalg.cholesky(0.5 * (cov + cov.T))
         except np.linalg.LinAlgError:
             raise LikelihoodInputError("cov must be positive definite") from None
         factor = None
@@ -460,7 +471,8 @@ class GaussianP1DLikelihood:
                 )
             terms[name] = (mean, sd)
         self.gaussian_terms = terms
-        self._chol = np.linalg.cholesky(data.cov)
+        # the symmetric part: a covariance may differ from its transpose by rounding (SYMMETRY_RTOL)
+        self._chol = np.linalg.cholesky(0.5 * (data.cov + data.cov.T))
         self.logdet = float(2.0 * np.sum(np.log(np.diag(self._chol))))
         self._slices = data.slices()
 
