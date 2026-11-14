@@ -270,6 +270,31 @@ def test_what_the_likelihood_refuses_when_it_is_made_or_called(emu):
         L.GaussianP1DLikelihood(emu, data).loglike(dict(THETA, ns=float("nan")))
 
 
+def test_a_sampler_gets_minus_infinity_where_the_model_refuses_and_a_count_of_why(emu):
+    like = L.GaussianP1DLikelihood(emu, _data(emu))
+    assert like.sampler_logp(THETA) == like.logp(THETA) and like.refusals == {}
+    for _ in range(2):  # the predictor refuses a parameter that is not finite
+        assert like.sampler_logp(dict(THETA, ns=float("nan"))) == -math.inf
+    (kind,) = like.refusals
+    assert like.refusals[kind][0] == 2 and isinstance(like.refusals[kind][1], str)
+    assert issubclass(getattr(hp, kind), hp.PredictorInputError)
+    # a data wavenumber beyond the modes of the point is a refusal of the point too
+    pred = emu.predict_many(PARAMS, z=list(ZS), tau0_amp=1.0, dtau0=0.0)
+    beyond = L.P1DData.from_blocks(
+        z=ZS,
+        k=[[float(pred.k[0][3])], [float(pred.k[1][-1]) * 2.0]],
+        p1d=[[1.0], [1.0]],
+        cov_blocks=[np.eye(1), np.eye(1)],
+    )
+    far = L.GaussianP1DLikelihood(emu, beyond)
+    assert far.sampler_logp(THETA) == -math.inf and far.refusals["OutsideModesError"][0] == 1
+    assert issubclass(L.OutsideModesError, L.LikelihoodInputError)
+    with pytest.raises(
+        E, match="missing"
+    ):  # a malformed point is the caller's error, not a refusal
+        like.sampler_logp({"ns": 0.9})
+
+
 def test_the_predictive_is_the_model_plus_noise_of_the_data_covariance(emu):
     data = _data(emu)
     like = L.GaussianP1DLikelihood(emu, data)

@@ -63,6 +63,7 @@ from .emulator import safe_io as _S
 __all__ = [
     "GaussianP1DLikelihood",
     "LikelihoodInputError",
+    "OutsideModesError",
     "P1DData",
     "interp_to_bins",
     "read_p1d_data",
@@ -82,6 +83,10 @@ SYMMETRY_RTOL = 1e-10
 
 class LikelihoodInputError(ValueError):
     """A data set, an option or a parameter point that the likelihood cannot use."""
+
+
+class OutsideModesError(LikelihoodInputError):
+    """A data wavenumber lies outside the wavenumbers of the model at this parameter point."""
 
 
 def _frozen(a):
@@ -336,8 +341,9 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
 
     Raises
     ------
-    LikelihoodInputError
-        If a data wavenumber lies outside the model's wavenumbers: nothing is extrapolated.
+    OutsideModesError
+        If a data wavenumber lies outside the model's wavenumbers: nothing is extrapolated. It is a
+        ``LikelihoodInputError``.
 
     Examples
     --------
@@ -352,7 +358,7 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
     if km.size < 2 or np.any(np.diff(km) <= 0):
         raise LikelihoodInputError("k_model must be strictly ascending, with at least two points")
     if kd.min() < km[0] or kd.max() > km[-1]:
-        raise LikelihoodInputError(
+        raise OutsideModesError(
             f"a data wavenumber lies outside the model's wavenumbers [{km[0]:.6g}, {km[-1]:.6g}] "
             f"(data from {kd.min():.6g} to {kd.max():.6g}): nothing is extrapolated"
         )
@@ -392,6 +398,8 @@ class GaussianP1DLikelihood:
     data : P1DData
     logdet : float
         ln det C.
+    refusals : dict
+        Filled by ``sampler_logp``: ``{kind of refusal: [count, the first message of that kind]}``.
 
     Raises
     ------
@@ -475,6 +483,7 @@ class GaussianP1DLikelihood:
         self._chol = np.linalg.cholesky(0.5 * (data.cov + data.cov.T))
         self.logdet = float(2.0 * np.sum(np.log(np.diag(self._chol))))
         self._slices = data.slices()
+        self.refusals = {}  # by sampler_logp: {kind of refusal: [count, the first message]}
 
     # ------------------------------------------------------------------------------- the point
     def _point(self, theta):
@@ -539,8 +548,8 @@ class GaussianP1DLikelihood:
         for i, (sl, kd) in enumerate(zip(self._slices, self.data.k)):
             try:
                 out[sl] = interp_to_bins(pred.k[i], mixed[i], kd)
-            except LikelihoodInputError as exc:
-                raise LikelihoodInputError(f"at z = {self._z[i]:g}: {exc}") from None
+            except OutsideModesError as exc:
+                raise OutsideModesError(f"at z = {self._z[i]:g}: {exc}") from None
         if self.data.model_factor is not None:
             out *= self.data.model_factor
         return out
@@ -616,6 +625,35 @@ class GaussianP1DLikelihood:
         float
         """
         return self.loglike(theta) + sum(self.log_gaussian_terms(theta).values())
+
+    def sampler_logp(self, theta: Mapping[str, float]) -> float:
+        """``logp`` for a sampler: minus infinity at a point the model cannot serve.
+
+        A sampler needs a number at every point it proposes. This returns ``logp(theta)``, and
+        minus infinity where the predictor refuses the point (``predictor.PredictorInputError``) or
+        a data wavenumber lies outside the model's wavenumbers there (``OutsideModesError``). Each
+        such refusal is counted in ``refusals``, by the kind of the error, with the first message
+        of that kind, so that a chain can say how often and why it was turned back. A point with
+        missing or unknown names still raises: that is an error of the caller, not of the point.
+
+        Parameters
+        ----------
+        theta : dict
+            The eleven parameters by name.
+
+        Returns
+        -------
+        float
+            ``logp(theta)``, or ``-inf``.
+        """
+        self._point(theta)
+        try:
+            return self.logp(theta)
+        except (_hp.PredictorInputError, OutsideModesError) as exc:
+            kind = type(exc).__name__
+            entry = self.refusals.setdefault(kind, [0, str(exc)])
+            entry[0] += 1
+            return -math.inf
 
     def predictive(self, thetas: Sequence[Mapping[str, float]], rng: np.random.Generator):
         """Model vectors at a set of points, and one noisy replicate of the data for each.
