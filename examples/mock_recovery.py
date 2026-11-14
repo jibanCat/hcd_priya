@@ -112,6 +112,10 @@ DOWNLOAD = {
 DOWNLOAD_PURPOSE = (
     "the mock-recovery example: a held-out recovery of the mock of the example download"
 )
+REFERENCE_BANDS = (
+    (2.5, 97.5),
+    (16.0, 84.0),
+)  # the percentile bands of the stored reference that part three draws
 
 
 def line(label: str, *values) -> None:
@@ -169,20 +173,24 @@ def parse(argv=None) -> argparse.Namespace:
         "--draws", type=int, default=200, help="points of the chain used for the predictive"
     )
     ap.add_argument(
-        "--out", default="mock_recovery_out", help="the folder for the chain and the figure"
+        "--out", default="mock_recovery_out", help="the folder for the chain and the figures"
     )
     a = ap.parse_args(argv)
+    if a.download is not None and not a.download:
+        ap.error("--download needs a directory")
+    named_by = "--download"
     if a.download is None and a.release is None and a.research is None:
-        a.download = (
-            os.environ.get(DOWNLOAD_ENV) or None
-        )  # only when no model is named on the command line
+        # only when no model is named on the command line; an empty variable is no variable
+        a.download = os.environ.get(DOWNLOAD_ENV) or None
+        named_by = f"the environment variable {DOWNLOAD_ENV}"
     if sum(x is not None for x in (a.download, a.release, a.research)) != 1:
         ap.error(
             "give the model once: --download DIR, or --release DIR SHA256, or --research DIR SHA256"
         )
     if a.download is not None and (a.data or a.mf or a.incidence or a.purpose):
         ap.error(
-            "--download brings its own mock and records: give no --data, --mf, --incidence, --purpose"
+            f"{named_by} names the example download, which brings its own mock and records: give no --data, "
+            "--mf, --incidence, --purpose"
         )
     if a.download is None and a.data is None:
         ap.error("--release and --research need --data FILE SHA256")
@@ -218,7 +226,7 @@ def open_download(root: str):
     try:
         with open(os.path.join(root, DOWNLOAD_MANIFEST), "rb") as f:
             stated = json.loads(f.read(1 << 16))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         sys.exit(
             f"refusing: {root} is not the example download: its manifest {DOWNLOAD_MANIFEST} cannot be read ({exc})"
         )
@@ -229,24 +237,34 @@ def open_download(root: str):
         )
     place = {name: os.path.join(root, rel) for name, (rel, _) in DOWNLOAD.items()}
     sha = {name: digest for name, (_, digest) in DOWNLOAD.items()}
-    emu = hp.load_research_bundle(
-        place["model"],
-        sha["model"],
-        purpose=DOWNLOAD_PURPOSE,
-        mf_dir=place["mf_record"],
-        mf_record_sha256=sha["mf_record"],
-        incidence_dir=place["incidence_record"],
-        incidence_record_sha256=sha["incidence_record"],
-    )
-    data = L.read_p1d_data(place["mock"], expected_sha256=sha["mock"])
-    reference = L.read_reference(place["reference"], expected_sha256=sha["reference"])
-    reference.check_bins(data)
-    names = (*hp.PARAM_NAMES, *L.MEAN_FLUX_NAMES)
-    truth = [float((data.truth or {}).get(name, np.nan)) for name in reference.param_names]
-    if reference.param_names != names or not np.array_equal(reference.truth, truth):
+    try:  # the mock and the reference first: they are quick to check, the model is not
+        data = L.read_p1d_data(place["mock"], expected_sha256=sha["mock"])
+        reference = L.read_reference(place["reference"], expected_sha256=sha["reference"])
+        reference.check_bins(data)
+        for lower, upper in REFERENCE_BANDS:  # the bands part three draws must be stored levels
+            reference.band(lower, upper)
+        names = (*hp.PARAM_NAMES, *L.MEAN_FLUX_NAMES)
+        truth = [float((data.truth or {}).get(name, np.nan)) for name in reference.param_names]
+        if reference.param_names != names or not np.array_equal(reference.truth, truth):
+            raise L.LikelihoodInputError(
+                "the stored reference does not state the eleven parameters of the likelihood, in its order, with "
+                "the truth of the mock"
+            )
+        emu = hp.load_research_bundle(
+            place["model"],
+            sha["model"],
+            purpose=DOWNLOAD_PURPOSE,
+            mf_dir=place["mf_record"],
+            mf_record_sha256=sha["mf_record"],
+            incidence_dir=place["incidence_record"],
+            incidence_record_sha256=sha["incidence_record"],
+        )
+    except (
+        ValueError,
+        OSError,
+    ) as exc:  # every refusal of the loaders is a ValueError; a missing file an OSError
         sys.exit(
-            "refusing: the stored reference does not state the eleven parameters of the likelihood with the truth "
-            "of the mock"
+            f"refusing: the example download at {root} is not the one this script names: {exc}"
         )
     return emu, data, reference
 
@@ -437,7 +455,7 @@ def part_three(like, chain, reference, a) -> None:
                 "|",
                 truth,
             )
-        for (lower, upper), shade in (((2.5, 97.5), 0.15), ((16.0, 84.0), 0.3)):
+        for (lower, upper), shade in zip(REFERENCE_BANDS, (0.15, 0.3)):
             lo, hi = reference.band(lower, upper)
             ax.fill_between(
                 x,
@@ -451,7 +469,7 @@ def part_three(like, chain, reference, a) -> None:
     if chain is None:
         line(
             "the chain of this run",
-            "none (--demo N, or --full): the figures show the stored reference alone",
+            "none (no chain was run): the figures show the stored reference alone",
         )
     else:
         thetas = [dict(zip(like.param_names, row)) for row in chain["points"]]
@@ -519,7 +537,14 @@ def part_three(like, chain, reference, a) -> None:
             lw=2.5,
             label="this run, 16th to 84th percentile" + (" (NOT CONVERGED)" if a.demo else ""),
         )
-        ax.plot(c[:, 1], y - 0.3, "o", color="C0", ms=3)
+        ax.plot(
+            c[:, 1],
+            y - 0.3,
+            "o",
+            color="C0",
+            ms=3,
+            label="this run, median" + (" (NOT CONVERGED)" if a.demo else ""),
+        )
     ax.set_yticks(y)
     ax.set_yticklabels(names)
     ax.set_xlim(-0.02, 1.02)

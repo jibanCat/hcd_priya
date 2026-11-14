@@ -4,7 +4,9 @@ This module joins three things that the package already has into one number, the
 a model loaded with ``hcd_analysis.predictor`` (``load_release``, ``load_published``), PRIYA's
 two-parameter model of the mean flux (``predictor.tau_eff_priya``), and the mixture of the class
 spectra (``predictor.add_hcd``). It adds a container for a data set (``P1DData``), a rule for
-bringing the model to the data's wavenumbers, and the Gaussian itself.
+bringing the model to the data's wavenumbers, and the Gaussian itself. Beside these it has a
+loader for one public data set (``load_xq100``) and a container for a stored reference of a mock
+recovery (``P1DReference``), each with what it does not do stated in its docstring.
 
 **The mathematics.** For a point ``theta`` (the nine PRIYA parameters, ``tau0_amp`` and
 ``dtau0``) and a data set with redshifts z_i, wavenumbers k_ij, values d and covariance C:
@@ -872,8 +874,7 @@ def read_p1d_data(path: str | os.PathLike, *, expected_sha256: str) -> P1DData:
 
 # ------------------------------------------------------------------------- a stored reference of a mock recovery
 REFERENCE_FORMAT = "hcd_priya.p1d_reference/1"
-REFERENCE_KEYS = (
-    "format",
+_REFERENCE_FIELDS = (  # the fields of P1DReference that the file holds as lists, by name
     "param_names",
     "truth",
     "mean",
@@ -883,8 +884,8 @@ REFERENCE_KEYS = (
     "k",
     "percentiles",
     "predictive",
-    "provenance",
 )
+REFERENCE_KEYS = ("format", *_REFERENCE_FIELDS, "provenance")
 
 
 @dataclasses.dataclass(frozen=True, eq=False)
@@ -1031,8 +1032,10 @@ class P1DReference:
         Raises
         ------
         LikelihoodInputError
-            If a level is not one of ``percentiles``.
+            If a level is not one of ``percentiles``, or ``lower`` is not below ``upper``.
         """
+        if not lower < upper:
+            raise LikelihoodInputError(f"a band needs lower < upper, got {lower!r} and {upper!r}")
         out = []
         for level in (lower, upper):
             if level not in self.percentiles:
@@ -1159,14 +1162,14 @@ def read_reference(path: str | os.PathLike, *, expected_sha256: str) -> P1DRefer
     doc, sha = _pinned_doc(
         raw, where, expected_sha256, "a reference", REFERENCE_KEYS, REFERENCE_FORMAT
     )
-    for key in REFERENCE_KEYS[1:-1]:
+    for key in _REFERENCE_FIELDS:
         if not isinstance(doc[key], list):
             raise LikelihoodInputError(f"{where}: {key} must be a list")
     if not isinstance(doc["provenance"], dict):
         raise LikelihoodInputError(f"{where}: provenance must be an object")
     try:
         return P1DReference(
-            **{key: doc[key] for key in REFERENCE_KEYS[1:-1]},
+            **{key: doc[key] for key in _REFERENCE_FIELDS},
             provenance=dict(doc["provenance"], file_sha256=sha),
         )
     except LikelihoodInputError as exc:

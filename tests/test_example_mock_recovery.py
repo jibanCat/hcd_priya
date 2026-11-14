@@ -458,34 +458,126 @@ def test_a_download_that_is_not_the_one_the_script_names_is_refused(
     (copy / ex.DOWNLOAD_MANIFEST).write_text(json.dumps(stated))
     # the manifest agrees but an item was changed: the loader of that item refuses it by its sha256
     (copy / "mock.p1d.json").write_text((copy / "mock.p1d.json").read_text() + "\n")
-    with pytest.raises(L.LikelihoodInputError, match="is not the expected"):
+    with pytest.raises(
+        SystemExit, match="refusing: the example download at .* is not the expected"
+    ):
+        ex.main(["--download", str(copy)])
+    # an item that is missing
+    shutil.copy(download["root"] / "mock.p1d.json", copy / "mock.p1d.json")
+    (copy / "reference.json").unlink()
+    with pytest.raises(
+        SystemExit, match="refusing: the example download at .* not a readable reference file"
+    ):
+        ex.main(["--download", str(copy)])
+    # a manifest nested beyond what the parser follows is a manifest that cannot be read
+    (copy / ex.DOWNLOAD_MANIFEST).write_text("[" * 100000)
+    with pytest.raises(SystemExit, match="its manifest example_download.json cannot be read"):
         ex.main(["--download", str(copy)])
 
 
-def test_a_reference_for_another_mock_is_refused(download, monkeypatch, tmp_path):
+def _variant(download, ex, monkeypatch, where, *, reference=None, mock=None):
+    """A copy of the synthetic download with another reference or another mock, its manifest and the script's pins
+    made to agree: so that only the checks after the digests can refuse it."""
     import shutil
 
+    shutil.copytree(download["root"], where)
+    pins = dict(download["pins"])
+    if mock is not None:
+        (where / "mock.p1d.json").unlink()
+        pins["mock"] = ("mock.p1d.json", L.write_p1d_data(where / "mock.p1d.json", mock))
+    if reference is not None:
+        (where / "reference.json").unlink()
+        pins["reference"] = (
+            "reference.json",
+            L.write_reference(where / "reference.json", reference),
+        )
+    manifest = {"format": ex.DOWNLOAD_FORMAT, "items": {k: v for k, (_, v) in pins.items()}}
+    (where / ex.DOWNLOAD_MANIFEST).write_text(json.dumps(manifest))
+    monkeypatch.setattr(ex, "DOWNLOAD", pins)
+    return where
+
+
+def test_a_reference_that_does_not_belong_to_the_mock_is_refused(download, monkeypatch, tmp_path):
     ex = _script()
     mock = download["mock"]
-    for n, (change, why) in enumerate(
-        (
-            ({"truth": None}, "does not state the eleven parameters"),  # another truth (set below)
-            ({"k": tuple(np.asarray(r) * 1.5 for r in mock.k)}, "not on the bins of this data set"),
-        )
-    ):
-        copy = tmp_path / f"copy{n}"
-        shutil.copytree(download["root"], copy)
-        (copy / "reference.json").unlink()
-        if change.get("truth", 0) is None:
-            ref = _made_up_reference(mock)
-            change = {"truth": ref.truth * (1.0 + 1e-12 * np.arange(1, 12))}
-        sha = L.write_reference(copy / "reference.json", _made_up_reference(mock, **change))
-        pins = dict(download["pins"], reference=("reference.json", sha))
-        manifest = {"format": ex.DOWNLOAD_FORMAT, "items": {k: v for k, (_, v) in pins.items()}}
-        (copy / ex.DOWNLOAD_MANIFEST).write_text(json.dumps(manifest))
-        monkeypatch.setattr(ex, "DOWNLOAD", pins)
-        with pytest.raises((SystemExit, L.LikelihoodInputError), match=why):
-            ex.main(["--download", str(copy)])
+    good = _made_up_reference(mock)
+    flip = slice(None, None, -1)
+    cases = {
+        "another truth": (
+            {"reference": _made_up_reference(mock, truth=good.truth * (1.0 + 1e-12))},
+            "in its order, with the truth of the mock",
+        ),
+        "the parameters in another order": (
+            {
+                "reference": _made_up_reference(
+                    mock,
+                    param_names=good.param_names[flip],
+                    truth=good.truth[flip],
+                    mean=good.mean[flip],
+                    interval68=good.interval68[flip],
+                    interval95=good.interval95[flip],
+                )
+            },
+            "in its order, with the truth of the mock",
+        ),
+        "other bins": (
+            {"reference": _made_up_reference(mock, k=tuple(np.asarray(r) * 1.5 for r in mock.k))},
+            "not on the bins of this data set",
+        ),
+        "a band of the figures is not a stored level": (
+            {"reference": _made_up_reference(mock, percentiles=(2.5, 16.0, 50.0, 84.0, 95.0))},
+            "holds the percentiles",
+        ),
+        "a mock whose truth lacks a name": (
+            {
+                "mock": L.P1DData(
+                    z=mock.z,
+                    k=mock.k,
+                    p1d=mock.p1d,
+                    cov=mock.cov,
+                    truth={n: v for n, v in mock.truth.items() if n != "dtau0"},
+                )
+            },
+            "in its order, with the truth of the mock",
+        ),
+    }
+    for n, (name, (change, why)) in enumerate(cases.items()):
+        where = _variant(download, ex, monkeypatch, tmp_path / f"case{n}", **change)
+        with pytest.raises(SystemExit, match="refusing: the example download at .*" + why):
+            ex.main(["--download", str(where)])
+    # and the unchanged copy is accepted: the refusals above are not an accident of the copying
+    where = _variant(download, ex, monkeypatch, tmp_path / "same", reference=good)
+    assert ex.main(["--download", str(where), "--out", str(tmp_path / "out")]) == 0
+
+
+def test_how_the_download_is_named_and_what_the_messages_say(download, monkeypatch, capsys):
+    ex = _script()
+    monkeypatch.setenv(ex.DOWNLOAD_ENV, "")  # an empty variable is no variable
+    with pytest.raises(SystemExit):
+        ex.parse([])
+    assert "give the model once" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        ex.parse(["--download", ""])
+    assert "--download needs a directory" in capsys.readouterr().err
+    monkeypatch.setenv(ex.DOWNLOAD_ENV, "somewhere")
+    with pytest.raises(SystemExit):
+        ex.parse(
+            ["--data", "f", "s"]
+        )  # the user typed no --download: the message names the variable
+    err = capsys.readouterr().err
+    assert f"the environment variable {ex.DOWNLOAD_ENV} names the example download" in err
+    with pytest.raises(SystemExit):
+        ex.parse(["--download", "d", "--data", "f", "s"])
+    assert "--download names the example download" in capsys.readouterr().err
+
+
+def test_the_docs_list_the_items_of_the_download_with_the_sha256_written_in_the_script():
+    ex = _script()
+    text = open(os.path.join(REPO, "docs", "likelihood.md"), encoding="utf-8").read()
+    rows = re.findall(r"(?m)^\| `([a-z_]+)` \| `([^`]+)` \| .* \| `([0-9a-f]{64})` \|$", text)
+    assert {name: (place.rstrip("/"), sha) for name, place, sha in rows} == ex.DOWNLOAD
+    assert "**It is not published yet.**" in text and ex.DOWNLOAD_ENV in text
+    assert ex.DOWNLOAD_FORMAT in text and ex.DOWNLOAD_MANIFEST in text
 
 
 def test_a_chain_is_drawn_over_the_stored_reference(download, capsys, monkeypatch, tmp_path):
@@ -505,6 +597,9 @@ def test_a_chain_is_drawn_over_the_stored_reference(download, capsys, monkeypatc
             records.append(record)
 
     def run(info):
+        # a sampler lets INFO records pass. Part one has already predicted, at the default level: that did not use
+        # the one record up
+        logger.setLevel(logging.INFO)
         logp = info["likelihood"]["p1d"]["external"]
         assert all(np.isfinite(logp(**THETA)) for _ in range(3))  # three calls of the likelihood
         return None, types.SimpleNamespace(products=lambda: {"sample": _FakeSample(columns)})
@@ -518,7 +613,6 @@ def test_a_chain_is_drawn_over_the_stored_reference(download, capsys, monkeypatc
     logger = logging.getLogger("hcd_analysis.predictor")
     handler, before = Keep(level=logging.INFO), logger.level
     logger.addHandler(handler)
-    logger.setLevel(logging.INFO)  # as under a sampler that lets INFO records pass
     try:
         out_dir = tmp_path / "out"
         argv = ["--download", str(download["root"]), "--demo", "10", "--draws", "4"]

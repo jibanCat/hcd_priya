@@ -463,6 +463,7 @@ def rel(tmp_path_factory):
     return {
         "two": hp.load_release(str(two["root"]), two["sha"]),
         "one": hp.load_release(str(one), sha1),
+        "one_sha": sha1,
         "info": two,
         "root": root,
     }
@@ -1057,10 +1058,9 @@ def test_a_predictor_says_its_corrections_once_at_info_and_then_at_debug(rel, ca
     import logging
 
     info = rel["info"]
-    two = hp.load_release(
-        str(info["root"]), info["sha"]
-    )  # a new predictor: it has said nothing yet
-    one = rel["one"]
+    # two new predictors: neither has said anything yet, whatever ran before and at whatever log level
+    two = hp.load_release(str(info["root"]), info["sha"])
+    one = hp.load_release(str(rel["root"] / "one"), rel["one_sha"])
     name = "hcd_analysis.predictor"
     # the library configures no logging: its logger has no level and no handler of its own
     assert logging.getLogger(name).level == logging.NOTSET and not logging.getLogger(name).handlers

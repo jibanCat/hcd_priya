@@ -2,6 +2,7 @@
 the data's wavenumbers, and the Gaussian. Synthetic values only: a synthetic model with untrained networks, and data
 vectors and covariances that are made up here."""
 
+import dataclasses
 import hashlib
 import json
 import math
@@ -627,6 +628,12 @@ def test_a_reference_holds_a_posterior_summary_and_a_predictive_band_read_only()
     assert lo.tolist() == ref.predictive[1].tolist() and hi.tolist() == ref.predictive[3].tolist()
     with pytest.raises(E, match="holds the percentiles"):
         ref.band(5.0, 95.0)  # only stored percentiles: nothing is interpolated between them
+    as_integers = ref.band(16, 84)  # a level given as an integer is the same level
+    assert as_integers[0].tolist() == lo.tolist() and as_integers[1].tolist() == hi.tolist()
+    for reversed_or_equal in ((84.0, 16.0), (16.0, 16.0)):
+        with pytest.raises(E, match="lower < upper"):
+            ref.band(*reversed_or_equal)
+    assert L.REFERENCE_KEYS == ("format", *(f.name for f in dataclasses.fields(L.P1DReference)))
     assert isinstance(ref.provenance, dict) and ref.provenance["what"].startswith("a made-up")
 
 

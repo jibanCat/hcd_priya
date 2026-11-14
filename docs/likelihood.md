@@ -148,7 +148,8 @@ written in the script, as `DOWNLOAD`):
   (`hcd_priya.example_download/1`) and the five sha256. The script refuses a directory whose manifest states
   anything else: it was made for another version of the script. The manifest is a first check only. What protects
   the read is that each loader refuses an item whose sha256 is not the one written in the script, and that the
-  reference must be on the bins of the mock and state the mock's truth.
+  reference must be on the bins of the mock, state the mock's truth and hold the percentile levels the figures
+  draw. Every such refusal ends the script with one line that starts with "refusing:".
 - **What the stored reference holds, and nothing more:** the truth of the mock, the posterior mean and the central
   68 and 95 per cent intervals of the eleven parameters, and the percentiles 2.5, 16, 50, 84 and 97.5 of the
   posterior predictive on the 99 bins. It comes from the project's own reference chains for this mock: Cobaya's MCMC
@@ -184,6 +185,10 @@ from two files that you supply into a `P1DData`: five redshifts, 3.4 to 4.2, wit
   unchecked. A wrong order would give a wrong likelihood without any error.
 
 ## References
+
+Karacayli, N. G., Padmanabhan, N., Font-Ribera, A., et al. 2022, "Optimal 1D Ly-alpha Forest Power Spectrum
+Estimation - II. KODIAQ, SQUAD & XQ-100", [arXiv:2108.10870](https://arxiv.org/abs/2108.10870), related DOI
+10.1093/mnras/stab3201 (title and authors read from the arXiv page; the journal fields were not verified).
 
 Fernandez, M. A., Bird, S., Ho, M.-F. 2024, "Cosmological constraints from the eBOSS Lyman-alpha forest using the
 PRIYA simulations", JCAP 2024 (07) 029, [arXiv:2309.03943](https://arxiv.org/abs/2309.03943).
