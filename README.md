@@ -218,19 +218,47 @@ power spectra", JCAP 2026 (07) 094
 
 ## How the HCD catalogues are built
 
-The emulator is trained on the products of a catalogue pipeline that is part of this repository. It is research
-code: it needs the raw PRIYA sightlines, which are not distributed, and it is not needed to use the predictor.
+The emulator is trained on absorber catalogues, made by running the HCD finder of this repository on the
+`fake_spectra` sightline files of the PRIYA snapshots. Those files are not distributed, and none of this is needed
+to use the predictor.
 
-- **In:** the optical-depth (τ) sightlines of every PRIYA simulation and snapshot, produced by `fake_spectra`.
-- **Finding the absorbers:** on each sightline, connected velocity regions where τ exceeds a detection threshold are
-  located, and regions closer than a velocity gap are merged into one system (`hcd_analysis/catalog.py`).
-- **Column densities and classes:** the column density N_HI of each system is estimated (a sum-rule inversion in
-  production; a Voigt fit is the alternative), and the system is classed as LLS, subDLA or DLA by the boundaries
-  given above; a system below 10^17.2 cm⁻² is discarded as forest.
-- **Out:** the absorber catalogue of every simulation and redshift, and from it the column-density distribution
-  function and the P1D of each class of sightlines, which are what the emulator is trained on.
+```python
+from hcd_analysis.catalog import build_catalog
+from hcd_analysis.io import pixel_dv_kms, read_header
 
-The details, the commands and the checks of the catalogue are in [`docs/pipeline.md`](docs/pipeline.md).
+# One fake_spectra file: the Lyman-alpha optical depth of every sightline of one snapshot.
+spectra = "SIMULATION/output/SPECTRA_017/lya_forest_spectra_grid_480.hdf5"
+header = read_header(spectra)
+catalog = build_catalog(
+    spectra, sim_name="SIMULATION", snap=17, z=header.redshift, dv_kms=pixel_dv_kms(header),
+    # the production settings, as in config/default.yaml under "absorber:"
+    tau_threshold=100.0,  # a system is a run of pixels with tau above this
+    merge_dv_kms=100.0,   # runs closer than this, in km/s, are one system
+    min_pixels=2,         # a system has at least this many pixels
+    fast_mode=True,       # N_HI from the integral of tau over the system; False fits a Voigt profile
+    min_log_nhi=17.2,     # a system below the LLS edge is forest and is dropped
+)
+print("systems found, by class:", catalog.summary())
+catalog.save_npz("catalog.npz")
+```
+
+On a made-up file of four sightlines, two of which hold one system each (the real files are not distributed), this
+prints:
+
+```text
+systems found, by class: {'LLS': 2, 'subDLA': 0, 'DLA': 0, 'forest': 0}
+```
+
+The command line runs the same finder with the settings of the config file, and also writes the P1D of each class
+of sightlines and the CDDF:
+
+```bash
+hcd run-one --sim SIMULATION --snap 17 --config config/default.yaml   # one snapshot
+hcd run-sim --sim SIMULATION --config config/default.yaml             # every snapshot of one simulation
+```
+
+How the finder works, its settings, its products and the checks of a catalogue are in
+[`docs/pipeline.md`](docs/pipeline.md).
 
 ---
 
