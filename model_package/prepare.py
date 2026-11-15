@@ -85,16 +85,18 @@ def clean() -> None:
     clean_build()
 
 
-def release_parts(src: str) -> tuple[str, list[str]]:
-    """The release's version and the names of the two directories that release.json names."""
+def release_parts(src: str) -> tuple[str, list[str], str]:
+    """The release's version, the names of the directories that release.json names (the backbone, the MF record
+    and, if the release names one, the incidence MF record), and the release's format."""
     with open(os.path.join(src, "release.json"), encoding="utf-8") as fh:
         doc = json.load(fh)
-    return str(doc["release_version"]), [str(doc["backbone"]["dir"]), str(doc["mf"]["dir"])]
+    parts = [str(doc[p]["dir"]) for p in ("backbone", "mf", "incidence") if p in doc]
+    return str(doc["release_version"]), parts, str(doc["format"])
 
 
 def copy_release(src: str, dst: str, parts: list[str], extra: list[str]) -> list[str]:
     """Copy the release: regular files only, at most one directory level, no symlink, no hidden name; at the top
-    only release.json, the two part directories, the documentation files and the names in ``extra``. Returns the
+    only release.json, the part directories, the documentation files and the names in ``extra``. Returns the
     copied paths, relative to the release."""
     allowed = {"release.json", *parts, *DOC_FILES, *extra}
     stray = sorted(set(os.listdir(src)) - allowed)
@@ -165,6 +167,18 @@ def write_package(version: str, synthetic: bool, models: list[dict]) -> None:
         fh.write(f"__version__ = {json.dumps(version)}\n")
 
 
+def check_loaded(loaded: dict, version: str, fmt: str) -> None:
+    """Stop unless the release that was loaded back from the copy is the one whose manifest was read: the same
+    version and the same format. An explicit check, so that it also runs under ``python -O``."""
+    for key, want in (("release_version", version), ("format", fmt)):
+        got = loaded.get(key)
+        if got != want:
+            sys.exit(
+                f"prepare: the copied release loads with {key} {got!r}, not {want!r} as its manifest says: no "
+                "package entry was written"
+            )
+
+
 def add_release(
     src: str, anchor: str, name: str = "lfmf", extra: tuple[str, ...] = ()
 ) -> tuple[dict, str]:
@@ -174,7 +188,7 @@ def add_release(
         sys.exit(
             f"prepare: release.json has sha256 {got}, not the digest given ({anchor}): nothing was copied"
         )
-    version, parts = release_parts(src)
+    version, parts, fmt = release_parts(src)
     dst = os.path.join(DATA, name)
     copied = copy_release(src, dst, parts, list(extra))
     try:
@@ -186,12 +200,12 @@ def add_release(
     emu = hp.load_release(
         dst, anchor
     )  # verifies every model file; refuses a file its manifests do not list
-    assert emu.provenance["release"]["release_version"] == version
+    check_loaded(emu.provenance["release"], version, fmt)
     sums = check_sums(dst, copied)
     print(
         f"prepare: {name}: {len(copied)} files copied and verified; {emu.n_members} members; {sums}"
     )
-    entry = {"name": name, "format": "hcd_priya.release/1", "path": name, "anchor_sha256": anchor}
+    entry = {"name": name, "format": fmt, "path": name, "anchor_sha256": anchor}
     return entry, version
 
 
@@ -250,7 +264,7 @@ def main(argv=None) -> int:
             )
         else:
             src = os.path.abspath(args.release)
-            version, _parts = release_parts(src)
+            version, _parts, _fmt = release_parts(src)
             if not PUBLIC_VERSION.match(version):
                 sys.exit(
                     f"prepare: the release's version {version!r} is not a plain public version (for example "

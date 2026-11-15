@@ -11,6 +11,11 @@ The supported public interface of this release. `predict` and `predict_many` are
 `load_research_bundle` return one. The loaders, `predict`, `predict_many`, `add_hcd`, `Prediction` and the helper
 functions have examples in their docstrings, and a test runs them (`tests/test_docstring_examples.py`).
 
+The class spectra are PRIYA-filtered, with two stated omissions (`pred.labels["omissions"]`): the power of the
+subDLA cores that the filter removes and the DLA damping-wing core are not added back. How the simulations' class
+spectra compare with the per-class model of Rogers et al. (2018) once those are restored is on
+[its own page](rogers_comparison.md).
+
 ```{eval-rst}
 .. autoapimodule:: hcd_analysis.predictor
    :members:

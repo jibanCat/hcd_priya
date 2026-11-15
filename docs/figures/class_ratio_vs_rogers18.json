@@ -1,0 +1,10 @@
+{
+ "figure": "class power ratio against Rogers et al. (2018), Eq. 6",
+ "line": "hcd_analysis.hcd_template.class_ratio",
+ "model": "none: this figure needs no model",
+ "simulations": "docs/figures/data/class_ratio_ranges_z3p0_lf60.csv: ranges over the simulations, troughs restored",
+ "template_band": "c + alpha * T for alpha from 0.5 to 2: this figure's choice",
+ "template_box_km_per_s": 8000.0,
+ "template_extrapolated_below_k_s_per_km": 0.0007853981633974483,
+ "z": 3.0
+}

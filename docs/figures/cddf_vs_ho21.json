@@ -1,0 +1,80 @@
+{
+ "design_table": "docs/figures/data/priya_lf_design_60.csv, sha256 a47f23bfce73b3d765206cef5b116cf42b3705c9a0df85a5e665cda185255d42",
+ "figure": "CDDF against Ho, Bird and Garnett (2021)",
+ "incidence_hr_simulations": 5,
+ "incidence_record": true,
+ "measurement_source": "Ho, Bird and Garnett (2021), doi:10.1093/mnras/stab2169; tables of github.com/sbird/DLA_data (commit 147c616), fetched from the fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/ho21/PROVENANCE.md",
+ "panels": [
+  {
+   "design_point_flags": {
+    "ns_ridge": 3,
+    "outside_sampling_box": 12
+   },
+   "design_points": 60,
+   "design_points_flagged": 12,
+   "design_points_in_band": 60,
+   "design_points_refused": 0,
+   "measurement_bin": "2 < z < 2.5",
+   "model_bins_absent": 2,
+   "model_flags_set": [
+    "cddf_bins_without_support",
+    "incidence_heldout_error_available",
+    "incidence_mf_applied",
+    "k_downweighted",
+    "mf_applied"
+   ],
+   "model_z": 2.2
+  },
+  {
+   "design_point_flags": {
+    "ns_ridge": 3,
+    "outside_sampling_box": 12
+   },
+   "design_points": 60,
+   "design_points_flagged": 12,
+   "design_points_in_band": 60,
+   "design_points_refused": 0,
+   "measurement_bin": "2.5 < z < 3",
+   "model_bins_absent": 1,
+   "model_flags_set": [
+    "incidence_heldout_error_available",
+    "incidence_mf_applied",
+    "k_downweighted",
+    "mf_applied"
+   ],
+   "model_z": 2.8
+  },
+  {
+   "design_point_flags": {
+    "ns_ridge": 3,
+    "outside_sampling_box": 12
+   },
+   "design_points": 60,
+   "design_points_flagged": 12,
+   "design_points_in_band": 60,
+   "design_points_refused": 0,
+   "measurement_bin": "3 < z < 4",
+   "model_bins_absent": 1,
+   "model_flags_set": [
+    "incidence_heldout_error_available",
+    "incidence_mf_applied",
+    "k_downweighted",
+    "mf_applied"
+   ],
+   "model_z": 3.4
+  }
+ ],
+ "parameters": {
+  "Ap": 1.9e-09,
+  "alphaq": 2.15,
+  "bhfeedback": 0.05,
+  "heref": 2.7,
+  "herei": 4.0,
+  "hireionz": 7.25,
+  "hub": 0.7,
+  "ns": 0.925,
+  "omegamh2": 0.143
+ },
+ "release_format": "hcd_priya.release/1",
+ "synthetic_build": false
+}

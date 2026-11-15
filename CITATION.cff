@@ -69,3 +69,31 @@ references:
       - type: url
         value: "https://arxiv.org/abs/2306.05471"
         description: arXiv:2306.05471
+  - type: article
+    title: >-
+      Simulating the effect of high column density absorbers on the one-dimensional Lyman-alpha forest flux power
+      spectrum
+    authors:
+      - given-names: Keir K.
+        family-names: Rogers
+      - given-names: Simeon
+        family-names: Bird
+      - given-names: Hiranya V.
+        family-names: Peiris
+      - given-names: Andrew
+        family-names: Pontzen
+      - given-names: Andreu
+        family-names: Font-Ribera
+      - given-names: Boris
+        family-names: Leistedt
+    journal: Monthly Notices of the Royal Astronomical Society
+    year: 2018
+    volume: "474"
+    issue: "3"
+    start: "3032"
+    end: "3042"
+    doi: 10.1093/mnras/stx2942
+    identifiers:
+      - type: url
+        value: "https://arxiv.org/abs/1706.08532"
+        description: arXiv:1706.08532
