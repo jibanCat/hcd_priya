@@ -193,7 +193,7 @@ def test_absolute_hcd_fractions_replace_the_models_own(emu):
         np.testing.assert_allclose(like.model_vector(THETA), want, rtol=1e-13, atol=0)
     # 1 as an absolute fraction is "every sightline": reading 1 as "PRIYA's own" fails, loudly
     with pytest.raises(
-        E, match="sum to 3 at z = 2.6: the fractions of all sightlines cannot exceed 1"
+        E, match="sum to 3.0 at z = 2.6: the fractions of all sightlines cannot exceed 1"
     ):
         L.GaussianP1DLikelihood(emu, data, hcd_fractions={"LLS": 1, "subDLA": 1, "DLA": 1})
     for bad, why in (
@@ -810,7 +810,11 @@ def test_a_reference_is_checked_against_the_bins_of_a_data_set():
 
 # --------------------------------------------------------------------- the minus-infinity conditions, in one place
 def test_the_conditions_of_minus_infinity_are_listed_in_one_place_and_none_is_relaxable():
-    assert set(L.SAMPLER_REFUSALS) == {"PredictorInputError", "OutsideModesError"}
+    assert set(L.SAMPLER_REFUSALS) == {
+        "PredictorInputError",
+        "OutsideModesError",
+        "NonFiniteModelError",
+    }
     for kind, text in L.SAMPLER_REFUSALS.items():
         assert "Not relaxable" in text, kind
     assert "not finite" in L.SAMPLER_REFUSALS["PredictorInputError"]
@@ -857,3 +861,70 @@ def test_flags_become_refusals_only_when_asked_for_a_diagnosis(emu):
     for bad in ("mf_applied", [1], ("",)):
         with pytest.raises(E, match="refuse_flags must be a tuple of flag names"):
             L.GaussianP1DLikelihood(emu, data, refuse_flags=bad)
+
+
+# ----------------------------------------------------------------------- what the review of this round added
+def test_a_point_whose_value_is_not_a_real_number_is_the_callers_error_not_minus_infinity(emu):
+    like = L.GaussianP1DLikelihood(emu, _data(emu))
+    for bad in ("0.7", True, np.bool_(True), [0.7], np.array([0.7, 0.7])):
+        with pytest.raises(E, match=r"theta\['hub'\] must be a real number"):
+            like.sampler_logp(dict(THETA, hub=bad))
+    assert like.refusals == {}
+    # a real value that is not finite is still the predictor's refusal of the point
+    assert like.sampler_logp(dict(THETA, hub=float("inf"))) == -math.inf
+    assert like.refusals["PredictorInputError"][0] == 1
+    # numpy scalars and 0-d arrays of real numbers are real numbers
+    assert like.sampler_logp(dict(THETA, hub=np.float64(THETA["hub"]))) == like.logp(THETA)
+    assert like.sampler_logp(dict(THETA, hub=np.array(THETA["hub"]))) == like.logp(THETA)
+
+
+def test_hcd_values_of_another_shape_or_with_booleans_are_refused(emu):
+    data = _data(emu)
+    for bad, why in (
+        (
+            {"LLS": [[0.1], [0.1]], "subDLA": 0.0, "DLA": 0.0},
+            r"one number, or one per redshift of the data \(2\), got shape \(2, 1\)",
+        ),
+        ({"LLS": [True, 0.1], "subDLA": 0.0, "DLA": 0.0}, "must be numbers"),
+        ({"LLS": 0.1, "subDLA": np.bool_(False), "DLA": 0.0}, "must be numbers"),
+    ):
+        with pytest.raises(E, match=why):
+            L.GaussianP1DLikelihood(emu, data, hcd_fractions=bad)
+    # a sum above 1 by rounding is said with all its digits
+    with pytest.raises(E, match="sum to 1.0000000000000002 at z = 2.6"):
+        L.GaussianP1DLikelihood(
+            emu, data, hcd_fractions={"LLS": 0.6, "subDLA": 0.4, "DLA": 2.3e-16}
+        )
+
+
+def test_only_a_flag_that_is_true_or_false_can_be_refused(emu):
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        like = L.GaussianP1DLikelihood(
+            emu, _data(emu), refuse_flags=("params_outside_training_box",)
+        )
+    with pytest.raises(
+        E,
+        match="refuse_flags names 'params_outside_training_box', whose value is not True or False",
+    ):
+        like.sampler_logp(THETA)
+
+
+def test_a_model_that_is_not_finite_far_outside_the_trained_mean_flux_is_a_refusal(emu):
+    """Far outside the mean flux it was trained on, the predictor still serves a point (it is flagged), but its
+    spectrum can stop being finite; there is no number to compare with the data, so the point is refused.
+    """
+    zs = (3.4, 4.2)  # above the pivot z = 3, a large dtau0 drives tau_eff far up
+    pred = emu.predict_many(PARAMS, z=list(zs), tau0_amp=1.0, dtau0=0.0)
+    rows = [0.5 * (np.asarray(pred.k[i])[1:4] + np.asarray(pred.k[i])[2:5]) for i in range(2)]
+    data = L.P1DData.from_blocks(z=zs, k=rows, p1d=[np.ones(3)] * 2, cov_blocks=[np.eye(3)] * 2)
+    like = L.GaussianP1DLikelihood(emu, data)
+    assert np.isfinite(like.sampler_logp(THETA))
+    far = dict(THETA, dtau0=50.0)
+    with pytest.raises(L.NonFiniteModelError, match="the model's spectrum is not finite at z = "):
+        like.model_vector(far)
+    assert issubclass(L.NonFiniteModelError, L.LikelihoodInputError)
+    assert like.prediction(far).flags["mean_flux_off_ladder"] is True
+    assert like.sampler_logp(far) == -math.inf and like.refusals["NonFiniteModelError"][0] == 1

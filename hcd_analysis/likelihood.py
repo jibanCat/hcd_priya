@@ -27,7 +27,7 @@ recovery (``P1DReference``), each with what it does not do stated in its docstri
    of a bin, and no window or resolution function is applied here.
 4. The result is multiplied by the data set's ``model_factor`` when it has one (for example a
    resolution table that the data vector also carries). That gives the model vector m(theta).
-5. With r = m(theta) - d and N the length of d::
+5. With r = d - m(theta) and N the length of d::
 
        ln L = -1/2 r^T C^-1 r  -  1/2 ln det C  -  N/2 ln(2 pi)
 
@@ -42,12 +42,13 @@ Gaussian terms on parameters. A call takes ``theta`` only, as a mapping with exa
 names of ``param_names``.
 
 **Outside the model's domain.** The predictor refuses a point that it cannot serve (a parameter
-that is not finite, a mean flux below the tables of the multi-fidelity correction, and so on) by
-raising ``predictor.PredictorInputError``. The methods here let that error through, so that a
-refusal is never mistaken for a small likelihood. A sampler that needs a number for such a point
-catches the error and returns minus infinity; the example script shows how. The flags of a
-prediction (extrapolation, clamping, a mean flux off the trained range) are NOT turned into
-refusals: read them from ``GaussianP1DLikelihood.prediction(theta).flags``.
+that is not finite, a mean optical depth that is not positive, and so on) by raising
+``predictor.PredictorInputError``. The methods here let that error through, so that a refusal is
+never mistaken for a small likelihood. ``GaussianP1DLikelihood.sampler_logp`` is the one that
+returns minus infinity there, for a sampler, and ``SAMPLER_REFUSALS`` lists every such condition.
+The flags of a prediction (extrapolation, clamping, a mean flux off the trained range) are NOT
+refusals: read them from ``GaussianP1DLikelihood.prediction(theta).flags``; only with
+``refuse_flags``, for diagnosis, does a sampler get minus infinity where one is set.
 
 Wavenumbers are angular, in s/km, and the P1D is in km/s: the predictor's convention
 (``predictor.Prediction``).
@@ -74,6 +75,7 @@ __all__ = [
     "DiagnosisOnlyWarning",
     "GaussianP1DLikelihood",
     "LikelihoodInputError",
+    "NonFiniteModelError",
     "OutsideModesError",
     "P1DData",
     "P1DReference",
@@ -103,6 +105,10 @@ class LikelihoodInputError(ValueError):
 
 class OutsideModesError(LikelihoodInputError):
     """A data wavenumber lies outside the wavenumbers of the model at this parameter point."""
+
+
+class NonFiniteModelError(LikelihoodInputError):
+    """The model's spectrum is not finite at this parameter point (far outside the mean flux it was trained on)."""
 
 
 def _frozen(a):
@@ -495,6 +501,12 @@ SAMPLER_REFUSALS = {
         "(2 pi n / 120 Mpc/h, n = 1, 2, ...); in s/km they move with hub and omegamh2, so a data bin near either "
         "end of the modes can fall outside them at some points of the box. Not relaxable: nothing is extrapolated."
     ),
+    "NonFiniteModelError": (
+        "The model's spectrum is not finite at a redshift of the data. The predictor serves, and flags, a mean flux "
+        "outside the range it was trained on (mean_flux_off_ladder); far outside it, for example tau0_amp in the "
+        "hundreds or a dtau0 that makes tau_eff(z) overflow, the spectrum can stop being finite. Not relaxable: there "
+        "is no number to compare with the data."
+    ),
 }
 
 
@@ -522,6 +534,13 @@ def _hcd_table(name: str, given, zs) -> np.ndarray:
         )
     table = np.empty((len(zs), 3))
     for c, cls in enumerate(classes):
+        raw = np.asarray(given[cls], dtype=object)
+        if raw.ndim > 1:
+            raise LikelihoodInputError(
+                f"{name}[{cls!r}] must be one number, or one per redshift of the data ({len(zs)}), got shape {raw.shape}"
+            )
+        if any(isinstance(x, (bool, np.bool_)) for x in raw.ravel()):  # numpy would read True as 1
+            raise LikelihoodInputError(f"{name}[{cls!r}] must be numbers")
         values = _numbers(f"{name}[{cls!r}]", given[cls]).ravel()
         if values.size not in (1, len(zs)):
             raise LikelihoodInputError(
@@ -541,13 +560,13 @@ def _check_hcd_fractions(table, zs):
             a = table[i, c]
             if not 0.0 <= a <= 1.0:
                 raise LikelihoodInputError(
-                    f"hcd_fractions[{cls!r}] = {a:g} at z = {z:g} is not in [0, 1]: it is the fraction of all "
+                    f"hcd_fractions[{cls!r}] = {float(a)!r} at z = {z:g} is not in [0, 1]: it is the fraction of all "
                     "sightlines that belong to that class"
                 )
         total = float(np.sum(table[i]))
         if total > 1.0:
             raise LikelihoodInputError(
-                f"hcd_fractions sum to {total:g} at z = {z:g}: the fractions of all sightlines cannot exceed 1 (if "
+                f"hcd_fractions sum to {total!r} at z = {z:g}: the fractions of all sightlines cannot exceed 1 (if "
                 "you meant PRIYA's own fractions, give no HCD argument, or hcd_relative_to_priya with 1 for each "
                 "class)"
             )
@@ -560,7 +579,7 @@ def _check_hcd_relative(table, zs):
             r = table[i, c]
             if r < 0.0:
                 raise LikelihoodInputError(
-                    f"hcd_relative_to_priya[{cls!r}] = {r:g} at z = {z:g}: a factor on PRIYA's own fraction is "
+                    f"hcd_relative_to_priya[{cls!r}] = {float(r)!r} at z = {z:g}: a factor on PRIYA's own fraction is "
                     ">= 0 (1 = PRIYA's own, 0 = none of that class)"
                 )
 
@@ -757,6 +776,18 @@ class GaussianP1DLikelihood:
                 f"theta must have exactly the names {self.param_names} "
                 f"(missing {missing}, not known {extra})"
             )
+        for (
+            name
+        ) in (
+            self.param_names
+        ):  # a value that is not a real number is the caller's error, not the point's
+            v = theta[name]
+            if (
+                isinstance(v, (bool, np.bool_, str, bytes))
+                or np.ndim(v) != 0
+                or np.asarray(v).dtype.kind not in "iuf"
+            ):
+                raise LikelihoodInputError(f"theta[{name!r}] must be a real number, got {v!r}")
         params = {n: theta[n] for n in _hp.PARAM_NAMES}
         return params, theta["tau0_amp"], theta["dtau0"]
 
@@ -797,8 +828,9 @@ class GaussianP1DLikelihood:
         Raises
         ------
         LikelihoodInputError
-            If ``theta`` does not have exactly the eleven names, or a data wavenumber lies
-            outside the model's wavenumbers at this point.
+            If ``theta`` does not have exactly the eleven real values; a data wavenumber lies
+            outside the model's wavenumbers at this point (``OutsideModesError``); or the model's
+            spectrum is not finite there (``NonFiniteModelError``).
         predictor.PredictorInputError
             If the predictor refuses the point.
         """
@@ -814,6 +846,14 @@ class GaussianP1DLikelihood:
             amplitudes = self._hcd * pred.w_c
         # step 2, one spectrum per redshift: P_clean + sum_c A_c (P_c - P_clean), on the model's own modes
         mixed = _hp.add_hcd(pred, amplitudes)
+        for i, row in enumerate(
+            mixed
+        ):  # far outside the trained mean flux a served spectrum can stop being finite
+            if not np.all(np.isfinite(row)):
+                raise NonFiniteModelError(
+                    f"the model's spectrum is not finite at z = {self._z[i]:g} at this point (a mean flux far "
+                    "outside the range the model was trained on: see the flag mean_flux_off_ladder)"
+                )
         # step 3, that spectrum at the data's wavenumbers, redshift by redshift (linear in k: interp_to_bins)
         out = np.empty(self.data.n)
         for i, (sl, kd) in enumerate(zip(self._slices, self.data.k)):
@@ -842,7 +882,8 @@ class GaussianP1DLikelihood:
         return self._chi2_of(self.model_vector(theta))
 
     def _chi2_of(self, model):
-        # with C = L L^T: r^T C^-1 r = |L^-1 r|^2, and L^-1 r is one triangular solve (no inverse is formed)
+        # with C = L L^T: r^T C^-1 r = |L^-1 r|^2, and L^-1 r is one triangular solve (no inverse is formed); the
+        # residual is taken as model - data here, which gives the same quadratic form as data - model
         white = solve_triangular(self._chol, model - self.data.p1d, lower=True)
         return float(white @ white)
 
@@ -919,9 +960,12 @@ class GaussianP1DLikelihood:
           fractions sum to more than 1 at a redshift.
         - ``OutsideModesError``: a data wavenumber lies outside the model's modes at this point
           (they move with hub and omegamh2).
+        - ``NonFiniteModelError``: the model's spectrum is not finite at a redshift of the data
+          (a mean flux far outside the range the model was trained on).
 
         **What is NOT minus infinity:** a point outside the box the model was trained on or the
-        package's sampling box, on the n_s ridge, with a mean flux off the trained ladder, or where
+        package's sampling box, on the n_s ridge, with a mean flux off the trained ladder (unless
+        so far off that the spectrum is not finite), or where
         the multi-fidelity tables are clamped. The predictor serves such a point and sets a flag
         (``prediction(theta).flags``). The flat boxes of a chain belong to the sampler.
 
@@ -931,11 +975,12 @@ class GaussianP1DLikelihood:
         To see the effect of the multi-fidelity correction, make a second likelihood with
         ``fidelity="LF"``.
 
-        **What still raises:** a point with missing or unknown names (an error of the caller); a
+        **What still raises:** a point with missing or unknown names, or with a value that is not a
+        real number (an error of the caller); a
         fidelity the model cannot serve and a data redshift below the multi-fidelity correction
         (``predictor.MFUnavailableError``, ``predictor.MFRangeError``), which hold for every point,
         so minus infinity everywhere would hide the reason; a name in ``refuse_flags`` that is not
-        a flag of a prediction.
+        a flag of a prediction, or whose value is not True or False.
 
         Parameters
         ----------
@@ -962,7 +1007,7 @@ class GaussianP1DLikelihood:
             )
         except (_hp.MFUnavailableError, _hp.MFRangeError):
             raise  # wrong for every point (no MF record; a data redshift below the correction): not a refusal
-        except (_hp.PredictorInputError, OutsideModesError) as exc:
+        except (_hp.PredictorInputError, OutsideModesError, NonFiniteModelError) as exc:
             return self._refused(type(exc).__name__, str(exc))
 
     def _flags_set(self, pred):
@@ -973,6 +1018,13 @@ class GaussianP1DLikelihood:
                 f"refuse_flags names {unknown[0]!r}, which is not a flag of a prediction of this model "
                 f"({sorted(pred.flags)})"
             )
+        for f in self.refuse_flags:
+            v = pred.flags[f]
+            if not (isinstance(v, (bool, np.bool_)) or np.asarray(v).dtype == bool):
+                raise LikelihoodInputError(
+                    f"refuse_flags names {f!r}, whose value is not True or False but {type(v).__name__}: only a flag "
+                    "that is True or False (one value, or one per redshift) can be refused"
+                )
         return [f for f in self.refuse_flags if np.any(pred.flags[f])]
 
     def _refused(self, kind, message):
@@ -1612,11 +1664,12 @@ def load_xq100(
     if type(cross_redshift) is not bool:
         raise LikelihoodInputError("cross_redshift must be True or False: state the choice")
     pins = _xq100_pins(expected_sha256)
-    # 2. the two files, each read only if its bytes have the pinned sha256
+    # 2. the two files, each read only if its bytes have the pinned sha256, and each checked as it is read
     data_text, data_sha = _read_pinned(data_file, pins["data"], "XQ-100 data file")
+    k_rows, p_rows = _xq100_data_table(data_text, data_file)  # k and paa of the five redshifts
     cov_text, cov_sha = _read_pinned(covariance_file, pins["covariance"], "XQ-100 covariance file")
-    # 3. their contents: k and paa of the five redshifts, and the 65 x 65 matrix (every layout check is in here)
-    k_rows, p_rows, cov = _xq100_tables(data_text, cov_text, data_file, covariance_file)
+    # 3. the 65 x 65 matrix (every layout check of the two files is in these two functions)
+    cov = _xq100_covariance_matrix(cov_text, covariance_file)
     # 4. the covariance between redshifts, as you chose
     if not cross_redshift:
         cov = _diagonal_blocks(cov, XQ100_NK)
@@ -1666,25 +1719,18 @@ def _xq100_pins(expected_sha256):
     return dict(expected_sha256)
 
 
-def _xq100_tables(data_text, cov_text, data_file, covariance_file):
-    """Parse the two XQ-100 files and check their layout. Returns (k_rows, p_rows, cov).
+def _xq100_data_table(data_text, data_file):
+    """Parse the XQ-100 data table and check its layout. Returns (k_rows, p_rows), one row per redshift.
 
-    The files hold numbers only, with no names on the covariance; a file of another layout would be read without
-    any error but mean something else. So every assumption the loader makes is checked here:
+    The file holds numbers under a header; a file of another layout would be read without any error but mean
+    something else. So every assumption is checked:
 
-    - The data table's header is exactly ``XQ100_HEADER``, and every row has its ten columns: the columns are then
-      the quantities the loader assumes, and no short row shifts them.
+    - The header is exactly ``XQ100_HEADER``, and every row has its ten columns: the columns are then the quantities
+      the loader assumes, and no short row shifts them.
     - k, paa and z of every row are finite numbers (the other seven columns are not read and may be empty).
     - Each of the five redshifts 3.4 to 4.2 has exactly 13 rows, consecutive, with k ascending, and the five come in
       ascending order: the order that the covariance file is assumed to follow (redshift, then wavenumber).
-    - The covariance file has 65 x 65 lines ``i j value``; each index lies in 0..64; each element is given once and
-      is a number; no element is missing. Together these make the file a complete matrix with no element
-      overwritten.
-
-    The order of the covariance file itself (index 0 to 64 = redshift 3.4 to 4.2, then wavenumber) cannot be
-    checked from the files: it is stated as NOT VERIFIED in ``load_xq100``.
     """
-    # the data table
     lines = data_text.splitlines()
     if not lines or lines[0].strip() != XQ100_HEADER:
         raise LikelihoodInputError(f"{data_file}: the header is not {XQ100_HEADER!r}")
@@ -1712,7 +1758,19 @@ def _xq100_tables(data_text, cov_text, data_file, covariance_file):
         firsts.append(int(at[0]))
     if firsts != sorted(firsts):
         raise LikelihoodInputError(f"{data_file}: the redshifts are not in ascending order")
-    # the covariance matrix
+    return k_rows, p_rows
+
+
+def _xq100_covariance_matrix(cov_text, covariance_file):
+    """Parse the XQ-100 covariance file and check its layout. Returns the 65 x 65 matrix.
+
+    The file holds lines ``i j value`` with no names; so every assumption is checked: there are 65 x 65 lines of
+    three fields; each index lies in 0..64; each element is given once and is a number; no element is missing.
+    Together these make the file a complete matrix with no element overwritten.
+
+    What cannot be checked from the files is the order of the indices (0 to 64 = redshift 3.4 to 4.2, then
+    wavenumber): it is stated as NOT VERIFIED in ``load_xq100``.
+    """
     n = XQ100_NK * len(XQ100_Z)
     cov = np.full((n, n), np.nan)  # NaN marks an element not given yet
     rows = [ln.split() for ln in cov_text.splitlines() if ln.strip()]
@@ -1737,7 +1795,7 @@ def _xq100_tables(data_text, cov_text, data_file, covariance_file):
         raise LikelihoodInputError(
             f"{covariance_file}: not every element of the {n} x {n} matrix is given"
         )
-    return k_rows, p_rows, cov
+    return cov
 
 
 def _diagonal_blocks(cov, m):

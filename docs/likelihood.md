@@ -78,7 +78,7 @@ over the corners of `hub` and `omegamh2`), and they reach 0.068 to 0.095 s/km. T
 | Data set | Bins | Spacing of the bins | Modes per bin |
 |---|---|---|---|
 | eBOSS DR14 (Chabanier et al. 2019) | 35 per redshift, 0.00108 to 0.0195 s/km | 0.000542 s/km, uniform | about 1 |
-| KODIAQ-SQUAD (Karacayli et al. 2022) | 0.0011, then steps of 0.1 in log10 k, to 0.40 s/km | 0.0022 to 0.081 s/km | about 4 at the lowest k, many more above |
+| KODIAQ-SQUAD (Karacayli et al. 2022) | 21 per redshift: 0.0011 to 0.0077 s/km in steps of 0.0022, then steps of 0.1 in log10 k to 0.40 s/km | 0.0022 to 0.081 s/km | about 4 at the lowest k, many more above |
 | XQ-100 (`load_xq100`) | 13 per redshift, 0.00316 to 0.0631 s/km | 0.108 in log10 k (0.0009 to 0.014 s/km) | about 2 at the lowest k, many more above |
 
 Where the data bins are a few modes apart or more, the model is a smooth function sampled finely, and the line
@@ -91,18 +91,20 @@ average over the bin can differ, and this rule takes the value at the centre.
   over a wide bin, a point value of the model at the bin centre is not the same thing where the spectrum curves.
   Give the data's own window as `model_factor` only if it is a multiplicative factor; a true bin average is not
   computed here.
-- **The lowest wavenumbers.** Below about 0.003 s/km a data bin holds only a few modes, and the first mode is about
-  0.0004 to 0.0006 s/km: a data bin below it is refused at every point.
+- **The lowest wavenumbers.** Below about 0.003 s/km a data bin holds only a few modes. The first mode lies between
+  about 0.0004 and 0.0006 s/km, depending on the point: a data bin below about 0.0004 s/km is refused at every
+  point, and one between 0.0004 and 0.0006 s/km at some points.
 - **Data beyond the modes.** A data wavenumber below the first or above the last mode at a point is refused
   (`OutsideModesError`), never extrapolated. The modes move with `hub` and `omegamh2`, so a bin near an end can be
   inside the modes at one point and outside at another: `sampler_logp` returns minus infinity there. Keep the data
   well inside the modes over the whole box (the KODIAQ-SQUAD bins above about 0.07 s/km are outside them at some
   points of the box).
-- **Features finer than the mode spacing.** The model is known at its modes only. A feature narrower than about two
-  mode spacings is not resolved by interpolating the model, and a feature of the data that the model does not have
-  (for example the oscillation of the SiIII-Lyman-alpha cross term, period 2 pi / 2271 km/s = 0.0028 s/km, about
-  five to seven mode spacings) is not created by it: such a term must be part of the model or of the data's
-  treatment, not of this rule.
+- **Features finer than the mode spacing.** The model is known at its modes only: a feature narrower than about two
+  mode spacings is not resolved by interpolating it.
+- **Features the model does not have.** Interpolating never creates a feature that is not in the model. For example
+  the oscillation of the SiIII-Lyman-alpha cross term (period 2 pi / 2271 km/s = 0.0028 s/km, five to seven mode
+  spacings, so the modes would resolve it) is not in the class spectra: such a term must be part of the model or of
+  the data's treatment, not of this rule.
 
 ## The HCD content: three ways, each explicit
 
@@ -115,7 +117,9 @@ average over the bin can differ, and this rule takes the value at the centre.
 Each argument is a mapping that names the three classes, so a value cannot land on the wrong class; a value is one
 number, or one per redshift of the data. Give at most one of the two. A list, an unknown or missing class, a value
 out of its range, or both arguments are refused when the likelihood is made. Writing 1 for each class in
-`hcd_fractions` (where 1 means "every sightline") is refused because the fractions would sum to 3. With
+`hcd_fractions` (where 1 means "every sightline") is refused because the fractions would sum to 3. Not every
+mistake can be caught: small values meant as absolute fractions but given to `hcd_relative_to_priya` (for example
+0.02) are valid factors and are accepted, as is a single class at an absolute fraction of 1. With
 `hcd_relative_to_priya` the scaled fractions can sum to more than 1 at some point; the predictor refuses that point
 (minus infinity in a sampler).
 
@@ -133,16 +137,20 @@ out of its range, or both arguments are refused when the likelihood is made. Wri
 ## When a sampler gets minus infinity
 
 `sampler_logp(theta)` returns `logp(theta)` or minus infinity, and counts every minus infinity in `refusals` by kind,
-with its first message. At the defaults it returns minus infinity in exactly the cases listed in `SAMPLER_REFUSALS`,
-each a refusal for correctness (no number exists there):
+with its first message. At the defaults, for a point whose eleven values are real numbers, it returns minus infinity
+in exactly the cases listed in `SAMPLER_REFUSALS`, each a refusal for correctness (no number exists there):
 
 - the predictor refuses the point (`PredictorInputError`): a parameter is not finite; or `tau_eff(z)` is not
   positive at a redshift of the data (`tau0_amp <= 0`); or, with `hcd_relative_to_priya`, the scaled fractions sum
   to more than 1;
-- a data wavenumber lies outside the model's modes at the point (`OutsideModesError`).
+- a data wavenumber lies outside the model's modes at the point (`OutsideModesError`);
+- the model's spectrum is not finite at a redshift of the data (`NonFiniteModelError`): the predictor serves, and
+  flags, a mean flux outside the range it was trained on, and far outside it (for example `tau0_amp` in the hundreds,
+  or a `dtau0` that makes `tau_eff(z)` overflow) the spectrum can stop being finite.
 
 **Not minus infinity:** a point outside the box the model was trained on or the package's sampling box, on the n_s
-ridge, with a mean flux off the trained ladder, or where the tables of the multi-fidelity correction are clamped. The
+ridge, with a mean flux off the trained ladder (unless so far off that the spectrum is not finite), or where the
+tables of the multi-fidelity correction are clamped. The
 predictor serves such a point and sets a flag (`like.prediction(theta).flags`). At the defaults there is therefore
 nothing to relax. To study these edges:
 
@@ -153,9 +161,11 @@ nothing to relax. To study these edges:
 - The flat boxes of the example (`BOXES`) can be widened: the predictor flags, and does not refuse, points outside
   them.
 
-**Still raised, not minus infinity:** a point with missing or unknown names; a fidelity the model cannot serve and a
+**Still raised, not minus infinity:** a point with missing or unknown names, or with a value that is not a real
+number (text, True or False, a list); a fidelity the model cannot serve and a
 data redshift below the multi-fidelity correction (`MFUnavailableError`, `MFRangeError`), which hold for every point,
-so minus infinity everywhere would hide the reason; a name in `refuse_flags` that is not a flag of a prediction.
+so minus infinity everywhere would hide the reason; a name in `refuse_flags` that is not a flag of a prediction,
+or whose value is not True or False.
 
 ## A data set
 
