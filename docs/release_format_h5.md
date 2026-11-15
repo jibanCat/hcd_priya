@@ -474,8 +474,10 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   simulations than the record uses unless that is said to be intended, and it refuses to run unless the held-out
   error is stated one way or the other (`--no-heldout-error`). The block is inside the record's bytes, so the
   record's digest covers it.
-- **On a prediction:** `dndx_err` (3,) and `cddf_err` (Nbin,) are the held-out rms of the fractional error of `dndx`
-  and `cddf`, for the fidelity of the prediction: the `lf` tables for an LF prediction, the `lfmf` tables for an
+- **On a prediction:** `dndx_err` (3,) and `cddf_err` (Nbin,) are the held-out rms of ln(prediction / truth) of `dndx`
+  and `cddf`: numbers on the logarithm. On the quantity itself the held-out range is the value times exp(-err) to the
+  value times exp(+err), each bound transformed on its own, so the range is asymmetric about the value. They are given
+  for the fidelity of the prediction: the `lf` tables for an LF prediction, the `lfmf` tables for an
   LF+MF one. It is an indication of size from a handful of held-out simulations, not the standard deviation of a
   known distribution; `labels["incidence_mf_error"]` gives the record's definition word for word, and
   `provenance["incidence_mf"]["heldout_error"]` its texts, redshifts, the counts behind the dN/dX tables,
@@ -487,7 +489,9 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   `dndx` or `cddf` value without a held-out error emits `HeldOutErrorWarning`, once per process for each record (not
   once per call). With an estimate beside every corrected value nothing is warned.
 - **The w_c map at the corrected incidence.** The map from dN/dX to the class fractions is a Poisson model with a
-  small term per class fitted on LF counts, and it is applied unchanged to the corrected dN/dX.
+  small term per class fitted on LF counts, and it is applied unchanged to the corrected dN/dX. It has no range
+  check on dN/dX: nothing flags a corrected dN/dX outside the counts that term was fitted on. `w_c` has no held-out
+  error of its own: it inherits the error of the corrected dN/dX (`dndx_err`) and the map's own error.
   Tested on the training simulations. Evaluated as the predictor evaluates it, at each high-resolution run's
   own dN/dX, the shipped map returns that run's counted class fractions with an rms relative error of 0.5 to 0.6 per
   cent for LLS, subDLA and DLA at z 2.2 to 4.6 (largest 1.3 per cent), the same as for the low-resolution runs (0.5

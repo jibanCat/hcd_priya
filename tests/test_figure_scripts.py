@@ -377,19 +377,57 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
 
     monkeypatch.setattr(Axes, "errorbar", errorbar)
     assert dndx.main(_args(with_error) + ["--no-band", "--out", out2]) == 0
-    # the bars themselves: per class, at the redshifts with an estimate, the fractional error times the model
-    # value. The synthetic LF+MF table of the block, in the column order LLS, subDLA, DLA:
+    # the bars themselves: per class, at the redshifts with an estimate, the held-out range of the model value v,
+    # from v * exp(-e) to v * exp(+e) with e the held-out rms of ln(prediction / truth), each bound on its own.
+    # The synthetic LF+MF table of the block, in the column order LLS, subDLA, DLA:
     table = SR.heldout_error()["dndx"]["lfmf"]
     bars = [d for d in drawn if d[3] == "none"]
     assert len(bars) == len(dndx.CLASSES) == 3
     for (x, y, yerr, _), (name, column, _, _) in zip(bars, dndx.CLASSES):
         want = {z: row[column] for z, row in zip((3.0, 5.0), table) if row[column] is not None}
         assert list(x) == sorted(want), name  # no bar at 2.6, and none where the cell is null
-        np.testing.assert_allclose(np.asarray(yerr) / y, [want[z] for z in x], rtol=1e-12, atol=0)
-        assert np.all(y > 0)
+        e = np.array([want[z] for z in x])
+        below, above = np.asarray(yerr)  # the bar's extent under and over the line
+        np.testing.assert_allclose(y - below, y * np.exp(-e), rtol=1e-12, atol=0)
+        np.testing.assert_allclose(y + above, y * np.exp(e), rtol=1e-12, atol=0)
+        assert np.all(above > below) and np.all(y > 0)  # asymmetric: exp(+e) - 1 > 1 - exp(-e)
     assert _facts(out2)["heldout_error"].startswith(
-        "drawn on the model lines: pred.dndx_err times pred.dndx"
+        "drawn on the model lines (LF+MF): the range pred.dndx * exp(-pred.dndx_err) to pred.dndx * exp(+pred.dndx_err)"
     )
+
+
+# the PI's rule (2026-11-15): a held-out error is stated on the quantity, never propagated from the logarithm by an
+# approximation, and its range is never called symmetric
+FORBIDDEN = r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|1 ?sigma|gaussian"
+
+
+def test_no_public_text_on_the_held_out_error_uses_an_approximation_or_calls_it_symmetric():
+    import re
+
+    held_out = re.compile(r"dndx_err|cddf_err|held-out (error|range|rms)", re.I)
+    files = (
+        "README.md",
+        "CHANGELOG.md",
+        "docs/release_format_h5.md",
+        "docs/model_figures.md",
+        "docs/models_and_data.md",
+        "scripts/figures/fig_dndx_vs_ho21.py",
+        "hcd_analysis/predictor.py",
+        "hcd_analysis/emulator/incidence_mf.py",
+    )
+    checked = 0
+    for name in files:
+        text = open(os.path.join(REPO, name), encoding="utf-8").read()
+        for paragraph in re.split(r"\n\s*\n", text):
+            if held_out.search(paragraph):
+                checked += 1
+                hit = re.search(FORBIDDEN, paragraph, re.I)
+                assert hit is None, (name, hit and hit.group(0), paragraph[:300])
+    assert checked >= len(files)
+    # and the figure computes its bars from the two bounds, never as the error times the value
+    src = open(os.path.join(REPO, "scripts/figures/fig_dndx_vs_ho21.py"), encoding="utf-8").read()
+    assert not re.search(r"dndx_err[^\n]*\*\s*[\w.]*dndx\b|dndx\[[^\n]*\*\s*[\w.]*dndx_err", src)
+    assert "np.exp(-log_err[ok])" in src and "np.exp(log_err[ok])" in src
 
 
 def test_the_dndx_figure_refuses_a_model_without_an_incidence_record(tmp_path):

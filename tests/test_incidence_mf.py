@@ -552,6 +552,9 @@ def test_labels_and_provenance_say_what_was_applied(rel):
     p = two.predict(PARAMS, 3.0, tau_eff=0.4)
     assert "multiplied by the incidence MF factor" in p.labels["dndx"]
     assert "before the map" in p.labels["w_c"] and "fitted on LF counts" in p.labels["w_c"]
+    assert (
+        "no held-out error of its own" in p.labels["w_c"]
+    )  # it inherits that of the corrected dN/dX
     assert "w_c stays the LF backbone's" not in p.labels["mf"] and "incidence MF" in p.labels["mf"]
     # no held-out error is shipped; the text that says how one is computed comes with the prediction
     # and it says how many HR simulations this record lists (the synthetic record lists two)
@@ -980,6 +983,8 @@ def test_a_prediction_carries_the_held_out_error_of_its_fidelity(rel_err):
         "A synthetic definition of the synthetic numbers.",
         "rms_log_error_heldout",
         "2 in number",
+        "the held-out range of a value v is v * exp(-err) to v * exp(+err)",
+        "the range is asymmetric about v",
     ):
         assert text in label
     assert "No held-out error" not in label
@@ -1249,3 +1254,27 @@ def test_a_record_that_trains_on_the_other_spelling_of_a_held_out_run_is_refused
     with pytest.raises(E, match="does not state that it excludes"):
         rp._attach_incidence(IM.load_record(tmp_path / "other", expected_record_sha256=other))
     assert rp._inc is None  # nothing was attached by either
+
+
+def test_the_two_error_fields_are_described_on_the_quantity_without_an_approximation():
+    """The PI's rule (2026-11-15): the docstrings of dndx_err and cddf_err, and the module's paragraph on the held-out
+    error, state the range on the quantity (the bounds transformed separately) and never an approximation from the
+    logarithm, and never call the range symmetric."""
+    import re
+
+    forbidden = r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|1 ?sigma|gaussian"
+    doc = hp.Prediction.__doc__
+    fields = {}
+    for name, nxt in (("dndx_err", "cddf_err"), ("cddf_err", "member_std")):
+        a = doc.index(f"    {name} : ")
+        fields[name] = doc[a : doc.index(f"    {nxt} : ", a)]
+    paragraph = hp.__doc__[hp.__doc__.index("**The held-out error.**") :]
+    paragraph = paragraph[: paragraph.index("\n\n")]
+    for where, text in dict(fields, module=paragraph).items():
+        hit = re.search(forbidden, text, re.I)
+        assert hit is None, (where, hit and hit.group(0))
+    flat = {k: " ".join(v.split()) for k, v in dict(fields, module=paragraph).items()}
+    assert "dndx * exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``" in flat["dndx_err"]
+    assert "cddf * exp(-cddf_err)`` to ``cddf * exp(+cddf_err)``" in flat["cddf_err"]
+    assert "asymmetric" in flat["dndx_err"] and "asymmetric" in flat["module"]
+    assert "exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``" in flat["module"]

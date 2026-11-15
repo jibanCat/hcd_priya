@@ -46,7 +46,8 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
 - **Snapshots against bins.** The model is drawn at snapshot redshifts 0.2 apart; the measurement is in bins one
   sixth of a unit wide. The two measured points above z = 4.6 have no model curve beside them, and neither has
   the one below 2.2.
-- **Model (bars on the lines):** the held-out error of the corrected dN/dX, `pred.dndx_err` times `pred.dndx`: at
+- **Model (bars on the lines):** the held-out range of the corrected dN/dX, from `pred.dndx * exp(-pred.dndx_err)` to
+  `pred.dndx * exp(+pred.dndx_err)`, each bound computed on its own, so the bars are asymmetric. `pred.dndx_err` is, at
   each snapshot, the rms over five held-out high-resolution simulations of the logarithm of prediction over truth.
   It includes the bias. With five values it is an indication of size, not the standard deviation of a known
   distribution; `labels["incidence_mf_error"]` on a prediction says what it does not cover. It is not the same
