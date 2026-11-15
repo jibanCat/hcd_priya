@@ -55,6 +55,7 @@ import hashlib
 import json
 import math
 import os
+import warnings
 from collections.abc import Mapping, Sequence
 
 import numpy as np
@@ -65,11 +66,13 @@ from . import predictor as _hp
 from .emulator import safe_io as _S
 
 __all__ = [
+    "DiagnosisOnlyWarning",
     "GaussianP1DLikelihood",
     "LikelihoodInputError",
     "OutsideModesError",
     "P1DData",
     "P1DReference",
+    "SAMPLER_REFUSALS",
     "interp_to_bins",
     "load_xq100",
     "read_p1d_data",
@@ -332,11 +335,20 @@ class P1DData:
         )
 
 
+# ---------------------------------------------------------------- from the model's modes to the data's wavenumbers
 def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) -> np.ndarray:
-    """Bring a model spectrum to the wavenumbers of data bins, by linear interpolation in k.
+    """Bring a model spectrum to the wavenumbers of data bins: linear interpolation in k.
 
-    The result is the value of the model at each ``k_data``, read off the straight line between
-    the two neighbouring model wavenumbers. It is not an average over a bin.
+    **The algorithm.** For each data wavenumber k, take the two neighbouring model wavenumbers
+    k_j <= k <= k_(j+1) and read the value off the straight line between them::
+
+        P(k) = P_j + (P_(j+1) - P_j) * (k - k_j) / (k_(j+1) - k_j)
+
+    That is all. It is the value of the model AT k: not an average over the width of a data bin,
+    not a re-binning, and nothing in it is fitted or tuned. A data wavenumber outside
+    [k_model[0], k_model[-1]] is refused, never extrapolated. ``docs/likelihood.md`` says when this
+    rule is accurate (the model's modes are close together compared with the data bins) and when it
+    is not.
 
     Parameters
     ----------
@@ -355,8 +367,10 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
     Raises
     ------
     OutsideModesError
-        If a data wavenumber lies outside the model's wavenumbers: nothing is extrapolated. It is a
-        ``LikelihoodInputError``.
+        If a data wavenumber lies outside the model's wavenumbers. It is a ``LikelihoodInputError``.
+    LikelihoodInputError
+        If an input is not a finite vector, ``k_model`` is not strictly ascending, or the shapes
+        do not fit.
 
     Examples
     --------
@@ -365,6 +379,16 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
     >>> print("halfway between the model's points:", out.tolist())
     halfway between the model's points: [15.0, 30.0]
     """
+    k_model, p_model, k_data = _interp_inputs(k_model, p_model, k_data)
+    _refuse_outside_modes(k_model, k_data)
+    # numpy.interp evaluates exactly the straight line of the docstring between each pair of neighbouring modes
+    return np.interp(k_data, k_model, p_model)
+
+
+def _interp_inputs(k_model, p_model, k_data):
+    """The three inputs of ``interp_to_bins`` as finite float vectors, after the checks that make the line defined:
+    at least two model wavenumbers, strictly ascending (so that every interval has a width), one model value per
+    model wavenumber, and at least one data wavenumber."""
     km = _vector("k_model", k_model)
     pm = _vector("p_model", p_model, km.size)
     kd = _vector("k_data", k_data)
@@ -372,19 +396,119 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
         raise LikelihoodInputError("k_data must hold at least one wavenumber")
     if km.size < 2 or np.any(np.diff(km) <= 0):
         raise LikelihoodInputError("k_model must be strictly ascending, with at least two points")
-    if kd.min() < km[0] or kd.max() > km[-1]:
+    return km, pm, kd
+
+
+def _refuse_outside_modes(k_model, k_data):
+    """Refuse a data wavenumber below the first or above the last model wavenumber: there the model has no value,
+    and extrapolating a line would invent one."""
+    if k_data.min() < k_model[0] or k_data.max() > k_model[-1]:
         raise OutsideModesError(
-            f"a data wavenumber lies outside the model's wavenumbers [{km[0]:.6g}, {km[-1]:.6g}] "
-            f"(data from {kd.min():.6g} to {kd.max():.6g}): nothing is extrapolated"
+            f"a data wavenumber lies outside the model's wavenumbers [{k_model[0]:.6g}, {k_model[-1]:.6g}] "
+            f"(data from {k_data.min():.6g} to {k_data.max():.6g}): nothing is extrapolated"
         )
-    return np.interp(kd, km, pm)
 
 
+# --------------------------------------------------------------------------- when a sampler gets minus infinity
+# Every condition under which ``GaussianP1DLikelihood.sampler_logp`` returns minus infinity at the defaults, by the
+# kind of the error that ``refusals`` counts. Each is a refusal for correctness: there is no number to return.
+SAMPLER_REFUSALS = {
+    "PredictorInputError": (
+        "The predictor refuses the point: a parameter is not finite (NaN or infinite); or the mean optical depth "
+        "tau_eff(z) = tau0_amp ((1 + z) / (1 + z_pivot))**dtau0 tau_Kim(z) is not positive at a redshift of the "
+        "data (tau0_amp <= 0); or, with hcd_relative_to_priya, the scaled class fractions sum to more than 1 at a "
+        "redshift. Not relaxable: there is no prediction at such a point."
+    ),
+    "OutsideModesError": (
+        "A wavenumber of the data lies outside the model's modes at the point. The modes are fixed in h/Mpc "
+        "(2 pi n / 120 Mpc/h, n = 1, 2, ...); in s/km they move with hub and omegamh2, so a data bin near either "
+        "end of the modes can fall outside them at some points of the box. Not relaxable: nothing is extrapolated."
+    ),
+}
+
+
+class DiagnosisOnlyWarning(UserWarning):
+    """A likelihood was made with a switch that changes the posterior, for diagnosis only (``refuse_flags``)."""
+
+
+def _hcd_table(name: str, given, zs) -> np.ndarray:
+    """The HCD values of ``hcd_fractions`` or ``hcd_relative_to_priya`` as an array of shape (n_z, 3), one row per
+    redshift of the data in the class order LLS, subDLA, DLA.
+
+    ``given`` must be a mapping that names exactly the three classes, so that no value can land on the wrong class
+    by its position. Each value is one number (used at every redshift) or one number per redshift of the data.
+    """
+    classes = _hp.HCD_CLASSES
+    if not isinstance(given, Mapping):
+        raise LikelihoodInputError(
+            f"{name} must be a mapping of the three classes, {{'LLS': ..., 'subDLA': ..., 'DLA': ...}}: a list or "
+            "an array has no class names, so its order could be anything"
+        )
+    if set(given) != set(classes):
+        raise LikelihoodInputError(
+            f"{name} must name exactly the classes {classes} (missing {sorted(set(classes) - set(given))}, "
+            f"unknown {sorted(set(given) - set(classes), key=str)})"
+        )
+    table = np.empty((len(zs), 3))
+    for c, cls in enumerate(classes):
+        values = _numbers(f"{name}[{cls!r}]", given[cls]).ravel()
+        if values.size not in (1, len(zs)):
+            raise LikelihoodInputError(
+                f"{name}[{cls!r}] must be one number, or one per redshift of the data ({len(zs)}), got {values.size}"
+            )
+        if not np.all(np.isfinite(values)):
+            raise LikelihoodInputError(f"{name}[{cls!r}] must be finite")
+        table[:, c] = values  # one number is used at every redshift
+    return table
+
+
+def _check_hcd_fractions(table, zs):
+    """Absolute sightline fractions: each in [0, 1], and at each redshift their sum at most 1 (the rest of the
+    sightlines is the clean forest)."""
+    for i, z in enumerate(zs):
+        for c, cls in enumerate(_hp.HCD_CLASSES):
+            a = table[i, c]
+            if not 0.0 <= a <= 1.0:
+                raise LikelihoodInputError(
+                    f"hcd_fractions[{cls!r}] = {a:g} at z = {z:g} is not in [0, 1]: it is the fraction of all "
+                    "sightlines that belong to that class"
+                )
+        total = float(np.sum(table[i]))
+        if total > 1.0:
+            raise LikelihoodInputError(
+                f"hcd_fractions sum to {total:g} at z = {z:g}: the fractions of all sightlines cannot exceed 1 (if "
+                "you meant PRIYA's own fractions, give no HCD argument, or hcd_relative_to_priya with 1 for each "
+                "class)"
+            )
+
+
+def _check_hcd_relative(table, zs):
+    """Factors on PRIYA's own fractions: each at least 0 (1 is PRIYA's own, 0 is no sightline of that class)."""
+    for i, z in enumerate(zs):
+        for c, cls in enumerate(_hp.HCD_CLASSES):
+            r = table[i, c]
+            if r < 0.0:
+                raise LikelihoodInputError(
+                    f"hcd_relative_to_priya[{cls!r}] = {r:g} at z = {z:g}: a factor on PRIYA's own fraction is "
+                    ">= 0 (1 = PRIYA's own, 0 = none of that class)"
+                )
+
+
+# ------------------------------------------------------------------------------------------- the likelihood
 class GaussianP1DLikelihood:
-    """The Gaussian likelihood of a ``P1DData`` under a loaded model.
+    """The Gaussian DATA likelihood of a ``P1DData`` under a loaded model: C is the data set's covariance only.
 
-    The module docstring gives the mathematics. Everything except the parameter point is fixed
-    here, when the object is made.
+    No emulator error is added to the covariance: this is a likelihood of the data given the model,
+    with the model treated as exact, not a likelihood of "data + emulator". A posterior from it is
+    narrower than one that accounts for the error of the emulator. ``docs/likelihood.md`` gives the
+    mathematics step by step; in short, at a point theta::
+
+        m(theta) = F * interp_k( P_clean + sum_c A_c (P_c - P_clean) )      (the model vector)
+        ln L     = -1/2 r^T C^-1 r - 1/2 ln det C - N/2 ln(2 pi),  r = d - m(theta)
+
+    with the mean flux from PRIYA's two-parameter model, A_c the class fractions (see the HCD
+    arguments), F the data set's ``model_factor`` and C the symmetric part of the data covariance.
+    Everything except the parameter point is fixed when the object is made.
 
     Parameters
     ----------
@@ -396,14 +520,26 @@ class GaussianP1DLikelihood:
     fidelity : {None, "LF", "LF+MF"}, optional
         Passed to the predictor. None (the default) is the predictor's default: "LF+MF" when the
         model has a multi-fidelity record, "LF" otherwise.
-    hcd : "model_fractions" or array_like, optional
-        How the class spectra are mixed. "model_fractions" (the default) uses the model's own
-        class fractions at each point, ``A = pred.w_c``: the HCD content then follows the nine
-        parameters and is not a free parameter. An array of shape (3,) or (n_z, 3) fixes the
-        amplitudes [A_LLS, A_subDLA, A_DLA] instead (``predictor.add_hcd``).
+    hcd_fractions : dict, optional
+        ABSOLUTE class fractions: ``{"LLS": a, "subDLA": b, "DLA": c}``, each the fraction of all
+        sightlines in that class, in [0, 1], with a sum of at most 1 at each redshift. 0 means no
+        sightline of that class; 1 would mean every sightline. A value is one number or one number
+        per redshift of the data. The HCD content is then fixed, the same at every point.
+    hcd_relative_to_priya : dict, optional
+        Class fractions RELATIVE to PRIYA's own at the point: ``{"LLS": r1, "subDLA": r2, "DLA":
+        r3}``, and A_c = r_c times the model's own fraction ``pred.w_c`` of class c. 1 means
+        PRIYA's own fraction, 0 means no sightline of that class, 2 twice PRIYA's own; each is at
+        least 0. A value is one number or one number per redshift of the data. Give at most one of
+        the two HCD arguments. With neither (the default), the model's own fractions are used,
+        ``A = pred.w_c``: the HCD content follows the nine parameters and is not a free parameter.
     gaussian_terms : dict, optional
         Gaussian terms on parameters, ``{name: (mean, standard deviation)}``, each name one of
         ``param_names``. They are added by ``logp``; ``loglike`` does not include them.
+    refuse_flags : tuple of str, optional
+        For diagnosis only: names of prediction flags (``Prediction.flags``, for example
+        "outside_sampling_box" or "mf_tau0_clamped") at which ``sampler_logp`` returns minus
+        infinity. The default, an empty tuple, refuses nothing beyond ``SAMPLER_REFUSALS``. A
+        non-empty tuple changes the posterior and emits ``DiagnosisOnlyWarning``.
 
     Attributes
     ----------
@@ -411,23 +547,27 @@ class GaussianP1DLikelihood:
         The eleven names a point must have: the nine PRIYA parameters
         (``predictor.PARAM_NAMES``), then "tau0_amp" and "dtau0".
     data : P1DData
+    hcd_mode : str
+        "priya" (the model's own fractions, the default), "fractions" or "relative_to_priya".
     logdet : float
         ln det C.
+    refuse_flags : tuple of str
     refusals : dict
         Filled by ``sampler_logp``: ``{kind of refusal: [count, the first message of that kind]}``.
 
     Raises
     ------
     LikelihoodInputError
-        If ``data`` is not a ``P1DData``, an option has a value that is not listed above, or a
-        Gaussian term names an unknown parameter or has a standard deviation that is not positive.
+        If ``data`` is not a ``P1DData``; an option has a value that is not listed above; both HCD
+        arguments are given, or one of them is not a mapping of the three classes with values in
+        its range; or a Gaussian term names an unknown parameter or has a standard deviation that
+        is not positive.
     predictor.PredictorInputError
-        If a redshift of the data is not a snapshot redshift, or fixed amplitudes are not valid.
+        If a redshift of the data is not a snapshot redshift.
 
     Notes
     -----
-    No flat prior and no parameter box is applied here: those belong to the sampler. The
-    covariance is the data set's, with no emulator error added.
+    No flat prior and no parameter box is applied here: those belong to the sampler.
 
     Examples
     --------
@@ -461,8 +601,10 @@ class GaussianP1DLikelihood:
         data: P1DData,
         *,
         fidelity: str | None = None,
-        hcd: str | ArrayLike = "model_fractions",
+        hcd_fractions: Mapping[str, ArrayLike] | None = None,
+        hcd_relative_to_priya: Mapping[str, ArrayLike] | None = None,
         gaussian_terms: Mapping[str, Sequence[float]] | None = None,
+        refuse_flags: tuple = (),
     ):
         if not isinstance(data, P1DData):
             raise LikelihoodInputError("data must be a P1DData")
@@ -472,26 +614,39 @@ class GaussianP1DLikelihood:
         self.data = data
         self.fidelity = fidelity
         self.param_names = tuple(_hp.PARAM_NAMES) + MEAN_FLUX_NAMES
+        # each redshift of the data, matched to a snapshot of the model
         self._z = [_hp.snapshot_z(z) for z in data.z]
         if len(set(self._z)) != len(self._z):
             raise LikelihoodInputError(
                 f"two redshifts of the data are the same snapshot redshift: {sorted(self._z)}"
             )
-        if isinstance(hcd, str):
-            if hcd != "model_fractions":
-                raise LikelihoodInputError(
-                    'hcd must be "model_fractions" or an array of amplitudes, shape (3,) or (n_z, 3)'
-                )
-            self._amplitudes = None
-        else:
-            self._amplitudes = _hp.check_amplitudes(hcd, self._z)
-            if self._amplitudes.shape not in ((3,), (len(self._z), 3)):
-                raise LikelihoodInputError(
-                    f"fixed amplitudes must have shape (3,) or ({len(self._z)}, 3), one row per redshift of "
-                    f"the data; got {self._amplitudes.shape}"
-                )
+        self.hcd_mode, self._hcd = self._hcd_choice(hcd_fractions, hcd_relative_to_priya)
+        self.gaussian_terms = self._gaussian_terms(gaussian_terms)
+        self.refuse_flags = self._refuse_flags(refuse_flags)
+        # the covariance, factorised once: C_sym = L L^T, with C_sym the symmetric part of the data's covariance
+        # (it may differ from its transpose by rounding: SYMMETRY_RTOL)
+        self._chol = np.linalg.cholesky(0.5 * (data.cov + data.cov.T))
+        self.logdet = float(2.0 * np.sum(np.log(np.diag(self._chol))))
+        self._slices = data.slices()
+        self.refusals = {}  # by sampler_logp: {kind of refusal: [count, the first message]}
+
+    # --------------------------------------------------------------------------- the options, checked once
+    def _hcd_choice(self, fractions, relative):
+        if fractions is not None and relative is not None:
+            raise LikelihoodInputError("give hcd_fractions or hcd_relative_to_priya, not both")
+        if fractions is not None:
+            table = _hcd_table("hcd_fractions", fractions, self.data.z)
+            _check_hcd_fractions(table, self.data.z)
+            return "fractions", table
+        if relative is not None:
+            table = _hcd_table("hcd_relative_to_priya", relative, self.data.z)
+            _check_hcd_relative(table, self.data.z)
+            return "relative_to_priya", table
+        return "priya", None
+
+    def _gaussian_terms(self, given):
         terms = {}
-        for name, pair in dict(gaussian_terms or {}).items():
+        for name, pair in dict(given or {}).items():
             if name not in self.param_names:
                 raise LikelihoodInputError(
                     f"a Gaussian term names {name!r}, which is not one of {self.param_names}"
@@ -502,12 +657,23 @@ class GaussianP1DLikelihood:
                     f"the Gaussian term on {name} needs a standard deviation above zero"
                 )
             terms[name] = (mean, sd)
-        self.gaussian_terms = terms
-        # the symmetric part: a covariance may differ from its transpose by rounding (SYMMETRY_RTOL)
-        self._chol = np.linalg.cholesky(0.5 * (data.cov + data.cov.T))
-        self.logdet = float(2.0 * np.sum(np.log(np.diag(self._chol))))
-        self._slices = data.slices()
-        self.refusals = {}  # by sampler_logp: {kind of refusal: [count, the first message]}
+        return terms
+
+    def _refuse_flags(self, given):
+        if not isinstance(given, tuple) or not all(type(f) is str and f for f in given):
+            raise LikelihoodInputError(
+                "refuse_flags must be a tuple of flag names (non-empty text)"
+            )
+        if given:
+            warnings.warn(
+                DiagnosisOnlyWarning(
+                    f"refuse_flags={given}: a sampler gets minus infinity wherever the predictor sets any of these "
+                    "flags. That changes the posterior, so it is for diagnosis only: for example a chain with and "
+                    "one without, to see what the points at an edge contribute."
+                ),
+                stacklevel=3,
+            )
+        return given
 
     # ------------------------------------------------------------------------------- the point
     def _point(self, theta):
@@ -545,7 +711,7 @@ class GaussianP1DLikelihood:
         )
 
     def model_vector(self, theta: Mapping[str, float]) -> np.ndarray:
-        """The model vector m(theta): steps 1 to 4 of the module docstring.
+        """The model vector m(theta): the prediction at theta, mixed, interpolated and scaled.
 
         Parameters
         ----------
@@ -565,21 +731,33 @@ class GaussianP1DLikelihood:
         predictor.PredictorInputError
             If the predictor refuses the point.
         """
-        pred = self.prediction(theta)
-        amplitudes = pred.w_c if self._amplitudes is None else self._amplitudes
+        return self._model_from(self.prediction(theta))
+
+    def _model_from(self, pred):
+        # step 1, the class fractions A_c at each redshift of the data
+        if self.hcd_mode == "priya":
+            amplitudes = pred.w_c
+        elif self.hcd_mode == "fractions":
+            amplitudes = self._hcd
+        else:  # relative to PRIYA's own at this point
+            amplitudes = self._hcd * pred.w_c
+        # step 2, one spectrum per redshift: P_clean + sum_c A_c (P_c - P_clean), on the model's own modes
         mixed = _hp.add_hcd(pred, amplitudes)
+        # step 3, that spectrum at the data's wavenumbers, redshift by redshift (linear in k: interp_to_bins)
         out = np.empty(self.data.n)
         for i, (sl, kd) in enumerate(zip(self._slices, self.data.k)):
             try:
                 out[sl] = interp_to_bins(pred.k[i], mixed[i], kd)
             except OutsideModesError as exc:
                 raise OutsideModesError(f"at z = {self._z[i]:g}: {exc}") from None
+        # step 4, the data set's factor on the model vector (for example a resolution table), when it has one
         if self.data.model_factor is not None:
             out *= self.data.model_factor
         return out
 
+    # --------------------------------------------------------------------------- the Gaussian
     def chi2(self, theta: Mapping[str, float]) -> float:
-        """r^T C^-1 r, with r = m(theta) - d.
+        """r^T C^-1 r, with r = d - m(theta).
 
         Parameters
         ----------
@@ -593,6 +771,7 @@ class GaussianP1DLikelihood:
         return self._chi2_of(self.model_vector(theta))
 
     def _chi2_of(self, model):
+        # with C = L L^T: r^T C^-1 r = |L^-1 r|^2, and L^-1 r is one triangular solve (no inverse is formed)
         white = solve_triangular(self._chol, model - self.data.p1d, lower=True)
         return float(white @ white)
 
@@ -611,8 +790,11 @@ class GaussianP1DLikelihood:
         -------
         float
         """
+        return self._loglike_of(self.model_vector(theta))
+
+    def _loglike_of(self, model):
         n = self.data.n
-        return -0.5 * self.chi2(theta) - 0.5 * self.logdet - 0.5 * n * math.log(2.0 * math.pi)
+        return -0.5 * self._chi2_of(model) - 0.5 * self.logdet - 0.5 * n * math.log(2.0 * math.pi)
 
     def log_gaussian_terms(self, theta: Mapping[str, float]) -> dict:
         """The log density of each Gaussian term on a parameter, by name.
@@ -650,18 +832,39 @@ class GaussianP1DLikelihood:
         """
         return self.loglike(theta) + sum(self.log_gaussian_terms(theta).values())
 
+    # ------------------------------------------------------------------------------- for a sampler
     def sampler_logp(self, theta: Mapping[str, float]) -> float:
         """``logp`` for a sampler: minus infinity at a point the model cannot serve.
 
-        A sampler needs a number at every point it proposes. This returns ``logp(theta)``, and
-        minus infinity where the predictor refuses the point (``predictor.PredictorInputError``) or
-        a data wavenumber lies outside the model's wavenumbers there (``OutsideModesError``). Each
-        such refusal is counted in ``refusals``, by the kind of the error, with the first message
-        of that kind, so that a chain can say how often and why it was turned back. A point with
-        missing or unknown names still raises: that is an error of the caller, not of the point.
-        So do the two refusals that hold for every point, a fidelity the model cannot serve and a
-        data redshift below the multi-fidelity correction (``predictor.MFUnavailableError``,
-        ``predictor.MFRangeError``): returning minus infinity everywhere would hide the reason.
+        A sampler needs a number at every point it proposes. This returns ``logp(theta)``, or minus
+        infinity, and counts every minus infinity in ``refusals`` by its kind, with the first
+        message of that kind, so that a chain can say how often and why it was turned back.
+
+        **When it returns minus infinity, at the defaults:** exactly the conditions of the module's
+        ``SAMPLER_REFUSALS``, each a refusal for correctness (no number exists there):
+
+        - ``PredictorInputError``: a parameter is not finite; or tau_eff(z) is not positive at a
+          redshift of the data (tau0_amp <= 0); or, with ``hcd_relative_to_priya``, the scaled
+          fractions sum to more than 1 at a redshift.
+        - ``OutsideModesError``: a data wavenumber lies outside the model's modes at this point
+          (they move with hub and omegamh2).
+
+        **What is NOT minus infinity:** a point outside the box the model was trained on or the
+        package's sampling box, on the n_s ridge, with a mean flux off the trained ladder, or where
+        the multi-fidelity tables are clamped. The predictor serves such a point and sets a flag
+        (``prediction(theta).flags``). The flat boxes of a chain belong to the sampler.
+
+        **For diagnosis only:** with ``refuse_flags`` (given when the likelihood is made), a point
+        at which the predictor sets any of the named flags is minus infinity too, counted as
+        "flag:<name>". Comparing a chain with and one without shows what such points contribute.
+        To see the effect of the multi-fidelity correction, make a second likelihood with
+        ``fidelity="LF"``.
+
+        **What still raises:** a point with missing or unknown names (an error of the caller); a
+        fidelity the model cannot serve and a data redshift below the multi-fidelity correction
+        (``predictor.MFUnavailableError``, ``predictor.MFRangeError``), which hold for every point,
+        so minus infinity everywhere would hide the reason; a name in ``refuse_flags`` that is not
+        a flag of a prediction.
 
         Parameters
         ----------
@@ -675,14 +878,36 @@ class GaussianP1DLikelihood:
         """
         self._point(theta)
         try:
-            return self.logp(theta)
+            if not self.refuse_flags:
+                return self.logp(theta)
+            pred = self.prediction(theta)
+            flagged = self._flags_set(pred)
+            if flagged:
+                return self._refused(
+                    f"flag:{flagged[0]}", f"the predictor set the flag {flagged[0]} here"
+                )
+            return self._loglike_of(self._model_from(pred)) + sum(
+                self.log_gaussian_terms(theta).values()
+            )
         except (_hp.MFUnavailableError, _hp.MFRangeError):
             raise  # wrong for every point (no MF record; a data redshift below the correction): not a refusal
         except (_hp.PredictorInputError, OutsideModesError) as exc:
-            kind = type(exc).__name__
-            entry = self.refusals.setdefault(kind, [0, str(exc)])
-            entry[0] += 1
-            return -math.inf
+            return self._refused(type(exc).__name__, str(exc))
+
+    def _flags_set(self, pred):
+        """The names of ``refuse_flags`` that the prediction sets, in the order given."""
+        unknown = [f for f in self.refuse_flags if f not in pred.flags]
+        if unknown:
+            raise LikelihoodInputError(
+                f"refuse_flags names {unknown[0]!r}, which is not a flag of a prediction of this model "
+                f"({sorted(pred.flags)})"
+            )
+        return [f for f in self.refuse_flags if np.any(pred.flags[f])]
+
+    def _refused(self, kind, message):
+        entry = self.refusals.setdefault(kind, [0, message])
+        entry[0] += 1
+        return -math.inf
 
     def predictive(self, thetas: Sequence[Mapping[str, float]], rng: np.random.Generator):
         """Model vectors at a set of points, and one noisy replicate of the data for each.

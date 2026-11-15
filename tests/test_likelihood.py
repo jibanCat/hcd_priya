@@ -173,19 +173,96 @@ def test_the_model_vector_is_the_mixed_spectrum_at_the_data_wavenumbers_times_th
     assert like.prediction(THETA).flags == pred.flags
 
 
-def test_fixed_amplitudes_replace_the_models_fractions(emu):
+def test_absolute_hcd_fractions_replace_the_models_own(emu):
+    """hcd_fractions: the sightline fraction of each class, absolute (0 means no sightline of that class), one
+    number for every redshift or one per redshift of the data."""
     data = _data(emu)
     rows = _bins(emu)
     pred = emu.predict_many(PARAMS, z=list(ZS), tau0_amp=1.0, dtau0=0.0)
-    for amplitudes in ([0.1, 0.05, 0.02], [[0.1, 0.05, 0.02], [0.0, 0.0, 0.0]]):
-        like = L.GaussianP1DLikelihood(emu, data, hcd=amplitudes)
-        mixed = hp.add_hcd(pred, amplitudes)
+    for given, amplitudes in (
+        ({"LLS": 0.1, "subDLA": 0.05, "DLA": 0.02}, [[0.1, 0.05, 0.02]] * 2),
+        (
+            {"LLS": [0.1, 0.0], "subDLA": [0.05, 0.0], "DLA": [0.02, 0.0]},
+            [[0.1, 0.05, 0.02], [0.0] * 3],
+        ),
+    ):
+        like = L.GaussianP1DLikelihood(emu, data, hcd_fractions=given)
+        assert like.hcd_mode == "fractions"
+        mixed = hp.add_hcd(pred, np.array(amplitudes))
         want = np.concatenate([np.interp(rows[i], pred.k[i], mixed[i]) for i in range(len(ZS))])
         np.testing.assert_allclose(like.model_vector(THETA), want, rtol=1e-13, atol=0)
-    with pytest.raises(E, match='hcd must be "model_fractions"'):
-        L.GaussianP1DLikelihood(emu, data, hcd="free")
-    with pytest.raises(hp.PredictorInputError):
-        L.GaussianP1DLikelihood(emu, data, hcd=[0.9, 0.9, 0.9])  # more than all sightlines
+    # 1 as an absolute fraction is "every sightline": reading 1 as "PRIYA's own" fails, loudly
+    with pytest.raises(
+        E, match="sum to 3 at z = 2.6: the fractions of all sightlines cannot exceed 1"
+    ):
+        L.GaussianP1DLikelihood(emu, data, hcd_fractions={"LLS": 1, "subDLA": 1, "DLA": 1})
+    for bad, why in (
+        (
+            {"LLS": 1.5, "subDLA": 0.0, "DLA": 0.0},
+            r"hcd_fractions\['LLS'\] = 1.5 at z = 2.6 is not in \[0, 1\]",
+        ),
+        ({"LLS": -0.1, "subDLA": 0.0, "DLA": 0.0}, r"is not in \[0, 1\]"),
+        ({"LLS": 0.1, "subDLA": 0.0}, "must name exactly the classes"),
+        ({"LLS": 0.1, "subDLA": 0.0, "DLA": 0.0, "forest": 0.5}, "must name exactly the classes"),
+        (
+            {"LLS": [0.1, 0.1, 0.1], "subDLA": 0.0, "DLA": 0.0},
+            r"one number, or one per redshift of the data \(2\)",
+        ),
+        ({"LLS": "0.1", "subDLA": 0.0, "DLA": 0.0}, "must be numbers"),
+        (
+            [0.1, 0.05, 0.02],
+            "must be a mapping",
+        ),  # a list has no class names: its order could be anything
+    ):
+        with pytest.raises(E, match=why):
+            L.GaussianP1DLikelihood(emu, data, hcd_fractions=bad)
+
+
+def test_hcd_fractions_relative_to_priya_scale_the_models_own(emu):
+    """hcd_relative_to_priya: a factor on PRIYA's own fraction at the point (1 = PRIYA's own, 0 = none)."""
+    data = _data(emu)
+    rows = _bins(emu)
+    default = L.GaussianP1DLikelihood(emu, data)
+    assert default.hcd_mode == "priya"
+    ones = L.GaussianP1DLikelihood(
+        emu, data, hcd_relative_to_priya={"LLS": 1, "subDLA": 1, "DLA": 1}
+    )
+    assert ones.hcd_mode == "relative_to_priya"
+    # 1 everywhere is the default, bit for bit
+    assert ones.model_vector(THETA).tobytes() == default.model_vector(THETA).tobytes()
+    pred = emu.predict_many(PARAMS, z=list(ZS), tau0_amp=1.0, dtau0=0.0)
+    factors = {"LLS": [0.5, 2.0], "subDLA": 0.0, "DLA": [1.0, 0.25]}
+    like = L.GaussianP1DLikelihood(emu, data, hcd_relative_to_priya=factors)
+    r = np.array([[0.5, 0.0, 1.0], [2.0, 0.0, 0.25]])
+    mixed = hp.add_hcd(pred, r * pred.w_c)
+    want = np.concatenate([np.interp(rows[i], pred.k[i], mixed[i]) for i in range(len(ZS))])
+    np.testing.assert_allclose(like.model_vector(THETA), want, rtol=1e-13, atol=0)
+    # 0 relative to PRIYA is no sightline of that class: the same as an absolute 0
+    zero_rel = L.GaussianP1DLikelihood(
+        emu, data, hcd_relative_to_priya={"LLS": 0, "subDLA": 0, "DLA": 0}
+    )
+    zero_abs = L.GaussianP1DLikelihood(emu, data, hcd_fractions={"LLS": 0, "subDLA": 0, "DLA": 0})
+    np.testing.assert_allclose(
+        zero_rel.model_vector(THETA), zero_abs.model_vector(THETA), rtol=1e-14, atol=0
+    )
+    with pytest.raises(E, match="a factor on PRIYA's own fraction is >= 0"):
+        L.GaussianP1DLikelihood(emu, data, hcd_relative_to_priya={"LLS": -1, "subDLA": 1, "DLA": 1})
+    with pytest.raises(E, match="give hcd_fractions or hcd_relative_to_priya, not both"):
+        L.GaussianP1DLikelihood(
+            emu,
+            data,
+            hcd_fractions={"LLS": 0, "subDLA": 0, "DLA": 0},
+            hcd_relative_to_priya={"LLS": 1, "subDLA": 1, "DLA": 1},
+        )
+    with pytest.raises(TypeError):
+        L.GaussianP1DLikelihood(emu, data, hcd=[0.1, 0.05, 0.02])  # the old argument is gone
+    # scaled fractions above 1 in sum at a point: the predictor refuses that point; a sampler gets minus infinity
+    big = L.GaussianP1DLikelihood(
+        emu, data, hcd_relative_to_priya={"LLS": 1e6, "subDLA": 1e6, "DLA": 1e6}
+    )
+    with pytest.raises(hp.PredictorInputError, match="cannot exceed 1"):
+        big.model_vector(THETA)
+    assert big.sampler_logp(THETA) == -math.inf and big.refusals["PredictorInputError"][0] == 1
 
 
 def test_the_log_likelihood_is_the_gaussian_density_with_its_normalisation(emu):
@@ -509,12 +586,6 @@ def test_what_is_wrong_for_every_point_is_refused_and_never_turned_into_minus_in
     )
     with pytest.raises(E, match="the same snapshot redshift"):
         L.GaussianP1DLikelihood(emu, twice)
-    for bad in (
-        np.full((3, 3), 0.05),
-        np.full((1, 3), 0.05),
-    ):  # not (3,) and not one row per redshift
-        with pytest.raises(E, match="fixed amplitudes must have shape \\(3,\\) or \\(2, 3\\)"):
-            L.GaussianP1DLikelihood(emu, _data(emu), hcd=bad)
     # a data redshift below the multi-fidelity correction: every point is refused, so the sampler is told, loudly
     pred = emu.predict(PARAMS, 2.2, tau0_amp=1.0, dtau0=0.0, fidelity="LF")
     k = 0.5 * (np.asarray(pred.k)[1:4] + np.asarray(pred.k)[2:5])
@@ -735,3 +806,54 @@ def test_a_reference_is_checked_against_the_bins_of_a_data_set():
             ref.check_bins(other)
     with pytest.raises(E, match="P1DData"):
         ref.check_bins({"z": ref.z})
+
+
+# --------------------------------------------------------------------- the minus-infinity conditions, in one place
+def test_the_conditions_of_minus_infinity_are_listed_in_one_place_and_none_is_relaxable():
+    assert set(L.SAMPLER_REFUSALS) == {"PredictorInputError", "OutsideModesError"}
+    for kind, text in L.SAMPLER_REFUSALS.items():
+        assert "Not relaxable" in text, kind
+    assert "not finite" in L.SAMPLER_REFUSALS["PredictorInputError"]
+    assert "tau_eff" in L.SAMPLER_REFUSALS["PredictorInputError"]
+    assert "hcd_relative_to_priya" in L.SAMPLER_REFUSALS["PredictorInputError"]
+    assert "outside the model's modes" in L.SAMPLER_REFUSALS["OutsideModesError"]
+    assert "SAMPLER_REFUSALS" in L.GaussianP1DLikelihood.sampler_logp.__doc__
+
+
+def test_flags_become_refusals_only_when_asked_for_a_diagnosis(emu):
+    import warnings
+
+    data = _data(emu)
+    plain = L.GaussianP1DLikelihood(emu, data)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        strict = L.GaussianP1DLikelihood(emu, data, refuse_flags=("mf_applied",))
+    (w,) = [c for c in caught if issubclass(c.category, L.DiagnosisOnlyWarning)]
+    assert "for diagnosis only" in str(w.message) and "mf_applied" in str(w.message)
+    assert plain.refuse_flags == () and strict.refuse_flags == ("mf_applied",)
+    # the synthetic model applies the MF correction at THETA: under the stricter switch that point is refused
+    assert plain.prediction(THETA).flags["mf_applied"] is True
+    assert np.isfinite(plain.sampler_logp(THETA))
+    assert strict.sampler_logp(THETA) == -math.inf
+    entry = strict.refusals["flag:mf_applied"]
+    assert entry[0] == 1 and "mf_applied" in entry[1]
+    # everything but sampler_logp is unchanged by the switch, and so is a point without the flag
+    assert strict.logp(THETA) == plain.logp(THETA)
+    lf_plain = L.GaussianP1DLikelihood(emu, data, fidelity="LF")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        lf_strict = L.GaussianP1DLikelihood(emu, data, fidelity="LF", refuse_flags=("mf_applied",))
+    assert (
+        lf_strict.sampler_logp(THETA) == lf_plain.sampler_logp(THETA) and lf_strict.refusals == {}
+    )
+    # a name that is not a flag of a prediction is a mistake of the caller, said at the first point
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        typo = L.GaussianP1DLikelihood(emu, data, refuse_flags=("outside_sampling_bx",))
+    with pytest.raises(
+        E, match="refuse_flags names 'outside_sampling_bx', which is not a flag of a prediction"
+    ):
+        typo.sampler_logp(THETA)
+    for bad in ("mf_applied", [1], ("",)):
+        with pytest.raises(E, match="refuse_flags must be a tuple of flag names"):
+            L.GaussianP1DLikelihood(emu, data, refuse_flags=bad)
