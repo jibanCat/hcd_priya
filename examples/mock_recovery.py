@@ -97,16 +97,16 @@ DOWNLOAD_ENV = "HCD_PRIYA_EXAMPLE_DOWNLOAD"
 DOWNLOAD_FORMAT = "hcd_priya.example_download/1"
 DOWNLOAD_MANIFEST = "example_download.json"
 DOWNLOAD = {
-    "mock": ("mock.p1d.json", "ae76f028aa482674d59e82e8052164af02bbe20d745b6be2dd1cb810f8fa68f1"),
-    "model": ("model", "07ae506b4105350081692d460c4b623e9083045a6ebe8130257ba31db5a7d758"),
-    "mf_record": ("mf_record", "667548cfa5a745d5dfb8d7b669d6486860565efa5d78306c21231529ffbeb4c0"),
+    "mock": ("mock.p1d.json", "95b155c00600499618f826e8f5b660c917c16b9bd73e32099201ca49cdd88a0d"),
+    "model": ("model", "f8a830af3faaffc4f47d90f2fc596d4d8cc9760fc3057127da22cea0771638e2"),
+    "mf_record": ("mf_record", "e639c4b187eface66e5e99bad1efe5645e409fe916f353cd0ef2f88d97bc2fa5"),
     "incidence_record": (
         "incidence_record",
-        "33b34ff8df3dcefb25756642dee1cc0c98db944909c79492ec9b24140adbdfe5",
+        "094522ca1a44f153f6661df5e7eed8211ce836c6864f779021271c109e2eb02f",
     ),
     "reference": (
         "reference.json",
-        "cdee9267d97cdfe41aa2bc88c0debfacfcb98c6207c20c610ac131352b183599",
+        "bf74d07bf3326bd3952515b852e99e3202f8c1b4cc69253dfb19700f58923807",
     ),
 }
 DOWNLOAD_PURPOSE = (

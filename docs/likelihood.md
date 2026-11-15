@@ -135,11 +135,11 @@ written in the script, as `DOWNLOAD`):
 
 | Item | Place in the directory | What it is | sha256 |
 |---|---|---|---|
-| `mock` | `mock.p1d.json` | The data set: the P1D of one PRIYA high-resolution simulation, named in the file's provenance, at 9 redshifts and 11 wavenumbers each (99 bins), times a resolution table, with a covariance per redshift derived from the KODIAQ-SQUAD P1D of Karacayli et al. (2022), and the truth. No measured P1D is in it. Its provenance names the inputs | `ae76f028aa482674d59e82e8052164af02bbe20d745b6be2dd1cb810f8fa68f1` |
-| `model` | `model/` | A research bundle: a fold model, trained WITHOUT the simulation of the mock. The sha256 is that of its `manifest.json`, which names every other file of the bundle by its own sha256 | `07ae506b4105350081692d460c4b623e9083045a6ebe8130257ba31db5a7d758` |
-| `mf_record` | `mf_record/` | The fold's MF record, built without that simulation. The sha256 is that of the record | `667548cfa5a745d5dfb8d7b669d6486860565efa5d78306c21231529ffbeb4c0` |
-| `incidence_record` | `incidence_record/` | The fold's incidence record, built without that simulation. The sha256 is that of the record | `33b34ff8df3dcefb25756642dee1cc0c98db944909c79492ec9b24140adbdfe5` |
-| `reference` | `reference.json` | The stored reference: a summary of a converged posterior for this mock on this model, and its posterior predictive band | `cdee9267d97cdfe41aa2bc88c0debfacfcb98c6207c20c610ac131352b183599` |
+| `mock` | `mock.p1d.json` | The data set: the P1D of one PRIYA high-resolution simulation, named in the file's provenance and one of the three high-resolution runs listed in `Emulator_Files/hires/emulator_params.json` of the public repository `jibanCat/InferenceLyaData`, at 9 redshifts and 11 wavenumbers each (99 bins), times a resolution table, with a covariance per redshift derived from the KODIAQ-SQUAD P1D of Karacayli et al. (2022), and the truth. No measured P1D is in it. Its provenance names the inputs | `95b155c00600499618f826e8f5b660c917c16b9bd73e32099201ca49cdd88a0d` |
+| `model` | `model/` | A research bundle: a fold model, trained WITHOUT the simulation of the mock. The sha256 is that of its `manifest.json`, which names every other file of the bundle by its own sha256 | `f8a830af3faaffc4f47d90f2fc596d4d8cc9760fc3057127da22cea0771638e2` |
+| `mf_record` | `mf_record/` | The fold's MF record, built without that simulation. The sha256 is that of the record | `e639c4b187eface66e5e99bad1efe5645e409fe916f353cd0ef2f88d97bc2fa5` |
+| `incidence_record` | `incidence_record/` | The fold's incidence record, built without that simulation. The sha256 is that of the record | `094522ca1a44f153f6661df5e7eed8211ce836c6864f779021271c109e2eb02f` |
+| `reference` | `reference.json` | The stored reference: a summary of a converged posterior for this mock on this model, and its posterior predictive band | `bf74d07bf3326bd3952515b852e99e3202f8c1b4cc69253dfb19700f58923807` |
 
 - **The model is not the release model.** It is one fold of the cross-validation, trained without the simulation
   the mock was made from, so that the recovery is a held-out one. It loads only through `load_research_bundle`, with
@@ -157,8 +157,9 @@ written in the script, as `DOWNLOAD`):
   30 per cent of each chain dropped; the flat boxes and the two Gaussian terms of the example; the model and the mock
   of the download. The predictive percentiles are over 1,000 posterior draws of a replicate of the data vector (the
   model vector at the draw plus noise from the data covariance). The chains were sampled with the project's private
-  reference likelihood, not with this module; the two were compared on this model and this mock and agree (to
-  rounding at the truth, and at the printed precision of the reference chain file at 32 points of the prior box).
+  reference likelihood, not with this module; the two were compared on the fold models and mocks of two runs (the
+  run of this example, and before it another high-resolution run) and agree: to rounding at the truth, and at the
+  printed precision of the reference chain files at 32 points of the prior box each.
 - **What the reference is not.** No emulator error is in the covariance, so its intervals are narrower than ones
   that account for the error of the emulator. It is one mock on one model: it says that the pieces recover a known
   point of a simulation, and nothing about any measurement.
