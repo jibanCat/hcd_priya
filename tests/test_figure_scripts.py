@@ -418,7 +418,8 @@ def test_no_public_text_on_the_held_out_error_uses_an_approximation_or_calls_it_
     checked = 0
     for name in files:
         text = open(os.path.join(REPO, name), encoding="utf-8").read()
-        for paragraph in re.split(r"\n\s*\n", text):
+        # a unit is a paragraph, and in a list each item on its own (a changelog lists one change per item)
+        for paragraph in re.split(r"\n\s*\n|\n(?=\s*- )", text):
             if held_out.search(paragraph):
                 checked += 1
                 hit = re.search(FORBIDDEN, paragraph, re.I)
