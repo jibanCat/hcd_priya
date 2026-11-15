@@ -128,13 +128,91 @@ def _vector(name, a, n=None):
     return v
 
 
+# ------------------------------------------------------------------------------------- a data set in memory
+# The checks of a data set, one small function each, in the order in which ``P1DData`` runs them. Each says what it
+# checks and why; none changes a value that passes it.
+def _check_redshifts(z) -> np.ndarray:
+    """The redshifts: at least one, finite, each given once (a redshift given twice would count its data twice)."""
+    z = _vector("z", z)
+    if z.size == 0 or len(set(z.tolist())) != z.size:
+        raise LikelihoodInputError("z must hold at least one redshift, each once")
+    return z
+
+
+def _check_wavenumber_rows(k, z) -> tuple:
+    """One row of wavenumbers per redshift, each with at least one bin, positive and strictly ascending (so that
+    the bins of a redshift are in a defined order, and the model can be read off at each). Returns read-only rows.
+    """
+    if not isinstance(k, (list, tuple)) or len(k) != z.size:
+        raise LikelihoodInputError(f"k must be a sequence of {z.size} arrays, one per redshift")
+    rows = []
+    for zi, row in zip(z, k):
+        r = _vector(f"k at z = {zi:g}", row)
+        if r.size == 0 or np.any(r <= 0) or np.any(np.diff(r) <= 0):
+            raise LikelihoodInputError(
+                f"k at z = {zi:g} must be positive and strictly ascending, with at least one bin"
+            )
+        rows.append(_frozen(r))
+    return tuple(rows)
+
+
+def _check_covariance(cov, n) -> np.ndarray:
+    """The covariance of the N bins: an N x N finite matrix, symmetric and positive definite, as the Gaussian needs.
+
+    Symmetric up to rounding: a matrix that was summed or inverted can differ from its transpose in the last digits,
+    so a difference up to ``SYMMETRY_RTOL`` of sqrt(C_ii C_jj) is accepted and the matrix is kept as given (the
+    likelihood uses its symmetric part); a larger difference is a mistake and is refused. Positive definite: tested by
+    a Cholesky factorisation of the symmetric part, the same factorisation the likelihood uses.
+    """
+    cov = _numbers("cov", cov)
+    if cov.shape != (n, n) or not np.all(np.isfinite(cov)):
+        raise LikelihoodInputError(
+            f"cov must be a finite matrix of shape ({n}, {n}), got shape {cov.shape}"
+        )
+    variances = np.diag(cov)
+    if np.any(variances <= 0):
+        raise LikelihoodInputError("cov must be positive definite (a variance is not positive)")
+    scale = np.sqrt(np.outer(variances, variances))
+    if np.any(np.abs(cov - cov.T) > SYMMETRY_RTOL * scale):
+        raise LikelihoodInputError(
+            "cov must be symmetric: cov and its transpose differ by more than rounding "
+            f"({SYMMETRY_RTOL:g} of sqrt(C_ii C_jj))"
+        )
+    try:
+        np.linalg.cholesky(0.5 * (cov + cov.T))
+    except np.linalg.LinAlgError:
+        raise LikelihoodInputError("cov must be positive definite") from None
+    return cov
+
+
+def _check_model_factor(factor, n) -> np.ndarray:
+    """The factor on the model vector: one positive number per bin (a zero or negative factor has no meaning for a
+    power spectrum). Returns a read-only copy."""
+    factor = _vector("model_factor", factor, n)
+    if np.any(factor <= 0):
+        raise LikelihoodInputError("model_factor must be positive")
+    return _frozen(factor)
+
+
 @dataclasses.dataclass(frozen=True, eq=False)
 class P1DData:
     """One P1D data set: a data vector with its wavenumbers, redshifts and full covariance.
 
-    The vector is ordered redshift by redshift, and inside a redshift by wavenumber, as ``k`` is
-    given. The redshifts may have different numbers of wavenumbers. Make one with
-    ``P1DData.from_blocks`` when the covariance comes as one block per redshift.
+    This is where your own data come in. To use a measurement or a mock with this package, put it
+    into a ``P1DData``:
+
+    1. the redshifts ``z`` (each a snapshot redshift of the model, ``predictor.Z_GRID``);
+    2. for each redshift, the wavenumbers of its bins (angular, in s/km, ascending) and the data
+       at those bins (km/s), joined into one vector, redshift by redshift;
+    3. the covariance of that vector, N x N (``from_blocks`` builds it from one block per
+       redshift);
+    4. optionally, a factor that the model vector is multiplied by (for example a resolution
+       table that the data carry), the truth of a mock, and a free-form provenance.
+
+    The checks run when the object is made, one small function each (``_check_redshifts``,
+    ``_check_wavenumber_rows``, ``_check_covariance``, ``_check_model_factor``); after that every
+    array is read-only. Write a data set to a file with ``write_p1d_data`` and read it back with
+    ``read_p1d_data``.
 
     Attributes
     ----------
@@ -175,51 +253,23 @@ class P1DData:
     provenance: Mapping = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
-        z = _vector("z", self.z)
-        if z.size == 0 or len(set(z.tolist())) != z.size:
-            raise LikelihoodInputError("z must hold at least one redshift, each once")
-        if not isinstance(self.k, (list, tuple)) or len(self.k) != z.size:
-            raise LikelihoodInputError(f"k must be a sequence of {z.size} arrays, one per redshift")
-        rows = []
-        for zi, row in zip(z, self.k):
-            r = _vector(f"k at z = {zi:g}", row)
-            if r.size == 0 or np.any(r <= 0) or np.any(np.diff(r) <= 0):
-                raise LikelihoodInputError(
-                    f"k at z = {zi:g} must be positive and strictly ascending, with at least one bin"
-                )
-            rows.append(_frozen(r))
-        n = sum(r.size for r in rows)
+        # 1. the redshifts, then one row of wavenumbers per redshift: together they fix N, the number of bins
+        z = _check_redshifts(self.z)
+        k_rows = _check_wavenumber_rows(self.k, z)
+        n = sum(r.size for r in k_rows)
+        # 2. the data vector: one finite value per bin
         p1d = _vector("p1d", self.p1d, n)
-        cov = _numbers("cov", self.cov)
-        if cov.shape != (n, n) or not np.all(np.isfinite(cov)):
-            raise LikelihoodInputError(
-                f"cov must be a finite matrix of shape ({n}, {n}), got shape {cov.shape}"
-            )
-        diag = np.diag(cov)
-        if np.any(diag <= 0):
-            raise LikelihoodInputError("cov must be positive definite (a variance is not positive)")
-        scale = np.sqrt(np.outer(diag, diag))
-        if np.any(np.abs(cov - cov.T) > SYMMETRY_RTOL * scale):
-            raise LikelihoodInputError(
-                "cov must be symmetric: cov and its transpose differ by more than rounding "
-                f"({SYMMETRY_RTOL:g} of sqrt(C_ii C_jj))"
-            )
-        try:
-            np.linalg.cholesky(0.5 * (cov + cov.T))
-        except np.linalg.LinAlgError:
-            raise LikelihoodInputError("cov must be positive definite") from None
-        factor = None
-        if self.model_factor is not None:
-            factor = _vector("model_factor", self.model_factor, n)
-            if np.any(factor <= 0):
-                raise LikelihoodInputError("model_factor must be positive")
-            factor = _frozen(factor)
+        # 3. the covariance of those N values
+        cov = _check_covariance(self.cov, n)
+        # 4. the optional parts
+        factor = None if self.model_factor is None else _check_model_factor(self.model_factor, n)
         if self.truth is not None and not isinstance(self.truth, Mapping):
             raise LikelihoodInputError("truth must be a mapping of names to values, or None")
         if not isinstance(self.provenance, Mapping):
             raise LikelihoodInputError("provenance must be a mapping")
+        # 5. keep read-only copies (a frozen dataclass sets its own fields with object.__setattr__)
         object.__setattr__(self, "z", tuple(float(v) for v in z))
-        object.__setattr__(self, "k", tuple(rows))
+        object.__setattr__(self, "k", k_rows)
         object.__setattr__(self, "p1d", _frozen(p1d))
         object.__setattr__(self, "cov", _frozen(cov))
         object.__setattr__(self, "model_factor", factor)
@@ -295,44 +345,60 @@ class P1DData:
         >>> print("the covariance between the two redshifts is zero:", bool(np.all(data.cov[:2, 2:] == 0)))
         the covariance between the two redshifts is zero: True
         """
+        # 1. every list has one entry per redshift
         n_z = len(z)
         for name, rows in (("k", k), ("p1d", p1d), ("cov_blocks", cov_blocks)):
             if len(rows) != n_z:
                 raise LikelihoodInputError(f"{name} must have one entry per redshift ({n_z})")
         if model_factor is not None and len(model_factor) != n_z:
             raise LikelihoodInputError(f"model_factor must have one entry per redshift ({n_z})")
+        # 2. the wavenumbers of each redshift fix how many bins it has
         k_rows = [_numbers("k", r) for r in k]
         sizes = [r.size for r in k_rows]
-        n = int(sum(sizes))
-        cov = np.zeros((n, n))
-        a = 0
-        for zi, m, block in zip(z, sizes, cov_blocks):
-            b = _numbers(f"the covariance block at z = {zi:g}", block)
-            if b.shape != (m, m):
-                raise LikelihoodInputError(
-                    f"the covariance block at z = {zi:g} must have shape ({m}, {m}), got {b.shape}"
-                )
-            cov[a : a + m, a : a + m] = b
-            a += m
-
-        def flat(name, rows):
-            parts = [_numbers(name, r) for r in rows]
-            for zi, m, p in zip(z, sizes, parts):
-                if p.shape != (m,):
-                    raise LikelihoodInputError(
-                        f"{name} at z = {zi:g} must have shape ({m},), got {p.shape}"
-                    )
-            return np.concatenate(parts)
-
+        # 3. the full covariance: each block on the diagonal, zero between redshifts
+        cov = _block_diagonal(z, sizes, cov_blocks)
+        # 4. the data vector and the factor: the rows of the redshifts joined in order. P1DData checks the rest.
         return cls(
             z=tuple(z),
             k=tuple(k_rows),
-            p1d=flat("p1d", p1d),
+            p1d=_joined_rows("p1d", z, sizes, p1d),
             cov=cov,
-            model_factor=None if model_factor is None else flat("model_factor", model_factor),
+            model_factor=(
+                None
+                if model_factor is None
+                else _joined_rows("model_factor", z, sizes, model_factor)
+            ),
             truth=truth,
             provenance={} if provenance is None else provenance,
         )
+
+
+def _block_diagonal(z, sizes, cov_blocks) -> np.ndarray:
+    """The N x N covariance with one block per redshift on its diagonal and zero between redshifts (the redshifts
+    taken as independent). Each block must be square, with the number of bins of its redshift."""
+    n = int(sum(sizes))
+    cov = np.zeros((n, n))
+    start = 0
+    for zi, m, block in zip(z, sizes, cov_blocks):
+        b = _numbers(f"the covariance block at z = {zi:g}", block)
+        if b.shape != (m, m):
+            raise LikelihoodInputError(
+                f"the covariance block at z = {zi:g} must have shape ({m}, {m}), got {b.shape}"
+            )
+        cov[start : start + m, start : start + m] = b
+        start += m
+    return cov
+
+
+def _joined_rows(name, z, sizes, rows) -> np.ndarray:
+    """One row per redshift, each with the number of bins of its redshift, joined into one vector in order."""
+    parts = [_numbers(name, r) for r in rows]
+    for zi, m, p in zip(z, sizes, parts):
+        if p.shape != (m,):
+            raise LikelihoodInputError(
+                f"{name} at z = {zi:g} must have shape ({m},), got {p.shape}"
+            )
+    return np.concatenate(parts)
 
 
 # ---------------------------------------------------------------- from the model's modes to the data's wavenumbers
@@ -1113,6 +1179,60 @@ _REFERENCE_FIELDS = (  # the fields of P1DReference that the file holds as lists
 REFERENCE_KEYS = ("format", *_REFERENCE_FIELDS, "provenance")
 
 
+# The checks of a stored reference, one small function each, in the order in which ``P1DReference`` runs them (the
+# redshifts and wavenumbers are checked as for a data set: ``_check_redshifts``, ``_check_wavenumber_rows``).
+def _check_param_names(names) -> tuple:
+    """The parameter names: a non-empty sequence of non-empty text, each name once (a row of the reference is found
+    by its name)."""
+    if (
+        not isinstance(names, (list, tuple))
+        or not names
+        or not all(type(n) is str and n for n in names)
+    ):
+        raise LikelihoodInputError("param_names must be a sequence of names (non-empty text)")
+    if len(set(names)) != len(names):
+        raise LikelihoodInputError("param_names must hold each name once")
+    return tuple(names)
+
+
+def _check_interval(name, interval, n_p) -> np.ndarray:
+    """A central interval per parameter: shape (n_p, 2), finite, the lower end not above the upper end."""
+    a = _numbers(name, interval)
+    if a.shape != (n_p, 2) or not np.all(np.isfinite(a)):
+        raise LikelihoodInputError(
+            f"{name} must be a finite array of shape ({n_p}, 2), got shape {a.shape}"
+        )
+    if np.any(a[:, 0] > a[:, 1]):
+        raise LikelihoodInputError(f"{name}: a lower end lies above its upper end")
+    return a
+
+
+def _check_percentile_levels(percentiles) -> np.ndarray:
+    """The percentile levels of the band: strictly between 0 and 100, strictly ascending (row i of the band is the
+    i-th level, so their order must be defined)."""
+    levels = _vector("percentiles", percentiles)
+    if levels.size == 0 or np.any(levels <= 0) or np.any(levels >= 100):
+        raise LikelihoodInputError("percentiles must be levels between 0 and 100")
+    if np.any(np.diff(levels) <= 0):
+        raise LikelihoodInputError("percentiles must be strictly ascending")
+    return levels
+
+
+def _check_predictive_band(predictive, n_levels, n) -> np.ndarray:
+    """The band: one finite row per level and one column per bin; in every bin a higher level is not lower (that
+    is what a percentile is)."""
+    band = _numbers("predictive", predictive)
+    if band.shape != (n_levels, n) or not np.all(np.isfinite(band)):
+        raise LikelihoodInputError(
+            f"predictive must be a finite array of shape ({n_levels}, {n}), got shape {band.shape}"
+        )
+    if np.any(np.diff(band, axis=0) < 0):
+        raise LikelihoodInputError(
+            "predictive must not decrease from one percentile level to the next, in any bin"
+        )
+    return band
+
+
 @dataclasses.dataclass(frozen=True, eq=False)
 class P1DReference:
     """A stored reference of a mock recovery: a summary of a posterior, and a predictive band.
@@ -1122,6 +1242,22 @@ class P1DReference:
     bin of the data vector some percentiles of the posterior predictive. It holds no chain, no
     covariance and no likelihood value. What the numbers were made with is stated in
     ``provenance``, which this class carries and never interprets.
+
+    How a reference is made and used, step by step:
+
+    1. From a converged chain for a mock: for each parameter the posterior mean and the central
+       68 and 95 per cent intervals, beside the truth of the mock (the point it was made at).
+    2. From model vectors at points of that chain, each with noise drawn from the data
+       covariance: some percentiles of each bin of the data vector (the posterior predictive).
+    3. ``write_reference`` writes these arrays, with a text that says how they were made, as one
+       strict JSON file, and returns its sha256.
+    4. ``read_reference`` reads the file back only against that sha256.
+    5. ``check_bins`` refuses a data set whose bins are not the reference's, and ``band`` gives two
+       stored percentile rows to draw (the example draws a user's chain over them).
+
+    No chain is stored: the reference says where a converged posterior lies, so that a short chain
+    can be compared with it, and nothing more. The checks run when the object is made, one small
+    function each; after that every array is read-only.
 
     Attributes
     ----------
@@ -1169,68 +1305,32 @@ class P1DReference:
     provenance: Mapping = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
-        names = self.param_names
-        if (
-            not isinstance(names, (list, tuple))
-            or not names
-            or not all(type(n) is str and n for n in names)
-        ):
-            raise LikelihoodInputError("param_names must be a sequence of names (non-empty text)")
-        if len(set(names)) != len(names):
-            raise LikelihoodInputError("param_names must hold each name once")
+        # 1. the parameters: their names, then for each the truth, the mean and the two intervals
+        names = _check_param_names(self.param_names)
         n_p = len(names)
         truth = _vector("truth", self.truth, n_p)
         mean = _vector("mean", self.mean, n_p)
-        ends = {}
-        for name in ("interval68", "interval95"):
-            a = _numbers(name, getattr(self, name))
-            if a.shape != (n_p, 2) or not np.all(np.isfinite(a)):
-                raise LikelihoodInputError(
-                    f"{name} must be a finite array of shape ({n_p}, 2), got shape {a.shape}"
-                )
-            if np.any(a[:, 0] > a[:, 1]):
-                raise LikelihoodInputError(f"{name}: a lower end lies above its upper end")
-            ends[name] = a
-        i68, i95 = ends["interval68"], ends["interval95"]
+        i68 = _check_interval("interval68", self.interval68, n_p)
+        i95 = _check_interval("interval95", self.interval95, n_p)
         if np.any(i95[:, 0] > i68[:, 0]) or np.any(i95[:, 1] < i68[:, 1]):
             raise LikelihoodInputError("interval95 must contain interval68 for every parameter")
-        z = _vector("z", self.z)
-        if z.size == 0 or len(set(z.tolist())) != z.size:
-            raise LikelihoodInputError("z must hold at least one redshift, each once")
-        if not isinstance(self.k, (list, tuple)) or len(self.k) != z.size:
-            raise LikelihoodInputError(f"k must be a sequence of {z.size} arrays, one per redshift")
-        rows = []
-        for zi, row in zip(z, self.k):
-            r = _vector(f"k at z = {zi:g}", row)
-            if r.size == 0 or np.any(r <= 0) or np.any(np.diff(r) <= 0):
-                raise LikelihoodInputError(
-                    f"k at z = {zi:g} must be positive and strictly ascending, with at least one bin"
-                )
-            rows.append(_frozen(r))
-        n = sum(r.size for r in rows)
-        levels = _vector("percentiles", self.percentiles)
-        if levels.size == 0 or np.any(levels <= 0) or np.any(levels >= 100):
-            raise LikelihoodInputError("percentiles must be levels between 0 and 100")
-        if np.any(np.diff(levels) <= 0):
-            raise LikelihoodInputError("percentiles must be strictly ascending")
-        band = _numbers("predictive", self.predictive)
-        if band.shape != (levels.size, n) or not np.all(np.isfinite(band)):
-            raise LikelihoodInputError(
-                f"predictive must be a finite array of shape ({levels.size}, {n}), got shape {band.shape}"
-            )
-        if np.any(np.diff(band, axis=0) < 0):
-            raise LikelihoodInputError(
-                "predictive must not decrease from one percentile level to the next, in any bin"
-            )
+        # 2. the bins of the data vector the band is on: the same checks as for a data set
+        z = _check_redshifts(self.z)
+        k_rows = _check_wavenumber_rows(self.k, z)
+        n = sum(r.size for r in k_rows)
+        # 3. the predictive band: one row per percentile level, one column per bin
+        levels = _check_percentile_levels(self.percentiles)
+        band = _check_predictive_band(self.predictive, levels.size, n)
         if not isinstance(self.provenance, Mapping):
             raise LikelihoodInputError("provenance must be a mapping")
-        object.__setattr__(self, "param_names", tuple(names))
+        # 4. keep read-only copies (a frozen dataclass sets its own fields with object.__setattr__)
+        object.__setattr__(self, "param_names", names)
         object.__setattr__(self, "truth", _frozen(truth))
         object.__setattr__(self, "mean", _frozen(mean))
         object.__setattr__(self, "interval68", _frozen(i68))
         object.__setattr__(self, "interval95", _frozen(i95))
         object.__setattr__(self, "z", tuple(float(v) for v in z))
-        object.__setattr__(self, "k", tuple(rows))
+        object.__setattr__(self, "k", k_rows)
         object.__setattr__(self, "percentiles", tuple(float(v) for v in levels))
         object.__setattr__(self, "predictive", _frozen(band))
         object.__setattr__(self, "provenance", dict(self.provenance))
@@ -1325,6 +1425,7 @@ def write_reference(path: str | os.PathLike, reference: P1DReference) -> str:
     """
     if not isinstance(reference, P1DReference):
         raise LikelihoodInputError("reference must be a P1DReference")
+    # 1. the arrays as plain lists, under the closed set of keys of the format
     doc = {
         "format": REFERENCE_FORMAT,
         "param_names": list(reference.param_names),
@@ -1338,12 +1439,14 @@ def write_reference(path: str | os.PathLike, reference: P1DReference) -> str:
         "predictive": reference.predictive.tolist(),
         "provenance": reference.provenance,
     }
+    # 2. strict JSON: sorted keys, no NaN or Infinity; Python writes each float so that it reads back exactly
     try:
         raw = json.dumps(doc, indent=1, sort_keys=True, allow_nan=False).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise LikelihoodInputError(
             f"provenance must hold plain JSON values (text, finite numbers, lists, mappings): {exc}"
         ) from None
+    # 3. never larger than the reader reads, and never over an existing file; the sha256 of the bytes is returned
     if len(raw) > MAX_DATA_BYTES:
         raise LikelihoodInputError(
             f"{path}: the reference takes {len(raw)} bytes as a file, above the {MAX_DATA_BYTES} that "
@@ -1380,13 +1483,16 @@ def read_reference(path: str | os.PathLike, *, expected_sha256: str) -> P1DRefer
         If the file cannot be read, has another sha256, or is not a reference of this format.
     """
     where = os.fspath(path)
+    # 1. the bytes of a regular file (not a link), of a bounded size
     try:
         raw = _S.read_regular(where, MAX_DATA_BYTES)
     except (_S.SafeFormatError, OSError) as exc:
         raise LikelihoodInputError(f"{path}: not a readable reference file ({exc})") from None
+    # 2. their sha256 checked BEFORE anything is parsed; then strict JSON with exactly the keys of the format
     doc, sha = _pinned_doc(
         raw, where, expected_sha256, "a reference", REFERENCE_KEYS, REFERENCE_FORMAT
     )
+    # 3. the arrays are lists and the provenance an object; P1DReference checks everything else
     for key in _REFERENCE_FIELDS:
         if not isinstance(doc[key], list):
             raise LikelihoodInputError(f"{where}: {key} must be a list")
@@ -1497,20 +1603,84 @@ def load_xq100(
     either, and a wrong order would give a wrong likelihood without any error. The
     repositories that hold the files state no licence.
     """
+    # 1. the choice you must state, and the two digests the files must have
     if type(cross_redshift) is not bool:
         raise LikelihoodInputError("cross_redshift must be True or False: state the choice")
+    pins = _xq100_pins(expected_sha256)
+    # 2. the two files, each read only if its bytes have the pinned sha256
+    data_text, data_sha = _read_pinned(data_file, pins["data"], "XQ-100 data file")
+    cov_text, cov_sha = _read_pinned(covariance_file, pins["covariance"], "XQ-100 covariance file")
+    # 3. their contents: k and paa of the five redshifts, and the 65 x 65 matrix (every layout check is in here)
+    k_rows, p_rows, cov = _xq100_tables(data_text, cov_text, data_file, covariance_file)
+    # 4. the covariance between redshifts, as you chose
+    if not cross_redshift:
+        cov = _diagonal_blocks(cov, XQ100_NK)
+    # 5. the data set
+    provenance = {
+        "what": "the XQ-100 Lyman-alpha P1D (column paa) at five redshifts, read from files supplied by the user",
+        "data_file": {"name": os.path.basename(os.fspath(data_file)), "sha256": data_sha},
+        "covariance_file": {
+            "name": os.path.basename(os.fspath(covariance_file)),
+            "sha256": cov_sha,
+        },
+        "covariance": (
+            "the full matrix of the file"
+            if cross_redshift
+            else "the blocks of the file on the diagonal; the covariance between redshifts is set to zero"
+        ),
+        "note": "a measurement, loaded as given: no emulator error, no resolution or metal model, no inflation",
+        "not_verified": "that the covariance file's index order is redshift 3.4 to 4.2 ascending, then wavenumber "
+        "ascending; the attribution of the files; the definition of the column paa",
+    }
+    try:
+        return P1DData(
+            z=tuple(float(z) for z in XQ100_Z),
+            k=tuple(k_rows),
+            p1d=np.concatenate(p_rows),
+            cov=cov,
+            provenance=provenance,
+        )
+    except LikelihoodInputError as exc:
+        raise LikelihoodInputError(
+            f"the XQ-100 files do not make a valid data set: {exc}"
+        ) from None
+
+
+def _xq100_pins(expected_sha256):
+    """The sha256 each of the two files must have: those of ``XQ100_FILES``, or the two you give."""
     pins = {k: v[1] for k, v in XQ100_FILES.items()}
-    if expected_sha256 is not None:
-        if set(expected_sha256) != set(pins) or not all(
-            _S.exact_hex64(v) for v in expected_sha256.values()
-        ):
-            raise LikelihoodInputError(
-                'expected_sha256 must be {"data": sha256, "covariance": sha256}, each 64 lowercase '
-                "hexadecimal digits"
-            )
-        pins = dict(expected_sha256)
-    text, data_sha = _read_pinned(data_file, pins["data"], "XQ-100 data file")
-    lines = text.splitlines()
+    if expected_sha256 is None:
+        return pins
+    if set(expected_sha256) != set(pins) or not all(
+        _S.exact_hex64(v) for v in expected_sha256.values()
+    ):
+        raise LikelihoodInputError(
+            'expected_sha256 must be {"data": sha256, "covariance": sha256}, each 64 lowercase '
+            "hexadecimal digits"
+        )
+    return dict(expected_sha256)
+
+
+def _xq100_tables(data_text, cov_text, data_file, covariance_file):
+    """Parse the two XQ-100 files and check their layout. Returns (k_rows, p_rows, cov).
+
+    The files hold numbers only, with no names on the covariance; a file of another layout would be read without
+    any error but mean something else. So every assumption the loader makes is checked here:
+
+    - The data table's header is exactly ``XQ100_HEADER``, and every row has its ten columns: the columns are then
+      the quantities the loader assumes, and no short row shifts them.
+    - k, paa and z of every row are finite numbers (the other seven columns are not read and may be empty).
+    - Each of the five redshifts 3.4 to 4.2 has exactly 13 rows, consecutive, with k ascending, and the five come in
+      ascending order: the order that the covariance file is assumed to follow (redshift, then wavenumber).
+    - The covariance file has 65 x 65 lines ``i j value``; each index lies in 0..64; each element is given once and
+      is a number; no element is missing. Together these make the file a complete matrix with no element
+      overwritten.
+
+    The order of the covariance file itself (index 0 to 64 = redshift 3.4 to 4.2, then wavenumber) cannot be
+    checked from the files: it is stated as NOT VERIFIED in ``load_xq100``.
+    """
+    # the data table
+    lines = data_text.splitlines()
     if not lines or lines[0].strip() != XQ100_HEADER:
         raise LikelihoodInputError(f"{data_file}: the header is not {XQ100_HEADER!r}")
     fields = [ln.split(",") for ln in lines[1:] if ln.strip()]
@@ -1525,23 +1695,22 @@ def load_xq100(
     if not np.all(np.isfinite(table)):
         raise LikelihoodInputError(f"{data_file}: k, paa and z must be finite")
     k_col, p_col, z_col = table[:, 0], table[:, 1], table[:, 2]
-    z_rows, k_rows, p_rows = [], [], []
+    k_rows, p_rows, firsts = [], [], []
     for z in XQ100_Z:
         at = np.where(np.abs(z_col - z) < 1e-6)[0]
         if at.size != XQ100_NK or np.any(np.diff(at) != 1) or np.any(np.diff(k_col[at]) <= 0):
             raise LikelihoodInputError(
                 f"{data_file}: z = {z:g} must have {XQ100_NK} consecutive rows with ascending k"
             )
-        z_rows.append(float(z))
         k_rows.append(k_col[at])
         p_rows.append(p_col[at])
-    firsts = [int(np.where(np.abs(z_col - z) < 1e-6)[0][0]) for z in XQ100_Z]
+        firsts.append(int(at[0]))
     if firsts != sorted(firsts):
         raise LikelihoodInputError(f"{data_file}: the redshifts are not in ascending order")
+    # the covariance matrix
     n = XQ100_NK * len(XQ100_Z)
-    text, cov_sha = _read_pinned(covariance_file, pins["covariance"], "XQ-100 covariance file")
-    cov = np.full((n, n), np.nan)
-    rows = [ln.split() for ln in text.splitlines() if ln.strip()]
+    cov = np.full((n, n), np.nan)  # NaN marks an element not given yet
+    rows = [ln.split() for ln in cov_text.splitlines() if ln.strip()]
     if len(rows) != n * n or any(len(r) != 3 for r in rows):
         raise LikelihoodInputError(
             f"{covariance_file}: expected {n * n} lines of the form 'i j value', got {len(rows)}"
@@ -1563,36 +1732,12 @@ def load_xq100(
         raise LikelihoodInputError(
             f"{covariance_file}: not every element of the {n} x {n} matrix is given"
         )
-    if not cross_redshift:
-        blocks = np.zeros_like(cov)
-        for a in range(0, n, XQ100_NK):
-            blocks[a : a + XQ100_NK, a : a + XQ100_NK] = cov[a : a + XQ100_NK, a : a + XQ100_NK]
-        cov = blocks
-    provenance = {
-        "what": "the XQ-100 Lyman-alpha P1D (column paa) at five redshifts, read from files supplied by the user",
-        "data_file": {"name": os.path.basename(os.fspath(data_file)), "sha256": data_sha},
-        "covariance_file": {
-            "name": os.path.basename(os.fspath(covariance_file)),
-            "sha256": cov_sha,
-        },
-        "covariance": (
-            "the full matrix of the file"
-            if cross_redshift
-            else "the blocks of the file on the diagonal; the covariance between redshifts is set to zero"
-        ),
-        "note": "a measurement, loaded as given: no emulator error, no resolution or metal model, no inflation",
-        "not_verified": "that the covariance file's index order is redshift 3.4 to 4.2 ascending, then wavenumber "
-        "ascending; the attribution of the files; the definition of the column paa",
-    }
-    try:
-        return P1DData(
-            z=tuple(z_rows),
-            k=tuple(k_rows),
-            p1d=np.concatenate(p_rows),
-            cov=cov,
-            provenance=provenance,
-        )
-    except LikelihoodInputError as exc:
-        raise LikelihoodInputError(
-            f"the XQ-100 files do not make a valid data set: {exc}"
-        ) from None
+    return k_rows, p_rows, cov
+
+
+def _diagonal_blocks(cov, m):
+    """The blocks of size m on the diagonal of ``cov``, with zero between them."""
+    out = np.zeros_like(cov)
+    for a in range(0, cov.shape[0], m):
+        out[a : a + m, a : a + m] = cov[a : a + m, a : a + m]
+    return out
