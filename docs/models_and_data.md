@@ -137,7 +137,9 @@ its `dndx` and `w_c` are the LF model's, as before, and it has no `cddf`. With t
 carries the column-density distribution `pred.cddf` at the bin centres `pred.log_nhi`, with NaN in every bin where
 no HR/LF simulation pair has absorbers at any tabulated redshift and, under LF+MF, where none has them at the
 redshift used. A record may also carry a held-out error of the dN/dX and the CDDF; a prediction then returns it as
-`dndx_err` and `cddf_err`, and an LF+MF prediction without one warns (`HeldOutErrorWarning`). No such record is
+`dndx_err` and `cddf_err`, the held-out rms of ln(prediction / truth) (on the quantity, the range from the value times
+exp(-err) to the value times exp(+err), asymmetric about the value), and an LF+MF prediction without one warns
+(`HeldOutErrorWarning`). No such record is
 released yet. Each call of `predict` or `predict_many` that applies a correction also says so in one INFO record on the Python logger
 `hcd_analysis.predictor`, with the sha256 of each record applied; the library configures no logging, so the record
 shows only when the application lets it pass. Details:

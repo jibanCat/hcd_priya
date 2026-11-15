@@ -464,8 +464,9 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   error is stated one way or the other (`--no-heldout-error`). The block is inside the record's bytes, so the
   record's digest covers it.
 - **On a prediction:** `dndx_err` (3,) and `cddf_err` (Nbin,) are the held-out rms of ln(prediction / truth) of `dndx`
-  and `cddf` (for small values the fractional error; the multiplicative range is the value times exp(-err) to
-  exp(+err)), for the fidelity of the prediction: the `lf` tables for an LF prediction, the `lfmf` tables for an
+  and `cddf`: numbers on the logarithm. On the quantity itself the held-out range is the value times exp(-err) to the
+  value times exp(+err), each bound transformed on its own, so the range is asymmetric about the value. They are given
+  for the fidelity of the prediction: the `lf` tables for an LF prediction, the `lfmf` tables for an
   LF+MF one. It is an indication of size from a handful of held-out simulations, not the standard deviation of a
   known distribution; `labels["incidence_mf_error"]` gives the record's definition word for word, and
   `provenance["incidence_mf"]["heldout_error"]` its texts, redshifts, the counts behind the dN/dX tables,

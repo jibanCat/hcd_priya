@@ -15,10 +15,11 @@ What is drawn, on one axis:
   redshift;
 - bands: the lowest and the highest value over the 60 design points of the PRIYA suite
   (``docs/figures/data/priya_lf_design_60.csv``; another table with ``--design``, none with ``--no-band``);
-- bars on the model lines (only when the model's incidence record carries a held-out error): ``pred.dndx_err`` times
-  ``pred.dndx``: ``pred.dndx_err`` is the held-out rms of ln(prediction / truth) of the corrected dN/dX, and the bar
-  is drawn symmetric, to first order. It is an indication of size from
-  a handful of held-out simulations, not the standard deviation of a known distribution;
+- bars on the model lines (only when the model's incidence record carries a held-out error): the held-out range
+  ``pred.dndx * exp(-pred.dndx_err)`` to ``pred.dndx * exp(+pred.dndx_err)``, each bound computed on its own, so the
+  bar is asymmetric about the line; ``pred.dndx_err`` is the held-out rms of ln(prediction / truth) of the corrected
+  dN/dX. It is an indication of size from a handful of held-out simulations, not the standard deviation of a known
+  distribution;
 - points: the DLA dN/dX of Ho, Bird and Garnett (2021) in eighteen redshift bins, with the limits of the 68 per cent
   interval, from ``docs/figures/data/ho21/dndx_all.txt``.
 
@@ -127,14 +128,17 @@ def main(argv=None) -> int:
         ax.plot(
             z, stack.dndx[:, col], color=colour, lw=width, zorder=2, label=f"model (LF+MF): {name}"
         )
-        # the held-out rms of ln(prediction / truth) of the corrected dN/dX, as a bar on the model line: to first
-        # order, that number times the model value. Drawn only where the model carries an estimate.
-        err = None if stack.dndx_err is None else stack.dndx_err[:, col] * stack.dndx[:, col]
-        if err is not None and np.any(np.isfinite(err)):
-            ok = np.isfinite(err)
+        # the held-out range of the corrected dN/dX, as a bar on the model line. dndx_err is the held-out rms of
+        # ln(prediction / truth): the bounds are dndx * exp(-dndx_err) and dndx * exp(+dndx_err), each computed on
+        # its own (the bar is asymmetric). Drawn only where the model carries an estimate.
+        log_err = None if stack.dndx_err is None else stack.dndx_err[:, col]
+        if log_err is not None and np.any(np.isfinite(log_err)):
+            ok = np.isfinite(log_err)
+            value = stack.dndx[ok, col]
+            lower, upper = value * np.exp(-log_err[ok]), value * np.exp(log_err[ok])
             ax.errorbar(
-                z[ok], stack.dndx[ok, col], yerr=err[ok], fmt="none", ecolor=colour, elinewidth=1.1, capsize=2.2,
-                capthick=1.1, zorder=2, label="held-out rms error of the model" if not drew_error else None,
+                z[ok], value, yerr=[value - lower, upper - value], fmt="none", ecolor=colour, elinewidth=1.1,
+                capsize=2.2, capthick=1.1, zorder=2, label="held-out range of the model" if not drew_error else None,
             )  # fmt: skip
             drew_error = True
         ax.annotate(
@@ -146,8 +150,8 @@ def main(argv=None) -> int:
             fontsize=8.5,
         )
     facts["heldout_error"] = (
-        "drawn on the model lines: pred.dndx_err times pred.dndx (LF+MF), to first order; pred.dndx_err is the held-out "
-        "rms of ln(prediction / truth)"
+        "drawn on the model lines (LF+MF): the range pred.dndx * exp(-pred.dndx_err) to pred.dndx * exp(+pred.dndx_err), "
+        "each bound computed on its own (asymmetric); pred.dndx_err is the held-out rms of ln(prediction / truth)"
         if drew_error
         else "not drawn: the model carries no held-out error at these redshifts"
     )

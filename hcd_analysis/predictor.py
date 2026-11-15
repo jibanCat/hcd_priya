@@ -93,9 +93,11 @@ facts are on every prediction without any logging: the flags ``mf_applied`` and 
 ``provenance``.
 
 **The held-out error.** A corrected dN/dX or CDDF is not exact. An incidence record may carry a held-out error, and
-then every prediction carries it too: ``dndx_err`` and ``cddf_err``, the held-out rms of ln(prediction / truth) (for
-small values it equals the fractional error), for the fidelity of the prediction (NaN where the record has no estimate; an error is never interpolated between
-redshifts). ``labels["incidence_mf_error"]`` says what the numbers are, in the record's own words. An LF+MF
+then every prediction carries it too: ``dndx_err`` and ``cddf_err``, the held-out rms of ln(prediction / truth), for the
+fidelity of the prediction (NaN where the record has no estimate; an error is never interpolated between redshifts).
+They are numbers on the logarithm. On the quantity itself the held-out range is ``dndx * exp(-dndx_err)`` to
+``dndx * exp(+dndx_err)`` (the same for ``cddf``): each bound is transformed on its own, and the range is
+asymmetric about the value. ``labels["incidence_mf_error"]`` says what the numbers are, in the record's own words. An LF+MF
 prediction that returns a corrected value without an estimate beside it emits ``HeldOutErrorWarning``, once per
 process for each record.
 
@@ -690,15 +692,17 @@ class Prediction:
         Shape (Nbin,). The bin centres, log10 of N_HI in cm^-2, from the incidence record.
     dndx_err : numpy.ndarray or None
         Shape (3,), in the order of ``dndx``. The held-out rms of ln(prediction / truth) of
-        ``dndx``. For small values it equals the fractional error; the multiplicative range is
-        ``dndx * exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``. It is an indication of size, not
+        ``dndx``: a number on the logarithm, not on ``dndx``. On ``dndx`` itself the held-out
+        range is ``dndx * exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``, each bound computed on
+        its own; the range is asymmetric about ``dndx``. It is an indication of size, not
         the standard deviation of a known distribution; see ``labels["incidence_mf_error"]`` for
         what it is and what it does not cover. For an LF prediction it is that of the uncorrected value,
         for an LF+MF prediction that of the corrected one. NaN where the incidence record has no
         estimate (it carries no held-out error, or none at this redshift; an error is never
         interpolated between redshifts). None without an incidence record.
     cddf_err : numpy.ndarray or None
-        Shape (Nbin,). The same for ``cddf``, per column-density bin; NaN also where ``cddf`` is.
+        Shape (Nbin,). The same for ``cddf``, per column-density bin: the held-out range is
+        ``cddf * exp(-cddf_err)`` to ``cddf * exp(+cddf_err)``. NaN also where ``cddf`` is.
     member_std : numpy.ndarray or None
         Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
         members disagree. It is not a calibrated emulator error and not a covariance. None for a

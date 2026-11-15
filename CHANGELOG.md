@@ -57,8 +57,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - **The held-out error on the output.** An incidence record may carry a held-out error of the dN/dX and the CDDF (an
   optional block, copied by the builder from a table and never computed by it; the block names that table file by
   its sha256). A prediction then returns it as
-  `dndx_err` and `cddf_err`: the held-out rms of ln(prediction / truth) (for small values the fractional error), for
-  the fidelity of the prediction, NaN where
+  `dndx_err` and `cddf_err`: the held-out rms of ln(prediction / truth); on the quantity the held-out range is the
+  value times exp(-err) to the value times exp(+err), each bound transformed on its own and the range asymmetric about
+  the value. They are given for the fidelity of the prediction, NaN where
   no estimate exists. An LF+MF prediction that returns a corrected value without an estimate beside it emits the new
   `HeldOutErrorWarning`, once per process for each record. The builder refuses to run unless the held-out error is
   stated (`--heldout-error FILE SHA256` or `--no-heldout-error`).
