@@ -97,7 +97,7 @@ DOWNLOAD_ENV = "HCD_PRIYA_EXAMPLE_DOWNLOAD"
 DOWNLOAD_FORMAT = "hcd_priya.example_download/1"
 DOWNLOAD_MANIFEST = "example_download.json"
 DOWNLOAD = {
-    "mock": ("mock.p1d.json", "6b5d17d091ad86337d00e863aee30297fb3cdcb692ad2540cbb32a4f0afe4a41"),
+    "mock": ("mock.p1d.json", "ae76f028aa482674d59e82e8052164af02bbe20d745b6be2dd1cb810f8fa68f1"),
     "model": ("model", "07ae506b4105350081692d460c4b623e9083045a6ebe8130257ba31db5a7d758"),
     "mf_record": ("mf_record", "667548cfa5a745d5dfb8d7b669d6486860565efa5d78306c21231529ffbeb4c0"),
     "incidence_record": (
@@ -106,7 +106,7 @@ DOWNLOAD = {
     ),
     "reference": (
         "reference.json",
-        "a3c74b2cc09c524ebe760560aaac2394238ac747b2e0ab9361a1c9b2524c4792",
+        "cdee9267d97cdfe41aa2bc88c0debfacfcb98c6207c20c610ac131352b183599",
     ),
 }
 DOWNLOAD_PURPOSE = (

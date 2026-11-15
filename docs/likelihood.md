@@ -135,11 +135,11 @@ written in the script, as `DOWNLOAD`):
 
 | Item | Place in the directory | What it is | sha256 |
 |---|---|---|---|
-| `mock` | `mock.p1d.json` | The data set: the P1D of one PRIYA high-resolution simulation at 9 redshifts and 11 wavenumbers each (99 bins), times a resolution table, with a covariance per redshift derived from the KODIAQ-SQUAD P1D of Karacayli et al. (2022), and the truth. No measured P1D is in it. Its provenance names the inputs | `6b5d17d091ad86337d00e863aee30297fb3cdcb692ad2540cbb32a4f0afe4a41` |
+| `mock` | `mock.p1d.json` | The data set: the P1D of one PRIYA high-resolution simulation, named in the file's provenance, at 9 redshifts and 11 wavenumbers each (99 bins), times a resolution table, with a covariance per redshift derived from the KODIAQ-SQUAD P1D of Karacayli et al. (2022), and the truth. No measured P1D is in it. Its provenance names the inputs | `ae76f028aa482674d59e82e8052164af02bbe20d745b6be2dd1cb810f8fa68f1` |
 | `model` | `model/` | A research bundle: a fold model, trained WITHOUT the simulation of the mock. The sha256 is that of its `manifest.json`, which names every other file of the bundle by its own sha256 | `07ae506b4105350081692d460c4b623e9083045a6ebe8130257ba31db5a7d758` |
 | `mf_record` | `mf_record/` | The fold's MF record, built without that simulation. The sha256 is that of the record | `667548cfa5a745d5dfb8d7b669d6486860565efa5d78306c21231529ffbeb4c0` |
 | `incidence_record` | `incidence_record/` | The fold's incidence record, built without that simulation. The sha256 is that of the record | `33b34ff8df3dcefb25756642dee1cc0c98db944909c79492ec9b24140adbdfe5` |
-| `reference` | `reference.json` | The stored reference: a summary of a converged posterior for this mock on this model, and its posterior predictive band | `a3c74b2cc09c524ebe760560aaac2394238ac747b2e0ab9361a1c9b2524c4792` |
+| `reference` | `reference.json` | The stored reference: a summary of a converged posterior for this mock on this model, and its posterior predictive band | `cdee9267d97cdfe41aa2bc88c0debfacfcb98c6207c20c610ac131352b183599` |
 
 - **The model is not the release model.** It is one fold of the cross-validation, trained without the simulation
   the mock was made from, so that the recovery is a held-out one. It loads only through `load_research_bundle`, with
