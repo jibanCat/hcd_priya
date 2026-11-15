@@ -51,13 +51,19 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   mean times the record's HR/LF ratio per bin. A bin is NaN, never a number, where no HR/LF simulation pair has
   absorbers at any tabulated redshift, and under LF+MF also where none has them at the redshift used.
   Without an incidence record both are `None`.
-- **A Gaussian likelihood of a P1D data vector** (`hcd_analysis.likelihood`): a data container with a full
+- **A Gaussian data likelihood of a P1D data vector** (`hcd_analysis.likelihood`; the data covariance only, no
+  emulator error): a data container with a full
   covariance, the rule that brings the model to the data's wavenumbers (linear interpolation at each bin's k), the
   log likelihood with its normalisation, optional Gaussian terms on parameters, and a strict file format for a
   data set, read only against its sha256. No emulator error is added to the covariance. No data set is shipped yet.
   `sampler_logp` gives a sampler minus infinity where the model refuses a point, and counts why. `load_xq100`
   reads the XQ-100 P1D from two files the user supplies, each checked by its sha256: a loader only, nothing
   fitted. An example, `examples/mock_recovery.py`, and a page, `docs/likelihood.md`.
+  The HCD content is the model's own class fractions at each point, or given explicitly in one of two ways:
+  absolute fractions (`hcd_fractions`) or factors on the model's own (`hcd_relative_to_priya`), each a mapping of
+  the three classes. `SAMPLER_REFUSALS` lists every condition under which `sampler_logp` returns minus infinity;
+  `refuse_flags` adds conditions for diagnosis only. The page gives the mathematics step by step and says when the
+  linear interpolation to the data's wavenumbers is accurate and when it is not.
 - **A stored reference of a mock recovery** (`likelihood.P1DReference`, `read_reference`, `write_reference`): the
   truth, the posterior mean and two central intervals of each parameter, and percentiles of the posterior predictive
   on the bins of a data set; a strict file format, read only against its sha256. No reference is shipped.

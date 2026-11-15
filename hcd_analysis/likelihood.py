@@ -1,4 +1,8 @@
-"""A Gaussian likelihood of a P1D data vector under the per-class predictor.
+"""A Gaussian DATA likelihood of a P1D data vector under the per-class predictor.
+
+The covariance is the data set's only: no emulator error is added (``docs/likelihood.md`` gives
+the mathematics step by step, and says when the interpolation to the data's wavenumbers is
+accurate and when it is not).
 
 This module joins three things that the package already has into one number, the log likelihood:
 a model loaded with ``hcd_analysis.predictor`` (``load_release``, ``load_published``), PRIYA's
@@ -15,7 +19,8 @@ recovery (``P1DReference``), each with what it does not do stated in its docstri
    ``tau_eff(z) = tau0_amp * ((1 + z) / (1 + z_pivot))**dtau0 * tau_Kim(z)``.
 2. The predictor gives the class spectra on its native modes at each z_i. They are mixed into
    one spectrum, ``P = P_clean + sum_c A_c (P_c - P_clean)``, with the model's own class fractions
-   (``A = pred.w_c``, the default) or with amplitudes that you fix.
+   (``A = pred.w_c``, the default), with absolute fractions (``hcd_fractions``) or with factors
+   on the model's own fractions (``hcd_relative_to_priya``).
 3. The model's wavenumbers at z_i depend on ``hub`` and ``omegamh2`` of the point (the predictor
    returns them in s/km). The mixed spectrum is interpolated linearly in k to each k_ij. This is
    the value of the model AT the wavenumber of the data bin. It is not an average over the window

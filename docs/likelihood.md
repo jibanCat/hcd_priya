@@ -1,40 +1,161 @@
-# The Gaussian likelihood and the mock-recovery example
+# The Gaussian data likelihood and the mock-recovery example
 
-`hcd_analysis.likelihood` turns a loaded model and a P1D data set into a log likelihood. This page says what it
-computes, what it leaves out, and how the example that comes with it is run. The reference of every function is on
-the [API page](api.md).
+`hcd_analysis.likelihood` turns a loaded model and a P1D data set into a log likelihood. **It is a data likelihood:
+the covariance C is the data set's own, and no emulator error is added to it.** It is not a likelihood of "data plus
+emulator": the model is treated as exact, so a posterior from it is narrower than one that accounts for the error of
+the emulator. This page gives the mathematics step by step, says what is left out, and how the example that comes
+with it is run. The reference of every function is on the [API page](api.md).
 
 **Nothing is fitted to a measurement by anything on this page.** The example recovers the parameters of a mock, a
 data vector made from a simulation at a known point. No mock and no model is published yet. The example reads them
 from the example download described below, which is not published yet, or from files you name.
 
-## What is computed
+## The mathematics, step by step
 
-For a parameter point (the nine PRIYA parameters, `tau0_amp` and `dtau0`):
+A point theta is the nine PRIYA parameters (`predictor.PARAM_NAMES`) and the two mean-flux parameters `tau0_amp`
+and `dtau0`. A data set has redshifts z_i, at each redshift the wavenumbers k_ij of its bins (angular, in s/km), the
+data vector d of length N (km/s), its covariance C (N x N), and optionally a factor F (one number per bin).
+`GaussianP1DLikelihood.loglike(theta)` computes:
 
-1. The mean flux at each redshift of the data is PRIYA's two-parameter model (`predictor.tau_eff_priya`).
-2. The model's class spectra at each redshift are mixed into one spectrum with the model's own class fractions,
-   `add_hcd(pred, pred.w_c)`, or with amplitudes you fix. With the model's fractions the HCD content follows the
-   nine parameters: it is not varied on its own, and it is not fixed at a truth either.
-3. The mixed spectrum is brought to the wavenumbers of the data by linear interpolation in k, at the wavenumber of
-   each bin. It is the model at a point, not an average over the window of a bin.
-4. The result is multiplied by the data set's `model_factor` when it has one (for example a resolution table that
-   the data vector also carries).
-5. With r the model vector minus the data and C the covariance of the data set:
+1. **The mean flux.** At each redshift of the data, PRIYA's two-parameter model of the effective optical depth
+   (`predictor.tau_eff_priya`):
+
+   `tau_eff(z) = tau0_amp * ((1 + z) / (1 + z_pivot))**dtau0 * tau_Kim(z)`, with `z_pivot = 3` and
+   `tau_Kim(z) = 0.0023 (1 + z)**3.65` (the fit of Kim et al. 2007).
+
+2. **The class spectra.** The predictor gives, at each z_i, the P1D of the four classes of sightlines, c = clean,
+   LLS, subDLA, DLA: `P_c(k_n)`, on the model's own wavenumbers k_n (its "modes", step 4).
+
+3. **The mixture.** One spectrum per redshift, as `predictor.add_hcd` forms it:
+
+   `P_model(k_n) = P_clean(k_n) + sum_c A_c (P_c(k_n) - P_clean(k_n))`, c over LLS, subDLA and DLA,
+
+   where A_c is the fraction of all sightlines that belong to class c (each in [0, 1], their sum at most 1; the
+   rest is clean forest). By default A_c is the model's own fraction at the point, `pred.w_c`, so the HCD content
+   follows the nine parameters; the section on the HCD content gives the two other ways.
+
+4. **The model at the data's wavenumbers.** `interp_to_bins` takes P_model at each k_ij by linear interpolation
+   between the two neighbouring modes, `k_n <= k_ij <= k_(n+1)`:
+
+   `m_ij = P_model(k_n) + (P_model(k_(n+1)) - P_model(k_n)) * (k_ij - k_n) / (k_(n+1) - k_n)`.
+
+   A data wavenumber outside the modes is refused (the next section says more).
+
+5. **The factor.** With a factor, `m_ij` is multiplied by `F_ij` (for example a resolution table that the data also
+   carry). The result, joined redshift by redshift in the order of d, is the model vector m(theta).
+
+6. **The residual.** `r = d - m(theta)`.
+
+7. **The Gaussian.** With C_sym = (C + C^T) / 2 (C itself when it is symmetric; a covariance may differ from its
+   transpose by rounding, `SYMMETRY_RTOL`) and its Cholesky factor L, `C_sym = L L^T`, computed once:
+
+   `r^T C^-1 r = |L^-1 r|^2` (one triangular solve; no inverse is formed), `ln det C = 2 sum_i ln L_ii`, and
+
    `ln L = -1/2 r^T C^-1 r - 1/2 ln det C - N/2 ln(2 pi)`.
+
+   `chi2(theta)` returns `r^T C^-1 r`; `loglike(theta)` returns ln L.
+
+8. **Gaussian terms on parameters,** when the likelihood is made with them (`gaussian_terms={name: (mean, sd)}`):
+   each adds `-1/2 ((x - mean) / sd)**2 - ln(sd sqrt(2 pi))`. `logp(theta)` is ln L plus these terms;
+   `loglike` has none of them.
+
+9. **The flat boxes** are not in the likelihood: they belong to the sampler. The example gives its sampler a flat
+   prior on each of the eleven parameters (`BOXES` in the script) and the two Gaussian terms on `hub` and
+   `bhfeedback` (`GAUSSIAN_TERMS`), and samples `sampler_logp`.
+
+## Bringing the model to the data's wavenumbers
+
+**The algorithm** is step 4 above and nothing more: the straight line between the two neighbouring modes, evaluated
+at each data wavenumber. It is `interp_to_bins`, whose body is that line (through `numpy.interp`) after two small
+checks. It is not a re-binning and not an average over the width of a bin, and nothing in it is fitted or tuned: it
+is the value of the model AT the data wavenumber.
+
+**Why this is enough for the data this package was tried with.** The modes are the box modes of the PRIYA
+simulations, `k_n = 2 pi n / (120 Mpc/h)`, n = 1 to 172. In s/km they depend on z and on `hub` and `omegamh2`; at the
+midpoint of the parameters their spacing is 0.00052 s/km at z = 2.2 and 0.00042 s/km at z = 4.2 (0.00040 to 0.00055
+over the corners of `hub` and `omegamh2`), and they reach 0.068 to 0.095 s/km. The data bins, from the public files:
+
+| Data set | Bins | Spacing of the bins | Modes per bin |
+|---|---|---|---|
+| eBOSS DR14 (Chabanier et al. 2019) | 35 per redshift, 0.00108 to 0.0195 s/km | 0.000542 s/km, uniform | about 1 |
+| KODIAQ-SQUAD (Karacayli et al. 2022) | 0.0011, then steps of 0.1 in log10 k, to 0.40 s/km | 0.0022 to 0.081 s/km | about 4 at the lowest k, many more above |
+| XQ-100 (`load_xq100`) | 13 per redshift, 0.00316 to 0.0631 s/km | 0.108 in log10 k (0.0009 to 0.014 s/km) | about 2 at the lowest k, many more above |
+
+Where the data bins are a few modes apart or more, the model is a smooth function sampled finely, and the line
+between two modes is close to it. Where a bin is about one mode wide (eBOSS), the value at the bin centre and the
+average over the bin can differ, and this rule takes the value at the centre.
+
+**The situations to avoid:**
+
+- **Bins wider than the mode spacing, compared with a bin average.** If a data set reports the average of the power
+  over a wide bin, a point value of the model at the bin centre is not the same thing where the spectrum curves.
+  Give the data's own window as `model_factor` only if it is a multiplicative factor; a true bin average is not
+  computed here.
+- **The lowest wavenumbers.** Below about 0.003 s/km a data bin holds only a few modes, and the first mode is about
+  0.0004 to 0.0006 s/km: a data bin below it is refused at every point.
+- **Data beyond the modes.** A data wavenumber below the first or above the last mode at a point is refused
+  (`OutsideModesError`), never extrapolated. The modes move with `hub` and `omegamh2`, so a bin near an end can be
+  inside the modes at one point and outside at another: `sampler_logp` returns minus infinity there. Keep the data
+  well inside the modes over the whole box (the KODIAQ-SQUAD bins above about 0.07 s/km are outside them at some
+  points of the box).
+- **Features finer than the mode spacing.** The model is known at its modes only. A feature narrower than about two
+  mode spacings is not resolved by interpolating the model, and a feature of the data that the model does not have
+  (for example the oscillation of the SiIII-Lyman-alpha cross term, period 2 pi / 2271 km/s = 0.0028 s/km, about
+  five to seven mode spacings) is not created by it: such a term must be part of the model or of the data's
+  treatment, not of this rule.
+
+## The HCD content: three ways, each explicit
+
+| How | What a value means | 0 means | 1 means |
+|---|---|---|---|
+| neither argument (the default) | A_c = the model's own fraction at the point, `pred.w_c` | (no value to give) | (no value to give) |
+| `hcd_fractions={"LLS": a, "subDLA": b, "DLA": c}` | the ABSOLUTE fraction of all sightlines in that class, in [0, 1], at most 1 in sum | no sightline of that class | every sightline in that class |
+| `hcd_relative_to_priya={"LLS": r1, "subDLA": r2, "DLA": r3}` | a factor on the model's own fraction: A_c = r_c `pred.w_c`, each r_c >= 0 | no sightline of that class | the model's own fraction |
+
+Each argument is a mapping that names the three classes, so a value cannot land on the wrong class; a value is one
+number, or one per redshift of the data. Give at most one of the two. A list, an unknown or missing class, a value
+out of its range, or both arguments are refused when the likelihood is made. Writing 1 for each class in
+`hcd_fractions` (where 1 means "every sightline") is refused because the fractions would sum to 3. With
+`hcd_relative_to_priya` the scaled fractions can sum to more than 1 at some point; the predictor refuses that point
+(minus infinity in a sampler).
 
 ## What is not in it
 
-- **No emulator error.** C is the data set's covariance, as given. The likelihood treats the model as exact, so a
-  posterior from it is narrower than one that accounts for the error of the emulator.
+- **No emulator error.** C is the data set's covariance, as given: this is a data likelihood. The model is treated as
+  exact, so a posterior from it is narrower than one that accounts for the error of the emulator.
 - **No bandpower model, no resolution model, no metals, no continuum or DLA-masking systematics** beyond what a data
   set puts into its covariance and its `model_factor`.
 - **The two omissions of the mixture** stated on a prediction (`pred.labels["omissions"]`): the power of the subDLA
   cores that the PRIYA filter removes, and the DLA damping-wing core.
 - **No prior.** Flat boxes belong to the sampler. Gaussian terms on parameters can be given when the likelihood is
   made; `logp` adds them and `loglike` does not.
-- **A point the model refuses raises.** `sampler_logp` returns minus infinity for such a point and counts the
-  refusals by kind, so that a chain can say how often and why it was turned back.
+
+## When a sampler gets minus infinity
+
+`sampler_logp(theta)` returns `logp(theta)` or minus infinity, and counts every minus infinity in `refusals` by kind,
+with its first message. At the defaults it returns minus infinity in exactly the cases listed in `SAMPLER_REFUSALS`,
+each a refusal for correctness (no number exists there):
+
+- the predictor refuses the point (`PredictorInputError`): a parameter is not finite; or `tau_eff(z)` is not
+  positive at a redshift of the data (`tau0_amp <= 0`); or, with `hcd_relative_to_priya`, the scaled fractions sum
+  to more than 1;
+- a data wavenumber lies outside the model's modes at the point (`OutsideModesError`).
+
+**Not minus infinity:** a point outside the box the model was trained on or the package's sampling box, on the n_s
+ridge, with a mean flux off the trained ladder, or where the tables of the multi-fidelity correction are clamped. The
+predictor serves such a point and sets a flag (`like.prediction(theta).flags`). At the defaults there is therefore
+nothing to relax. To study these edges:
+
+- `refuse_flags=("outside_sampling_box",)` (any flag names) makes `sampler_logp` return minus infinity wherever one of
+  the named flags is set, counted as `flag:<name>`. It changes the posterior and emits a `DiagnosisOnlyWarning`: it
+  is for diagnosis only, for example a chain with and one without the switch.
+- `fidelity="LF"` makes a likelihood without the multi-fidelity correction: compare the two to see its effect.
+- The flat boxes of the example (`BOXES`) can be widened: the predictor flags, and does not refuse, points outside
+  them.
+
+**Still raised, not minus infinity:** a point with missing or unknown names; a fidelity the model cannot serve and a
+data redshift below the multi-fidelity correction (`MFUnavailableError`, `MFRangeError`), which hold for every point,
+so minus infinity everywhere would hide the reason; a name in `refuse_flags` that is not a flag of a prediction.
 
 ## A data set
 
