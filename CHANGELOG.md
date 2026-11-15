@@ -20,6 +20,27 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   clean-lineage bundle, with free HCD amplitudes and no informative HCD priors.
 - **Production and research bundles kept apart.** A bundle trained without some simulations (a validation fold) can
   only be loaded through the explicit research path.
+- **The trained models come in a companion package, `hcd-priya-models`** (`model_package/`; data only, MIT
+  licence), which `hcd-priya` now requires. **`load_published`** (`hcd_analysis.predictor`) loads a model by name
+  from the installed model package, only against the sha256 listed in `hcd_analysis/published_models.py`.
+  With no argument it loads the LF+MF model; a name is compared without case and punctuation. The examples write
+  the nine parameters out; `example_params` gives the midpoint of the training range of each parameter and prints
+  that statement and the values when it is called. No model is published yet, so the list is empty; tests
+  and CI use a model package built with a synthetic bundle.
+- **A warning for a mean flux outside the trained range.** A prediction whose `tau_eff` lies outside the range of
+  mean flux the model was trained on, or outside the tables of the multi-fidelity correction, emits a
+  `MeanFluxRangeWarning` that gives the range. The prediction is still
+  returned, with the flag `mean_flux_off_ladder` as before.
+- **`python -m hcd_analysis.check_release`**: loads a model from a fresh install, predicts, and compares with
+  reference predictions. Before its last line it prints what was checked.
+- **Said where a user reads first.** A prediction of a synthetic test build carries the flag and the label
+  `synthetic_build`. `w_c_corrected` without a map warns that it uses the historical map (`HistoricalMapWarning`).
+  A model that records no trained mean-flux range says so once when it is loaded. The flags `mf_z_clamped` and
+  `mf_tau0_clamped` are False on an LF prediction, which applies no correction (they were set from the redshift
+  and the mean flux alone). The README and the docstrings state the convention of `k` and of the P1D, and that the
+  mixture `add_hcd(pred, pred.w_c)` is not the full P1D of a sightline sample.
+- **Examples in the docstrings of the user entry points**, run by a test; type annotations on the loaders,
+  `predict`, `predict_many` and `add_hcd`.
 - **Runtime data inputs** (`hcd_analysis.runtime_data`): the observed P1D legs and the multi-fidelity
   resolution-correction table come from an explicit path or an environment variable, never a built-in path, and are
   verified by sha256 before use; the simulation roots come from the config file or `HCD_LF_RAW_DIR` /
@@ -52,6 +73,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - The `hcd` command needs an explicit `--config` file and refuses to run without one. Keys the file leaves out
   still take the built-in values of `hcd_analysis.config`, and keys it does not know are ignored.
 - The install name is `hcd-priya`; the import name stays `hcd_analysis`.
+- The README is short: install, load a model, predict. The release format, the runtime data inputs and the
+  description of the research pipeline moved, word for word, to `docs/models_and_data.md` and `docs/pipeline.md`.
 - The Python code is formatted with black (line length 100), with no change in behaviour. Catalogues built from
   now on record different finder source digests than earlier catalogues built from the same code, and a cache
   carry needs a newly reviewed row-path diff ([`CONTRIBUTING.md`](CONTRIBUTING.md), "What a reformat changes").

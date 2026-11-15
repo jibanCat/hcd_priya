@@ -407,6 +407,66 @@ def _synthetic_snapshot(root, nb=64, n_sk=4, z=3.0):
     return p
 
 
+def test_the_readme_lines_that_build_a_catalogue_run_as_written(tmp_path, monkeypatch, capsys):
+    """The code block of the README section "How the HCD catalogues are built", run as written on the synthetic
+    snapshot above (only the path of the sightline file is replaced): it prints what the README shows, its settings
+    are those of config/default.yaml, and the catalogue it saves is read back."""
+    import ast
+
+    import yaml
+
+    repo = Path(__file__).resolve().parent.parent
+    text = (repo / "README.md").read_text(encoding="utf-8")
+    start = text.index("## How the HCD catalogues are built\n")
+    a = text.index("```python\n", start) + len("```python\n")
+    b = text.index("```\n", a)
+    code = text[a:b]
+    c = text.index("```text\n", b) + len("```text\n")
+    shown = text[c : text.index("```\n", c)]
+    assert text.index("```bash\n", c) < text.index(
+        "\n## ", c
+    )  # the command lines are in the same section
+    written = 'spectra = "SIMULATION/output/SPECTRA_017/lya_forest_spectra_grid_480.hdf5"\n'
+    assert code.count(written) == 1
+    snapshot = _synthetic_snapshot(tmp_path / "raw")
+    monkeypatch.chdir(tmp_path)
+    exec(compile(code.replace(written, f"spectra = {str(snapshot)!r}\n"), "README.md", "exec"), {})
+    assert capsys.readouterr().out == shown
+    saved = C.AbsorberCatalog.load_npz(tmp_path / "catalog.npz")
+    assert saved.summary() == {"LLS": 2, "subDLA": 0, "DLA": 0, "forest": 0}
+    # the settings written out in the README are the production ones of the config file
+    (call,) = [
+        n
+        for n in ast.walk(ast.parse(code))
+        if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "build_catalog"
+    ]
+    given = {
+        k.arg: ast.literal_eval(k.value)
+        for k in call.keywords
+        if k.arg in C.finder_settings.__code__.co_varnames
+    }
+    absorber = yaml.safe_load((repo / "config" / "default.yaml").read_text(encoding="utf-8"))[
+        "absorber"
+    ]
+    assert given == {
+        name: absorber[name]
+        for name in ("tau_threshold", "merge_dv_kms", "min_pixels", "fast_mode", "min_log_nhi")
+    }
+    # every print of the block carries a label, and the two command lines name real commands and options
+    for ln in code.splitlines():
+        assert not ln.startswith("print(") or ln.startswith('print("systems found, by class:"')
+    from click.testing import CliRunner
+
+    from hcd_analysis.cli.run import cli
+
+    for command in ("run-one", "run-sim"):
+        helped = CliRunner().invoke(cli, [command, "--help"]).output
+        assert "--sim" in helped and "--config" in helped
+        assert ("--snap" in helped) == (command == "run-one")
+    assert "hcd run-one --sim SIMULATION --snap 17 --config config/default.yaml" in text
+    assert "hcd run-sim --sim SIMULATION --config config/default.yaml" in text
+
+
 def _restamp(cat, like):
     """``cat`` with a copy of the lineage record of ``like`` (a catalogue build_catalog made for the same snapshot),
     its payload digest and count re-made to fit: what a hand edit of the record could produce."""

@@ -231,7 +231,54 @@ def test_mf_domain_flags(emu_mf):
     assert inside.flags["mf_z_clamped"] is False and inside.flags["mf_tau0_clamped"] is False
     assert inside.flags["mf_z_above_validated"] is False
     assert emu_mf.predict(PARAMS, 4.2, tau_eff=0.4).flags["mf_z_clamped"] is True
-    assert emu_mf.predict(PARAMS, 3.0, tau_eff=3.0).flags["mf_tau0_clamped"] is True
+    with pytest.warns(hp.MeanFluxRangeWarning):
+        assert emu_mf.predict(PARAMS, 3.0, tau_eff=3.0).flags["mf_tau0_clamped"] is True
+    # an LF prediction applies no correction, so neither lookup flag is set, where the LF+MF one above is
+    lf_hi = emu_mf.predict(PARAMS, 4.2, tau_eff=0.4, fidelity="LF")
+    assert lf_hi.flags["mf_applied"] is False and lf_hi.flags["mf_z_clamped"] is False
+    with pytest.warns(
+        hp.MeanFluxRangeWarning
+    ):  # the trained ladder still warns; the MF tables do not
+        lf_tau = emu_mf.predict(PARAMS, 3.0, tau_eff=3.0, fidelity="LF")
+    assert lf_tau.flags["mf_tau0_clamped"] is False
+    stack = emu_mf.predict_many(PARAMS, [3.0, 4.2], tau_eff=0.4, fidelity="LF")
+    assert stack.flags["mf_z_clamped"] is False and stack.flags["mf_tau0_clamped"] is False
+
+
+def test_a_mean_flux_outside_the_mf_tables_warns_once_whichever_range_it_leaves(emu_mf):
+    """An LF+MF prediction has two mean-flux ranges: the ladder the backbone was trained on, and the tables of the MF
+    correction. Outside either, one MeanFluxRangeWarning per call says which; an LF prediction ignores the MF's.
+    """
+    import warnings
+
+    from hcd_analysis.emulator.mean_flux_model import kim_tau0
+
+    z_tab, tau_by_z = emu_mf._mf_dom
+    mf_hi = max(float(np.interp(3.0, z_tab, tau_by_z[:, r])) for r in range(tau_by_z.shape[1]))
+    lf_lo, lf_hi = (a * float(kim_tau0(3.0)) for a in emu_mf._alpha_range)
+    assert (
+        mf_hi < 0.98 * lf_hi
+    )  # the synthetic MF tables end below the synthetic ladder: a gap to test in
+    t = 0.5 * (mf_hi + lf_hi)  # inside the ladder, outside the MF tables
+    with pytest.warns(hp.MeanFluxRangeWarning) as caught:
+        p = emu_mf.predict(PARAMS, 3.0, tau_eff=t)
+    assert len(caught) == 1 and caught[0].filename == __file__
+    assert p.flags["mf_tau0_clamped"] is True and p.flags["mean_flux_off_ladder"] is False
+    msg = str(caught[0].message)
+    assert "multi-fidelity correction's tables" in msg and "mf_tau0_clamped" in msg
+    assert f"{mf_hi:.4g}]" in msg and "at z = 3" in msg
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        lf = emu_mf.predict(
+            PARAMS, 3.0, tau_eff=t, fidelity="LF"
+        )  # the LF output does not use the MF tables
+        emu_mf.predict(PARAMS, 3.0, tau_eff=0.4)  # inside both
+    assert lf.flags["mf_applied"] is False
+    with pytest.warns(
+        hp.MeanFluxRangeWarning, match="trained on"
+    ) as caught:  # outside both: one warning, the ladder's
+        emu_mf.predict(PARAMS, 3.0, tau_eff=3.0)
+    assert len(caught) == 1
 
 
 def test_mf_above_the_validated_range_is_served_unchanged_but_flagged(info, emu_lf, tmp_path):

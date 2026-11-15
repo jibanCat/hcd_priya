@@ -1,6 +1,6 @@
 # Data Layout
 
-**Root:** `$HCD_LF_RAW_DIR/` (the LF simulation outputs; see the README's runtime data inputs)
+**Root:** `$HCD_LF_RAW_DIR/` (the LF simulation outputs; see the runtime data inputs in [`models_and_data.md`](models_and_data.md))
 
 ## Simulation Folders (60 total)
 

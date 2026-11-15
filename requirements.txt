@@ -1,7 +1,9 @@
 # The dependencies are declared in pyproject.toml. This file only installs the package itself, with the pinned
 # versions of the supported environment (README.md, docs/compatibility.md). Run it from the repository root:
-#   pip install -r requirements.txt
-# which is the same as:  pip install -c tools/ci/constraints-devenv.txt .
+#   pip install -r requirements.txt <path to the hcd_priya_models wheel>
+# which is the same as:  pip install -c tools/ci/constraints-devenv.txt . <path to the hcd_priya_models wheel>
+# hcd-priya requires the model package hcd-priya-models, which is not on the package index yet: give its wheel as a
+# file (README.md, "Install").
 # fake_spectra (simulation side only) is installed separately: docs/fake_spectra_integration.md
 -c tools/ci/constraints-devenv.txt
 .

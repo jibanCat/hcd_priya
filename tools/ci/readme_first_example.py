@@ -1,0 +1,138 @@
+"""Run the first example of the README exactly as it is written, in the current environment.
+
+    python -I tools/ci/readme_first_example.py README.md
+
+It takes the first Python block of the README's Quickstart and the output block printed under it, and checks:
+
+- the example writes the nine parameters out: it holds one ``params = {...}`` of plain numbers whose names are the
+  model's nine parameter names, it does not call ``example_params``, and the prediction is made at exactly those
+  written values (a first example never hides or computes its values);
+- it loads with ``hp.load_published`` and predicts;
+- it runs, and prints the lines the README shows. Each printed line is ``label: value``, and the README shows at
+  least one. With a published model every line must equal the README's. With a synthetic test build (untrained
+  networks, another number of wavenumbers) the labels must be the README's, in order, and the values are compared
+  only where they do not depend on the model;
+- ``pred.P_class`` is an array with four rows (clean, LLS, subDLA, DLA) and at least one column, of finite numbers.
+
+Run it with ``-I`` in an environment that has only the installed wheels: the script fails if ``hcd_analysis`` was
+imported from the directory that holds the README (a source tree), so the README is tested against the installation.
+Exit status 0 on success.
+"""
+
+from __future__ import annotations
+
+import ast
+import contextlib
+import io
+import os
+import sys
+
+# the labels whose value is the same for every model
+SAME_FOR_EVERY_MODEL = ("model", "classes, in the order of P_class")
+
+
+def blocks(text: str) -> tuple[str, str]:
+    """The first Python block of the Quickstart and the first text block after it."""
+    start = text.index("## Quickstart\n")
+    a = text.index("```python\n", start) + len("```python\n")
+    b = text.index("```\n", a)
+    c = text.index("```text\n", b) + len("```text\n")
+    return text[a:b], text[c : text.index("```\n", c)]
+
+
+def written_out_params(code: str) -> dict | None:
+    """The dict literal assigned to ``params`` in the example, if its keys are strings and its values numbers."""
+    for node in ast.walk(ast.parse(code)):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "params"
+            and isinstance(node.value, ast.Dict)
+        ):
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError:
+                return None
+            ok = all(isinstance(k, str) for k in value) and all(
+                isinstance(v, (int, float)) and not isinstance(v, bool) for v in value.values()
+            )
+            return value if ok else None
+    return None
+
+
+def main(argv=None) -> int:
+    (readme,) = argv if argv is not None else sys.argv[1:]
+    code, shown = blocks(open(readme, encoding="utf-8").read())
+    print(code.rstrip())
+    import numpy as np
+    import hcd_analysis
+    import hcd_analysis.predictor as hp
+
+    params = written_out_params(code)
+    if "example_params" in code or params is None:
+        print(
+            "FAILED: the first example must write the nine parameters out as params = {name: number, ...}"
+        )
+        return 1
+    if tuple(params) != tuple(hp.PARAM_NAMES):
+        print(
+            f"FAILED: the example's parameter names {tuple(params)} are not the model's {tuple(hp.PARAM_NAMES)}"
+        )
+        return 1
+    if "hp.load_published(" not in code or ".predict(" not in code:
+        print("FAILED: the first example must load with hp.load_published and predict")
+        return 1
+    want = shown.splitlines()
+    if not want or not all(": " in x for x in want):
+        print(
+            "FAILED: the README must show, under the example, the lines it prints, each as 'label: value'"
+        )
+        return 1
+    out = io.StringIO()
+    scope: dict = {}
+    with contextlib.redirect_stdout(out):
+        exec(compile(code, readme, "exec"), scope)
+    printed = out.getvalue().splitlines()
+    print("-> printed:")
+    for line in printed:
+        print("   " + line)
+    pred, emu = scope.get("pred"), scope.get("emu")
+    written = {k: float(v) for k, v in params.items()}
+    if scope.get("params") != params or getattr(pred, "params", None) != written:
+        print("FAILED: the prediction was not made at the parameter values the example writes out")
+        return 1
+    synthetic = bool(emu.provenance.get("release", {}).get("synthetic_build"))
+    label = lambda line: line.partition(": ")[0]
+    if [label(x) for x in printed] != [label(x) for x in want]:
+        print("FAILED: the example does not print the labels that the README shows under it:")
+        print(shown.rstrip())
+        return 1
+    for got, exp in zip(printed, want):
+        if got != exp and (not synthetic or label(exp) in SAME_FOR_EVERY_MODEL):
+            print(f"FAILED: the README shows the line {exp!r}, the example printed {got!r}")
+            return 1
+    print(
+        "-> a synthetic test build: labels compared, values only where every model agrees"
+        if synthetic
+        else "-> a published model: every printed line equals the README's"
+    )
+    value = pred.P_class
+    shape = getattr(value, "shape", None)
+    ok = shape is not None and len(shape) == 2 and shape[0] == 4 and shape[1] > 0
+    ok = ok and bool(np.all(np.isfinite(value)))
+    where = os.path.realpath(hcd_analysis.__file__)
+    tree = os.path.realpath(os.path.dirname(os.path.abspath(readme)))
+    print(f"-> pred.P_class has shape {shape}; finite: {ok}")
+    print(f"-> hcd_analysis {hcd_analysis.__version__} from {where}")
+    if os.path.commonpath([where, tree]) == tree:
+        print(
+            "FAILED: hcd_analysis was imported from the directory of the README, not from an installation"
+        )
+        return 1
+    print("PASSED" if ok else "FAILED: the result is not a finite (4, K) array with K > 0")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

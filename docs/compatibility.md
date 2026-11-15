@@ -39,8 +39,11 @@ opt-in replay with the pinned stack on the kind of CPU they were recorded on, x8
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
-pip install -c tools/ci/constraints-devenv.txt ".[test]"
+pip install -c tools/ci/constraints-devenv.txt ".[test]" <path to the hcd_priya_models wheel>
 ```
+
+`hcd-priya` requires the model package `hcd-priya-models`, which is not on the package index yet; the README's
+install section says where its wheel comes from.
 
 To run the scripts or the pipeline from a clone, install it editable (`-e`), as `CONTRIBUTING.md` does: the pipeline
 records the clone's commit, and only an editable install makes that the code that runs (with the changes

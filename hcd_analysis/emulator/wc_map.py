@@ -35,6 +35,7 @@ import os
 from typing import NamedTuple
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .. import lineage as L
 
@@ -335,7 +336,12 @@ def build(cache_path, out_path, *, expected_cache_sha256=None, require_release_e
 
 # ------------------------------------------------------------------------------------------------------- reading
 class WcMap(NamedTuple):
-    """A parsed, checked w_c map. Arrays are host numpy float64."""
+    """A parsed, checked w_c map: how a model turns its incidence dN/dX into fractions of sightlines.
+
+    A loaded model carries one (``emu.wc_map``). Its two fitted parts are ``xbar(z)``, the mean
+    absorption distance of a sightline, and ``delta_c(z)``, a small correction per class; ``w_c``
+    applies both. Arrays are host numpy float64.
+    """
 
     delta_c_coeffs: np.ndarray  # (4, 3) np.polyval order, class order CLASS_ORDER
     delta_c_z_clamp: tuple
@@ -366,9 +372,38 @@ class WcMap(NamedTuple):
         """Xbar(z) = np.polyval(xbar_coeffs, z) (not clamped: outside ``xbar_z_fit`` it is an extrapolation)."""
         return np.polyval(self.xbar_coeffs, np.asarray(z, dtype=np.float64))
 
-    def w_c(self, dndx, z):
-        """(..., 4) class fractions (clean, LLS, subDLA, DLA) from dN/dX (..., 3) at z: ``dndx_wc.w_c_corrected``
-        with this map's Xbar(z) and delta_c. Host numpy in, host numpy out."""
+    def w_c(self, dndx: ArrayLike, z: ArrayLike) -> np.ndarray:
+        """Fractions of sightlines per class from the incidence dN/dX, at redshift ``z``.
+
+        It is ``dndx_wc.w_c_corrected(dndx, self.xbar(z), z, self.delta_c_map())``: the Poisson model
+        of ``dndx_wc.w_c_from_mu`` with this map's mean path ``Xbar(z)`` and its fitted correction.
+        A prediction's ``w_c`` is this map applied to its ``dndx``, without the clean class.
+
+        Parameters
+        ----------
+        dndx : array_like
+            Shape (..., 3): the incidence dN/dX of LLS, subDLA, DLA.
+        z : array_like
+            The redshift: a scalar or shape (...).
+
+        Returns
+        -------
+        numpy.ndarray
+            Shape (..., 4): the fractions of clean, LLS, subDLA, DLA; they sum to one. Host numpy.
+
+        Examples
+        --------
+        ``emu`` is a loaded model and ``params`` its nine parameters, as in ``predictor.load_release``.
+
+        >>> import numpy as np
+        >>> pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+        >>> w4 = emu.wc_map.w_c(pred.dndx, 3.0)             # clean, LLS, subDLA, DLA
+        >>> w4.shape, bool(np.isclose(w4.sum(), 1.0)), bool(np.array_equal(w4[1:], pred.w_c))
+        ((4,), True, True)
+        >>> more_lls = emu.wc_map.w_c(pred.dndx * [1.5, 1.0, 1.0], 3.0)[1:]     # fractions for 50% more LLS
+        >>> bool(more_lls[0] > pred.w_c[0])
+        True
+        """
         import jax.numpy as jnp
         from .dndx_wc import w_c_corrected
 

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hcd-priya-models"
+dynamic = ["version"]
+description = "Trained models of the hcd_priya Lyman-alpha forest P1D emulator (data only)"
+readme = "README.md"
+authors = [{ name = "Ming-Feng Ho", email = "mfho@umich.edu" }]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+# Data only: this package imports nothing but the standard library. hcd-priya depends on it, never the reverse.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/jibanCat/hcd_priya"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["hcd_priya_models"]
+namespaces = false
+
+# The version is the bundle's version: prepare.py writes it to src/hcd_priya_models/_version.py.
+[tool.setuptools.dynamic]
+version = { attr = "hcd_priya_models._version.__version__" }
+
+# The model files are copied in by prepare.py before a build; they are never committed to git.
+[tool.setuptools.package-data]
+hcd_priya_models = ["data/**/*"]

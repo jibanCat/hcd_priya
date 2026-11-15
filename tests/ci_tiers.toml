@@ -34,6 +34,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_cddf_dx_patch.py" = { tier = "source" }
 "tests/test_cemu_t3.py" = { tier = "wheel" }
 "tests/test_cert_prereqs.py" = { tier = "source" }
+"tests/test_check_release.py" = { tier = "wheel" }
 "tests/test_ci_tiers.py" = { tier = "wheel" }
 "tests/test_ci_tools.py" = { tier = "source" }
 "tests/test_cli_config.py" = { tier = "wheel" }
@@ -45,6 +46,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_derive_dndx_historical.py" = { tier = "source" }
 "tests/test_derive_provenance.py" = { tier = "source" }
 "tests/test_dist_content.py" = { tier = "source" }
+"tests/test_docstring_examples.py" = { tier = "wheel" }
 "tests/test_dla_completeness_forward_parity.py" = { tier = "source" }
 "tests/test_dla_selfdraw_arm.py" = { tier = "source" }
 "tests/test_dla_truth.py" = { tier = "wheel" }
@@ -78,6 +80,7 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_legb_ctx_cache.py" = { tier = "wheel" }
 "tests/test_legb_tau0_priya.py" = { tier = "wheel" }
 "tests/test_likelihood_driver.py" = { tier = "wheel" }
+"tests/test_load_published.py" = { tier = "wheel" }
 "tests/test_lineage.py" = { tier = "wheel" }
 "tests/test_lit_dndx.py" = { tier = "source" }
 "tests/test_lit_dndx_fits.py" = { tier = "source" }
@@ -97,11 +100,13 @@ no_tests = "a file named test_*.py from which pytest collects no test; not run i
 "tests/test_predict_physical_grid.py" = { tier = "wheel" }
 "tests/test_predictor.py" = { tier = "wheel" }
 "tests/test_predictor_mf.py" = { tier = "wheel" }
+"tests/test_publish_workflow_is_disabled.py" = { tier = "source" }
 "tests/test_prod_forward_wiring.py" = { tier = "source" }
 "tests/test_prod_sbc_checkpoint.py" = { tier = "source" }
 "tests/test_product_manifest.py" = { tier = "wheel" }
 "tests/test_products_mf_loader.py" = { tier = "wheel" }
 "tests/test_rcinj_oos_spec.py" = { tier = "source" }
+"tests/test_readme_first_example.py" = { tier = "source" }
 "tests/test_real_fit_export.py" = { tier = "source" }
 "tests/test_registry.py" = { tier = "wheel" }
 "tests/test_res_corr_injection_gate.py" = { tier = "source" }

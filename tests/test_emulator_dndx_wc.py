@@ -240,3 +240,28 @@ def test_alpha_from_dndx_law_grad_through_A_gamma():
         return jnp.sum(alpha_to_dndx(al, Xbar, z, apply_delta=True))
 
     assert jnp.all(jnp.isfinite(jax.grad(chain)(A)))
+
+
+def test_the_default_map_is_the_historical_one_and_says_so():
+    import warnings
+
+    import pytest
+
+    import jax.numpy as jnp
+    import numpy as np
+
+    from hcd_analysis.emulator import dndx_wc as W
+
+    dndx, xbar, z = jnp.array([0.1, 0.02, 0.01]), jnp.array(1.0), jnp.array(3.0)
+    with pytest.warns(W.HistoricalMapWarning, match="uses the HISTORICAL map") as caught:
+        default = W.w_c_corrected(dndx, xbar, z)
+    assert len(caught) == 1 and caught[0].filename == __file__
+    with (
+        warnings.catch_warnings()
+    ):  # with the map given, also the historical one by name, nothing is warned
+        warnings.simplefilter("error")
+        named = W.w_c_corrected(dndx, xbar, z, W.HISTORICAL_DELTA_C)
+        W.w_c_corrected(dndx, xbar, z, W.DeltaCMap(np.zeros((4, 3)), 2.0, 5.4, "no correction"))
+    np.testing.assert_array_equal(
+        np.asarray(default), np.asarray(named)
+    )  # the warning changes no number

@@ -29,10 +29,16 @@ Questions about installing or using the package are welcome as issues too; say i
 
    ```bash
    python3.11 -m venv .venv && source .venv/bin/activate
-   pip install -c tools/ci/constraints-devenv.txt -e ".[test]"
+   pip install build && python -m build --wheel --outdir dist .
+   tools/ci/install_with_synthetic_models.sh python "$(ls dist/*.whl)[test]" dist/models \
+       -c tools/ci/constraints-devenv.txt
+   pip install --no-deps -e .
    ```
 
-   The install is editable, so the code you change is the code that runs. The pipeline records the clone's commit,
+   `hcd-priya` requires the model package `hcd-priya-models`. The second command builds it with a synthetic bundle
+   (untrained networks; `model_package/`) and installs it with the dependencies, so development and tests never
+   need a real model; `load_published` loads it only when `HCD_PRIYA_ALLOW_SYNTHETIC=1` is set. The last command
+   makes the install editable, so the code you change is the code that runs. The pipeline records the clone's commit,
    which describes the code only once your changes are committed; with uncommitted changes, each snapshot's
    metadata says so (`code_dirty`).
 

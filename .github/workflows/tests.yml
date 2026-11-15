@@ -62,7 +62,9 @@ jobs:
       # A failure here stops the job before the install and both test tiers, on purpose: fix the content first.
       - name: Scan the distribution for private or internal content
         run: python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt
-      - name: Install the wheel into a fresh virtual environment
+      # hcd-priya requires the model package hcd-priya-models. CI never needs the real models: the script builds the
+      # model package with a synthetic bundle (untrained networks; version 0+synthetic) and installs both wheels.
+      - name: Install the wheel and a synthetic model package into a fresh virtual environment
         id: install
         run: |
           python -m venv "$RUNNER_TEMP/venv"
@@ -70,10 +72,29 @@ jobs:
           if [ "${{ matrix.deps }}" = development-environment ]; then
             constraints=(-c tools/ci/constraints-devenv.txt)
           fi
-          "$RUNNER_TEMP/venv/bin/python" -m pip install "${constraints[@]}" "$(ls dist/*.whl)[test]"
+          tools/ci/install_with_synthetic_models.sh "$RUNNER_TEMP/venv/bin/python" "$(ls dist/*.whl)[test]" \
+            "$RUNNER_TEMP/dist_models" "${constraints[@]}"
+          sha256sum "$RUNNER_TEMP"/dist_models/*.whl
           "$RUNNER_TEMP/venv/bin/python" -m pip check
           mkdir -p "$RUNNER_TEMP/results"
           "$RUNNER_TEMP/venv/bin/python" -m pip freeze | tee "$RUNNER_TEMP/results/pip-freeze.txt"
+      # What a user gets: a clean environment with only the two wheels (no test extra, no clone on the import
+      # path). The first example of the README runs as written, and the release check loads the model of the model
+      # package. The model package is the synthetic build, so the test switch is set.
+      - name: Fresh install of both wheels, then the README's first example
+        env:
+          HCD_PRIYA_ALLOW_SYNTHETIC: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/fresh"
+          constraints=()
+          if [ "${{ matrix.deps }}" = development-environment ]; then
+            constraints=(-c tools/ci/constraints-devenv.txt)
+          fi
+          "$RUNNER_TEMP/fresh/bin/python" -m pip install "${constraints[@]}" \
+            "$(ls dist/*.whl)" "$(ls "$RUNNER_TEMP"/dist_models/*.whl)"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/fresh/bin/python" -I "$GITHUB_WORKSPACE/tools/ci/readme_first_example.py" "$GITHUB_WORKSPACE/README.md"
+          "$RUNNER_TEMP/fresh/bin/python" -I -m hcd_analysis.check_release --published
       - name: Wheel tier (the installed package, tests copied outside the checkout)
         run: >-
           "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier wheel --wheel "$(ls dist/*.whl)"
@@ -117,15 +138,17 @@ jobs:
       - name: Write a synthetic bundle with the pinned stack
         run: |
           python -m venv "$RUNNER_TEMP/pinned"
-          "$RUNNER_TEMP/pinned/bin/python" -m pip install -c tools/ci/constraints-devenv.txt "$(ls dist/*.whl)"
+          tools/ci/install_with_synthetic_models.sh "$RUNNER_TEMP/pinned/bin/python" "$(ls dist/*.whl)[test]" \
+            "$RUNNER_TEMP/dist_models" -c tools/ci/constraints-devenv.txt
           "$RUNNER_TEMP/pinned/bin/python" -I tools/ci/h5_cross_version.py write "$RUNNER_TEMP/xbundle"
       - name: Install the package with h5py built against the system libhdf5 1.10
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libhdf5-dev pkg-config
           python -m venv "$RUNNER_TEMP/old"
-          HDF5_DIR=/usr/lib/x86_64-linux-gnu/hdf5/serial "$RUNNER_TEMP/old/bin/python" -m pip install --no-binary h5py \
-            -c tools/ci/constraints-devenv.txt "$(ls dist/*.whl)[test]"
+          HDF5_DIR=/usr/lib/x86_64-linux-gnu/hdf5/serial tools/ci/install_with_synthetic_models.sh \
+            "$RUNNER_TEMP/old/bin/python" "$(ls dist/*.whl)[test]" "$RUNNER_TEMP/dist_models" \
+            --no-binary h5py -c tools/ci/constraints-devenv.txt
           "$RUNNER_TEMP/old/bin/python" -c "import h5py; print('h5py', h5py.version.version, 'libhdf5', h5py.version.hdf5_version)"
       - name: Read the bundle with libhdf5 1.10, bit for bit
         run: '"$RUNNER_TEMP/old/bin/python" -I tools/ci/h5_cross_version.py read "$RUNNER_TEMP/xbundle" --max-hdf5 1.11'

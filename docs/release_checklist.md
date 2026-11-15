@@ -58,7 +58,39 @@ code release (see the last section).
 - [ ] The maintainer approves, then tags the release commit and publishes the GitHub release.
 - [ ] The release is archived (for example on Zenodo), and the archive DOI is added to `CITATION.cff`.
 
-## 7. Models and data (a separate decision)
+## 7. Models (a separate decision, with its own approval)
+
+The trained models are published as the package `hcd-priya-models` (`model_package/`), which `hcd-priya` requires.
+The order matters, because the code names the model it accepts:
+
+1. the model is accepted, and its entry (version and the sha256 of its `release.json`) is added to
+   `hcd_analysis/published_models.py`;
+2. the code is merged and tagged **with that entry** (code tagged without it accepts no model);
+3. the model package is built from the same accepted release and published;
+4. then the code package; then the archive.
+
+Each step needs the maintainer's approval. The publishing workflow (`.github/workflows/publish.yml`) is manual and
+disabled until then.
+
 - [ ] A model is released only after its own acceptance: a clean lineage, a published manifest digest and a model
       card.
-- [ ] The registry gets the model's entry only after that.
+- [ ] The model package is prepared from the accepted release, in a clean clone: `python model_package/prepare.py
+      --release RELEASE_DIR --release-sha256 SHA256` checks the digest, copies only what the release names and its
+      documentation files, and verifies every file. Its version is the release's version. The model files are not
+      committed.
+- [ ] The entry that `prepare.py` prints (name, version, format, the sha256 of `release.json`) is in
+      `hcd_analysis/published_models.py` of the commit to be tagged, and the dependency range of
+      `hcd-priya-models` in `pyproject.toml` contains that version.
+- [ ] The model wheel and source archive are built (`python -m build --outdir <folder> model_package`), and
+      `python tools/ci/check_dist_content.py <folder> --release` reports 0 findings.
+- [ ] **Blocking: the fresh install.** In a new environment that holds only the two built wheels (no clone on the
+      import path), with `HCD_PRIYA_ALLOW_SYNTHETIC` unset: `python -I tools/ci/readme_first_example.py README.md`
+      passes (the first example of the README, as written), and `python -I -m hcd_analysis.check_release --published
+      --reference reference_predictions.json` ends in the plain line `PASSED` (every file verifies; the
+      predictions agree with the reference predictions published beside the release). A run that ends in
+      "PASSED (synthetic build ...)" is not this check. The reference is written once, on the supported
+      environment, with `--write-reference`.
+- [ ] A dry run on the test index, then the model package on the index, then the code package, by the manual
+      workflow. A synthetic build (version `0+synthetic`) cannot be uploaded: the index refuses a local version.
+- [ ] After publication: the statements "not published yet" in `README.md`, `model_package/README.md` and the
+      docstrings are updated, and the install commands become `pip install hcd-priya`.
