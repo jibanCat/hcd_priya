@@ -10,8 +10,9 @@
    Either chain starts at the truth of the mock. This script is a single process: it does not run under MPI.
 3. **The figures.** After a chain: the posterior predictive (model vectors at points of the chain, with one noisy
    replicate of the data for each, drawn as a band over the data vector). With the example download: the stored
-   reference, a converged posterior for the same mock, drawn underneath, and the intervals of the eleven parameters
-   with the truth marked.
+   reference, a converged posterior for the same mock, drawn underneath, and two figures drawn from the stored
+   reference and the mock alone (``draw_reference``): the intervals of the eleven parameters with the truth marked,
+   and the mock per redshift with the stored bands of the posterior predictive.
 
 **The example download** (``--download DIR``, or the environment variable ``HCD_PRIYA_EXAMPLE_DOWNLOAD``) is one
 directory with the mock, the model that goes with it and the stored reference; ``DOWNLOAD`` below names its items and
@@ -419,8 +420,9 @@ def part_two(like, theta, a) -> dict | None:
 
 
 def part_three(like, chain, reference, a) -> None:
-    """The figures: the posterior predictive of the data vector and, with a stored reference, the intervals of the
-    parameters. The stored reference is drawn underneath in grey, the chain of this run over it in colour.
+    """The figures: the posterior predictive of the data vector and, with a stored reference, the two figures of
+    ``draw_reference`` (the intervals of the parameters; the mock and the stored bands per redshift). The stored
+    reference is drawn in grey, the chain of this run over it in colour.
     """
     if chain is None and reference is None:
         print("=== Part 3: no chain, so no posterior predictive")
@@ -508,9 +510,80 @@ def part_three(like, chain, reference, a) -> None:
     fig.savefig(path, dpi=150)
     plt.close(fig)
     line("figure written", path)
-    if reference is None:
-        return
-    # The intervals of the parameters, each on the scale of its flat box (0 and 1 are the edges of the box).
+    if reference is not None:
+        draw_reference(
+            reference,
+            data,
+            a.out,
+            chain_summary=None if chain is None else chain["summary"],
+            demo=bool(a.demo),
+        )
+
+
+def reference_panels(reference, data) -> list:
+    """What each panel of the figure per redshift draws, as numbers: for each redshift of the mock its wavenumbers,
+    the mock there, and the stored bands of the posterior predictive there (one pair of rows per entry of
+    ``REFERENCE_BANDS``), each multiplied by k / pi. Nothing is interpolated: the bins are the mock's and the
+    reference's, which ``reference.check_bins`` requires to be the same."""
+    reference.check_bins(data)
+    bands = {pair: reference.band(*pair) for pair in REFERENCE_BANDS}
+    panels = []
+    for z, k, sl in zip(data.z, data.k, data.slices()):
+        panel = {"z": z, "k": k, "mock": k * data.p1d[sl] / np.pi}
+        for pair, (lo, hi) in bands.items():
+            panel[pair] = (k * lo[sl] / np.pi, k * hi[sl] / np.pi)
+        panels.append(panel)
+    return panels
+
+
+def _download_item(name: str) -> str:
+    place, sha = DOWNLOAD[name]
+    return f"{place} of the example download, sha256 {sha}"
+
+
+def _write_figure(fig, path: str, facts: dict) -> None:
+    """Write the image and, beside it, a side file (.json) that says in words what it shows and from what."""
+    import matplotlib.pyplot as plt
+
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    with open(os.path.splitext(path)[0] + ".json", "w", encoding="utf-8") as fh:
+        json.dump(facts, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    line("figure written", path)
+
+
+def draw_reference(reference, data, out: str, *, chain_summary=None, demo: bool = False) -> list:
+    """The two figures of the stored reference. They are drawn from the stored reference and the mock alone: no
+    model, no likelihood. Anyone with the example download draws the same two figures.
+
+    1. ``posterior_intervals.png``: for each of the eleven parameters, on the scale of its flat box (``BOXES``), the
+       reference's mean and its central 68 and 95 per cent intervals, with the truth. A chain of this run, if given
+       (``chain_summary``: the 16th, 50th and 84th percentile of each parameter), is drawn over it in colour.
+    2. ``posterior_predictive_per_redshift.png``: one panel per redshift, with the mock and the stored bands of the
+       posterior predictive (``REFERENCE_BANDS``), as k P(k) / pi against k.
+
+    Each image has a side file with the same name and the ending .json. It says in words what the image shows and
+    which items of the download it was drawn from; it holds no value of the reference or of the mock. Returns the
+    paths of the two images.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    os.makedirs(out, exist_ok=True)
+    panels = reference_panels(
+        reference, data
+    )  # checks first that the reference and the mock share their bins
+    said = {
+        "reference": _download_item("reference"),
+        "made_by": "examples/mock_recovery.py, part three (draw_reference); it needs the example download",
+        "covariance": "the covariance of the mock alone: no emulator error is added",
+    }
+    not_converged = " (NOT CONVERGED)" if demo else ""
+
+    # 1. The intervals of the parameters, each on the scale of its flat box (0 and 1 are the edges of the box).
     names = reference.param_names
     lo_box = np.array([BOXES[n][0] for n in names])
     width = np.array([BOXES[n][1] - BOXES[n][0] for n in names])
@@ -527,33 +600,93 @@ def part_three(like, chain, reference, a) -> None:
         unit(reference.mean[:, None])[:, 0], y, "o", color="k", ms=4, label="stored reference, mean"
     )
     ax.plot(unit(reference.truth[:, None])[:, 0], y, "|", color="C3", ms=14, mew=1.6, label="truth")
-    if chain is not None:
-        c = unit(chain["summary"])
+    if chain_summary is not None:
+        c = unit(chain_summary)
         ax.hlines(
             y - 0.3,
             c[:, 0],
             c[:, 2],
             color="C0",
             lw=2.5,
-            label="this run, 16th to 84th percentile" + (" (NOT CONVERGED)" if a.demo else ""),
+            label="this run, 16th to 84th percentile" + not_converged,
         )
-        ax.plot(
-            c[:, 1],
-            y - 0.3,
-            "o",
-            color="C0",
-            ms=3,
-            label="this run, median" + (" (NOT CONVERGED)" if a.demo else ""),
-        )
+        ax.plot(c[:, 1], y - 0.3, "o", color="C0", ms=3, label="this run, median" + not_converged)
     ax.set_yticks(y)
     ax.set_yticklabels(names)
     ax.set_xlim(-0.02, 1.02)
     ax.set_xlabel("position in the flat box of the parameter (0 and 1 are its edges)")
     ax.legend(frameon=False, fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2)
-    path = os.path.join(a.out, "posterior_intervals.png")
-    fig.savefig(path, dpi=150)
-    plt.close(fig)
-    line("figure written", path)
+    if chain_summary is None:
+        chain_said = "none: the stored reference alone"
+    else:
+        chain_said = "a chain of this run, drawn over the stored reference in colour" + (
+            ": a demonstration chain, NOT CONVERGED" if demo else ""
+        )
+    intervals = os.path.join(out, "posterior_intervals.png")
+    _write_figure(
+        fig,
+        intervals,
+        dict(
+            said,
+            figure="the mean and the central 68 and 95 per cent intervals of the stored reference for each of the "
+            "eleven parameters, with the truth of the mock",
+            scale="each parameter on its flat box of the example (BOXES): 0 and 1 are the edges of the box",
+            chain=chain_said,
+        ),
+    )
+
+    # 2. The mock and the stored bands of the posterior predictive, one panel per redshift.
+    ncols = min(3, len(panels))
+    nrows = -(-len(panels) // ncols)
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(3.0 * ncols, 2.2 * nrows + 0.8),
+        sharex=True,
+        squeeze=False,
+        layout="constrained",
+    )
+    for ax, panel in zip(axes.flat, panels):
+        for (lower, upper), shade in zip(REFERENCE_BANDS, (0.15, 0.3)):
+            ax.fill_between(
+                panel["k"],
+                *panel[(lower, upper)],
+                color="0.3",
+                alpha=shade,
+                lw=0,
+                label=f"{lower:g} to {upper:g} per cent of the replicates",
+            )
+        ax.plot(panel["k"], panel["mock"], "o", color="C3", ms=3, label="the mock")
+        ax.set_xscale("log")
+        ax.set_title(f"z = {panel['z']:.1f}")
+    for ax in axes.flat[len(panels) :]:
+        ax.set_visible(False)  # a grid has more places than there are redshifts
+    for ax in axes[-1]:
+        ax.set_xlabel("k (s/km)")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("k P(k) / pi")
+    fig.suptitle("The mock and the posterior predictive of the stored reference (in grey)")
+    fig.legend(
+        *axes.flat[0].get_legend_handles_labels(),
+        loc="outside lower center",
+        ncols=3,
+        frameon=False,
+    )
+    per_redshift = os.path.join(out, "posterior_predictive_per_redshift.png")
+    _write_figure(
+        fig,
+        per_redshift,
+        dict(
+            said,
+            figure="the mock at each of its redshifts, with the stored bands of the posterior predictive of the "
+            "stored reference (replicates of the data: the model at a posterior draw plus noise from the covariance)",
+            mock=_download_item("mock"),
+            bands="the stored percentiles 2.5 to 97.5 and 16 to 84 of the posterior predictive (REFERENCE_BANDS)",
+            y="k P(k) / pi, with k angular in s/km",
+            chain="none: this figure shows the stored reference and the mock alone",
+        ),
+    )
+    return [intervals, per_redshift]
 
 
 def main(argv=None) -> int:

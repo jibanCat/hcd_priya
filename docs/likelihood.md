@@ -228,12 +228,15 @@ third runs on a model and a mock of your own, and then has no stored reference.
 - **Part 3** draws the figures. After a chain: the posterior predictive of the data vector, `posterior_predictive.png`
   (model vectors at points of the chain, each with one replicate of the data drawn from the covariance). With the
   example download the stored reference is drawn underneath in grey (its 2.5 to 97.5 and 16 to 84 per cent bands),
-  and a second figure, `posterior_intervals.png`, shows for each of the eleven parameters the reference's mean and
-  its 68 and 95 per cent intervals, the truth, and the 16th to 84th percentile of the chain of the run, each on the
-  scale of the parameter's flat box. The part also prints the reference's mean and 68 per cent interval of each
-  parameter, labelled. Without a chain the figures show the stored reference alone. A `--demo` chain drawn over
-  the reference is labelled NOT CONVERGED in both figures: the reference is a converged posterior, a demonstration
-  chain is not, and the two are not expected to agree.
+  and `draw_reference` draws two more figures from the stored reference and the mock alone (shown below, in the
+  section on the download): `posterior_intervals.png`, for each of the eleven parameters the reference's mean, its
+  68 and 95 per cent intervals and the truth, each on the scale of the parameter's flat box, with the 16th to 84th
+  percentile of the chain of the run over it; and `posterior_predictive_per_redshift.png`, the mock at each
+  redshift with the stored bands of the posterior predictive. Each of the two has a side file (`.json`) that says
+  in words what it shows and from which items of the download. The part also prints the reference's mean and 68
+  per cent interval of each parameter, labelled. Without a chain the figures show the stored reference alone. A
+  `--demo` chain drawn over the reference is labelled NOT CONVERGED in the figures: the reference is a converged
+  posterior, a demonstration chain is not, and the two are not expected to agree.
 
 What the example fixes is written out at the top of the script:
 
@@ -294,6 +297,23 @@ written in the script, as `DOWNLOAD`):
 - **What the reference is not.** No emulator error is in the covariance, so its intervals are narrower than ones
   that account for the error of the emulator. It is one mock on one model: it says that the pieces recover a known
   point of a simulation, and nothing about any measurement.
+
+### The stored reference, drawn
+
+The two figures below are drawn by `draw_reference`, in part three of the example, from the stored reference and
+the mock of the download alone: no model, no chain. With the download, `python examples/mock_recovery.py --download
+DOWNLOAD_DIR` writes the same two images (and the posterior predictive over the data vector) into
+`mock_recovery_out/`; without the download they cannot be redrawn. Their side files, beside them in
+`docs/figures/mock_recovery/`, say in words what each image shows and name the reference and the mock by their
+sha256.
+
+Reading the first figure: the Gaussian terms on `hub` and `bhfeedback` are centred at 0.70 and 0.05, away from the
+truth of this mock, and the truth of `omegamh2` lies near the lower edge of its box, so the means of these three sit
+away from their truth for that reason. The interval of `ns` spans most of its box: these bins constrain it little.
+
+![The stored reference for the eleven parameters: the mean, the central 68 and 95 per cent intervals and the truth of the mock, each on the scale of the parameter's flat box](figures/mock_recovery/posterior_intervals.png)
+
+![The mock at each of its nine redshifts, with the 2.5 to 97.5 and 16 to 84 per cent bands of the stored posterior predictive](figures/mock_recovery/posterior_predictive_per_redshift.png)
 
 ## A loader for the XQ-100 P1D, and nothing more
 

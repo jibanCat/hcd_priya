@@ -422,8 +422,18 @@ def test_the_download_gives_the_model_the_mock_and_the_reference_and_part_three_
         "stored reference, ns: mean, lower and upper end of the central 68 per cent interval | truth: "
     )
     assert any(ln.startswith("the chain of this run: none") for ln in lines)
-    for name in ("posterior_predictive.png", "posterior_intervals.png"):
+    for name in (
+        "posterior_predictive.png",
+        "posterior_intervals.png",
+        "posterior_predictive_per_redshift.png",
+    ):
         assert (out_dir / name).stat().st_size > 1000, name
+    written = [ln for ln in lines if ln.startswith("figure written")]
+    assert [os.path.basename(ln.split(": ", 1)[1]) for ln in written] == [
+        "posterior_predictive.png",
+        "posterior_intervals.png",
+        "posterior_predictive_per_redshift.png",
+    ]
     body = [ln for ln in lines if not ln.startswith("===")]
     labelled = re.compile(r"[a-zA-Z(][^:]{8,}: \S")
     assert all(labelled.match(ln) for ln in body), [ln for ln in body if not labelled.match(ln)]
@@ -580,6 +590,24 @@ def test_the_docs_list_the_items_of_the_download_with_the_sha256_written_in_the_
     assert ex.DOWNLOAD_FORMAT in text and ex.DOWNLOAD_MANIFEST in text
 
 
+def test_the_committed_figures_of_the_stored_reference_name_the_items_the_script_pins():
+    """docs/figures/mock_recovery holds the two figures that draw_reference draws from the example download, with
+    their side files. The side files must name the reference and the mock that the script pins, so a new download
+    cannot leave old figures behind; the docs show both figures."""
+    ex = _script()
+    root = os.path.join(REPO, "docs", "figures", "mock_recovery")
+    names = ("posterior_intervals", "posterior_predictive_per_redshift")
+    assert sorted(os.listdir(root)) == sorted(n + end for n in names for end in (".json", ".png"))
+    intervals, per_redshift = (_side_file(os.path.join(root, n + ".png")) for n in names)
+    for facts in (intervals, per_redshift):
+        assert facts["reference"] == ex._download_item("reference")
+        assert facts["chain"].startswith("none: ")
+    assert per_redshift["mock"] == ex._download_item("mock")
+    text = open(os.path.join(REPO, "docs", "likelihood.md"), encoding="utf-8").read()
+    for n in names:
+        assert f"](figures/mock_recovery/{n}.png)" in text, n
+
+
 def test_a_chain_is_drawn_over_the_stored_reference(download, capsys, monkeypatch, tmp_path):
     """Parts two and three on the synthetic download with a stand-in for Cobaya: both figures are written, the
     demonstration chain is labelled, and the library's record of the corrections appears once, not once per call.
@@ -631,3 +659,71 @@ def test_a_chain_is_drawn_over_the_stored_reference(download, capsys, monkeypatc
     assert "the chain of this run: none" not in out
     for name in ("posterior_predictive.png", "posterior_intervals.png"):
         assert (out_dir / name).stat().st_size > 1000, name
+    facts = json.loads((out_dir / "posterior_intervals.json").read_text())
+    assert facts["chain"] == (
+        "a chain of this run, drawn over the stored reference in colour: a demonstration chain, NOT CONVERGED"
+    )
+    facts = json.loads((out_dir / "posterior_predictive_per_redshift.json").read_text())
+    assert facts["chain"] == "none: this figure shows the stored reference and the mock alone"
+
+
+# ------------------------------------------------------------------- the two figures of the stored reference alone
+def _side_file(path):
+    with open(os.path.splitext(path)[0] + ".json", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def test_the_figures_of_the_stored_reference_need_the_reference_and_the_mock_only(
+    download, monkeypatch, tmp_path
+):
+    """No model and no chain: the two figures are drawn from the stored reference and the mock alone, so anyone with
+    the download draws the same two figures. Each has a side file that says in words what it shows and from what, and
+    holds no value of the reference or of the mock."""
+    ex = _script()
+    monkeypatch.setattr(ex, "DOWNLOAD", download["pins"])
+    mock = download["mock"]
+    paths = ex.draw_reference(_made_up_reference(mock), mock, str(tmp_path / "figs"))
+    assert [os.path.basename(p) for p in paths] == [
+        "posterior_intervals.png",
+        "posterior_predictive_per_redshift.png",
+    ]
+    ref_place, ref_sha = download["pins"]["reference"]
+    mock_place, mock_sha = download["pins"]["mock"]
+    for path in paths:
+        assert os.path.getsize(path) > 1000, path
+        facts = _side_file(path)
+        assert all(isinstance(v, str) for v in facts.values()), facts  # words only, no values
+        assert facts["reference"] == f"{ref_place} of the example download, sha256 {ref_sha}"
+        assert facts["made_by"] == (
+            "examples/mock_recovery.py, part three (draw_reference); it needs the example download"
+        )
+        assert facts["covariance"] == "the covariance of the mock alone: no emulator error is added"
+    intervals, per_redshift = (_side_file(p) for p in paths)
+    assert intervals["chain"] == "none: the stored reference alone"
+    assert intervals["scale"] == (
+        "each parameter on its flat box of the example (BOXES): 0 and 1 are the edges of the box"
+    )
+    assert (
+        "mock" not in intervals
+    )  # the truth is the reference's own, checked against the mock when it is read
+    assert per_redshift["mock"] == f"{mock_place} of the example download, sha256 {mock_sha}"
+    assert per_redshift["bands"] == (
+        "the stored percentiles 2.5 to 97.5 and 16 to 84 of the posterior predictive (REFERENCE_BANDS)"
+    )
+    assert per_redshift["y"] == "k P(k) / pi, with k angular in s/km"
+
+
+def test_the_panels_per_redshift_are_the_mock_and_the_stored_bands_at_that_redshift(download):
+    """What each panel draws: the bins of one redshift, the mock there, and the stored bands there, all times k / pi.
+    The made-up reference puts its 16 and 84 per cent rows one sigma below and above the mock."""
+    ex = _script()
+    mock = download["mock"]
+    sigma = np.sqrt(np.diag(mock.cov))
+    panels = ex.reference_panels(_made_up_reference(mock), mock)
+    assert [p["z"] for p in panels] == list(mock.z)
+    for p, sl, k in zip(panels, mock.slices(), mock.k):
+        np.testing.assert_array_equal(p["k"], k)
+        np.testing.assert_allclose(p["mock"], k * mock.p1d[sl] / np.pi, rtol=1e-15)
+        np.testing.assert_allclose(p[(16.0, 84.0)][0], k * (mock.p1d[sl] - sigma[sl]) / np.pi)
+        np.testing.assert_allclose(p[(16.0, 84.0)][1], k * (mock.p1d[sl] + sigma[sl]) / np.pi)
+        np.testing.assert_allclose(p[(2.5, 97.5)][1], k * (mock.p1d[sl] + 2 * sigma[sl]) / np.pi)

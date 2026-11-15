@@ -1,0 +1,10 @@
+{
+ "bands": "the stored percentiles 2.5 to 97.5 and 16 to 84 of the posterior predictive (REFERENCE_BANDS)",
+ "chain": "none: this figure shows the stored reference and the mock alone",
+ "covariance": "the covariance of the mock alone: no emulator error is added",
+ "figure": "the mock at each of its redshifts, with the stored bands of the posterior predictive of the stored reference (replicates of the data: the model at a posterior draw plus noise from the covariance)",
+ "made_by": "examples/mock_recovery.py, part three (draw_reference); it needs the example download",
+ "mock": "mock.p1d.json of the example download, sha256 95b155c00600499618f826e8f5b660c917c16b9bd73e32099201ca49cdd88a0d",
+ "reference": "reference.json of the example download, sha256 bf74d07bf3326bd3952515b852e99e3202f8c1b4cc69253dfb19700f58923807",
+ "y": "k P(k) / pi, with k angular in s/km"
+}
