@@ -293,17 +293,21 @@ A research (fold) model of your own, trained without the simulation your mock co
 on a model and a mock of your own. This section says what the download is, so that the script and the files can be
 checked against each other when it exists.
 
+The example covers z 2.2 to 4.2: 11 redshifts with 11 wavenumbers each, 121 bins. z 2.2 is the lower edge of the
+grouped-validation domain of the model's multi-fidelity correction of the P1D (z 2.2 to 4.6; a domain edge, not a
+statement that a validation was passed); below it the model refuses an LF+MF prediction.
+
 The download is one directory. `--download DIR` names it, or the environment variable `HCD_PRIYA_EXAMPLE_DOWNLOAD`
 when no model is named on the command line. Its items, each with the sha256 it must have (the values are also
 written in the script, as `DOWNLOAD`):
 
 | Item | Place in the directory | What it is | sha256 |
 |---|---|---|---|
-| `mock` | `mock.p1d.json` | The data set: the P1D of one PRIYA high-resolution simulation, named in the file's provenance and one of the three high-resolution runs listed in `Emulator_Files/hires/emulator_params.json` of the public repository `jibanCat/InferenceLyaData`, at 9 redshifts and 11 wavenumbers each (99 bins), times a resolution table, with a covariance per redshift derived from the KODIAQ-SQUAD P1D of Karacayli et al. (2022), and the truth. No measured P1D is in it. Its provenance names the inputs | `95b155c00600499618f826e8f5b660c917c16b9bd73e32099201ca49cdd88a0d` |
+| `mock` | `mock.p1d.json` | The data set: the P1D of one PRIYA high-resolution simulation, named in the file's provenance and one of the three high-resolution runs listed in `Emulator_Files/hires/emulator_params.json` of the public repository `jibanCat/InferenceLyaData`, at 11 redshifts from 2.2 to 4.2 and 11 wavenumbers each (121 bins), times a resolution table, with a covariance per redshift derived from the KODIAQ-SQUAD P1D of Karacayli et al. (2022), and the truth. No measured P1D is in it. Its provenance names the inputs | `b7db66e81a20c25de571f39fad1a362d7c844a855487a46b31208354ce5efc34` |
 | `model` | `model/` | A research bundle: a fold model, trained WITHOUT the simulation of the mock. The sha256 is that of its `manifest.json`, which names every other file of the bundle by its own sha256 | `f8a830af3faaffc4f47d90f2fc596d4d8cc9760fc3057127da22cea0771638e2` |
 | `mf_record` | `mf_record/` | The fold's MF record, built without that simulation. The sha256 is that of the record | `e639c4b187eface66e5e99bad1efe5645e409fe916f353cd0ef2f88d97bc2fa5` |
 | `incidence_record` | `incidence_record/` | The fold's incidence record, built without that simulation. The sha256 is that of the record | `094522ca1a44f153f6661df5e7eed8211ce836c6864f779021271c109e2eb02f` |
-| `reference` | `reference.json` | The stored reference: a summary of a converged posterior for this mock on this model, and its posterior predictive band | `bf74d07bf3326bd3952515b852e99e3202f8c1b4cc69253dfb19700f58923807` |
+| `reference` | `reference.json` | The stored reference: a summary of a converged posterior for this mock on this model, and its posterior predictive band | `35a0ad02dfa502234c79775ba4b37f82a8ec2efd2c162b4fe7b35b0e968cc8ac` |
 
 - **The model is not the release model.** It is one fold of the cross-validation, trained without the simulation
   the mock was made from, so that the recovery is a held-out one. It loads only through `load_research_bundle`, with
@@ -316,14 +320,15 @@ written in the script, as `DOWNLOAD`):
   draw. Every such refusal ends the script with one line that starts with "refusing:".
 - **What the stored reference holds, and nothing more:** the truth of the mock, the posterior mean and the central
   68 and 95 per cent intervals of the eleven parameters, and the percentiles 2.5, 16, 50, 84 and 97.5 of the
-  posterior predictive on the 99 bins. It comes from the project's own reference chains for this mock: Cobaya's MCMC
+  posterior predictive on the 121 bins. It comes from the project's own reference chains for this mock: Cobaya's MCMC
   sampler, four chains, stopped at R-1 below 0.01 for the means and below 0.05 for the 95 per cent bounds, the first
   30 per cent of each chain dropped; the flat boxes and the two Gaussian terms of the example; the model and the mock
   of the download. The predictive percentiles are over 1,000 posterior draws of a replicate of the data vector (the
   model vector at the draw plus noise from the data covariance). The chains were sampled with the project's private
-  reference likelihood, not with this module; the two were compared on the fold models and mocks of two runs (the
-  run of this example, and before it another high-resolution run) and agree: to rounding at the truth, and at the
-  printed precision of the reference chain files at 32 points of the prior box each.
+  reference likelihood, not with this module; the two were compared on the fold model and the mock of this example,
+  on its present layout (121 bins) and on the earlier one (99 bins, z 2.6 to 4.2), and before that on another
+  high-resolution run, and agree: to rounding at the truth, and at the printed precision of the reference chain
+  files at 32 points of the prior box each time.
 - **What the reference is not.** No emulator error is in the covariance, so its intervals are narrower than ones
   that account for the error of the emulator. It is one mock on one model: it says that the pieces recover a known
   point of a simulation, and nothing about any measurement.
@@ -343,7 +348,7 @@ away from their truth for that reason. The interval of `ns` spans most of its bo
 
 ![The stored reference for the eleven parameters: the mean, the central 68 and 95 per cent intervals and the truth of the mock, each on the scale of the parameter's flat box](figures/mock_recovery/posterior_intervals.png)
 
-![The mock at each of its nine redshifts, with the 2.5 to 97.5 and 16 to 84 per cent bands of the stored posterior predictive](figures/mock_recovery/posterior_predictive_per_redshift.png)
+![The mock at each of its eleven redshifts, with the 2.5 to 97.5 and 16 to 84 per cent bands of the stored posterior predictive](figures/mock_recovery/posterior_predictive_per_redshift.png)
 
 ## A loader for the XQ-100 P1D, and nothing more
 
