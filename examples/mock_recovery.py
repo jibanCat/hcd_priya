@@ -29,6 +29,9 @@ one that accounts for the error of the emulator.
 
 Nothing is fitted to a measurement here: the data vector is a simulation's.
 
+The figures are saved to files and never shown, under whatever matplotlib backend your session has; in a session
+without a display set MPLBACKEND=Agg in the environment.
+
     python examples/mock_recovery.py --download DOWNLOAD_DIR --demo 200 --out out/
     python examples/mock_recovery.py --release RELEASE_DIR SHA256 --data MOCK_FILE SHA256
     python examples/mock_recovery.py --research BUNDLE_DIR SHA256 --purpose "a held-out mock recovery" \\
@@ -174,7 +177,9 @@ def parse(argv=None) -> argparse.Namespace:
         "--draws", type=int, default=200, help="points of the chain used for the predictive"
     )
     ap.add_argument(
-        "--out", default="mock_recovery_out", help="the folder for the chain and the figures"
+        "--out",
+        default="mock_recovery_out",
+        help="the folder for the chain and the figures (files only; without a display, set MPLBACKEND=Agg)",
     )
     a = ap.parse_args(argv)
     if a.download is not None and not a.download:
@@ -427,9 +432,6 @@ def part_three(like, chain, reference, a) -> None:
     if chain is None and reference is None:
         print("=== Part 3: no chain, so no posterior predictive")
         return
-    import matplotlib
-
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     os.makedirs(a.out, exist_ok=True)
@@ -567,9 +569,6 @@ def draw_reference(reference, data, out: str, *, chain_summary=None, demo: bool 
     which items of the download it was drawn from; it holds no value of the reference or of the mock. Returns the
     paths of the two images.
     """
-    import matplotlib
-
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     os.makedirs(out, exist_ok=True)

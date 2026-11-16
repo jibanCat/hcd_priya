@@ -12,10 +12,15 @@ Any other failure fails the test, and a pass fails it too (strict), so each mark
 rebuilt against the current interface.
 """
 
+import os
 import re
 
-import jax
-import pytest
+# The tests draw figures and never show them. The backend is set here, in the tests' own environment, and not in
+# the package, the example or the figure scripts, where it is the user's choice.
+os.environ.setdefault("MPLBACKEND", "Agg")
+
+import jax  # noqa: E402
+import pytest  # noqa: E402
 
 jax.config.update("jax_enable_x64", True)
 

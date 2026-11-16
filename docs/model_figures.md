@@ -3,7 +3,8 @@
 Three figures, each drawn by one script of `scripts/figures/`. The data files they read are committed under
 `docs/figures/data`. The class-ratio figure regenerates from the repository alone. The dN/dX and CDDF figures need a
 model that holds an incidence record; their measured points and the 60 design points of their bands are in the
-repository.
+repository. The scripts save their figures to files under the matplotlib backend of your session, which they do not
+choose; without a display, set `MPLBACKEND=Agg`.
 
 **What the model figures are drawn from.** No model is published yet. The two model figures below were drawn from the
 candidate LF+MF release (staged, not yet public) with the multi-fidelity correction of the incidence built from

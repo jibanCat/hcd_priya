@@ -264,7 +264,8 @@ third runs on a model and a mock of your own, and then has no stored reference.
   percentile of the chain of the run over it; and `posterior_predictive_per_redshift.png`, the mock at each
   redshift with the stored bands of the posterior predictive. Each of the two has a side file (`.json`) that says
   in words what it shows and from which items of the download. The part also prints the reference's mean and 68
-  per cent interval of each parameter, labelled. Without a chain the figures show the stored reference alone. A
+  per cent interval of each parameter, labelled. Without a chain the figures show the stored reference alone. The figures are saved to files under the
+  matplotlib backend of your session, which the example does not choose; without a display, set `MPLBACKEND=Agg`. A
   `--demo` chain drawn over the reference is labelled NOT CONVERGED in the figures: the reference is a converged
   posterior, a demonstration chain is not, and the two are not expected to agree.
 

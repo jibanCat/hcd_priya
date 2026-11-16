@@ -63,9 +63,6 @@ def main(argv=None) -> int:
     C.add_design_arguments(ap)
     ap.add_argument("--out", default=os.path.join(C.FIGURES, "dndx_vs_ho21.png"))
     args = ap.parse_args(argv)
-    import matplotlib
-
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FuncFormatter
 

@@ -555,3 +555,40 @@ def test_a_band_with_every_point_refused_stops_with_a_message(release):
     not_a_point = dict(C.MIDPOINT, ns=float("nan"))
     with pytest.raises(SystemExit, match="refused every design point"):
         C.envelope(emu, [not_a_point], 3.0, "dndx")
+
+
+def test_no_code_a_user_runs_forces_a_matplotlib_backend():
+    """The choice of backend is the user's (the PI's review of 2026-11-16). The example, the figure scripts and the
+    report module only save files, which works under any backend, so none of them calls matplotlib.use. A session
+    without a display sets MPLBACKEND=Agg, and the example's help and the docs say so."""
+    import glob
+
+    files = ["examples/mock_recovery.py", "hcd_analysis/report.py"]
+    files += sorted(
+        os.path.relpath(f, REPO)
+        for f in glob.glob(os.path.join(REPO, "scripts", "figures", "*.py"))
+    )
+    assert len(files) >= 6
+    for name in files:
+        src = open(os.path.join(REPO, name), encoding="utf-8").read()
+        assert "matplotlib.use(" not in src, name
+    for name in ("examples/mock_recovery.py", "docs/likelihood.md", "docs/model_figures.md"):
+        assert "MPLBACKEND=Agg" in open(os.path.join(REPO, name), encoding="utf-8").read(), name
+
+
+def test_a_figure_script_draws_under_the_backend_the_user_chose(tmp_path):
+    """Under a backend that is not Agg the figure is still written as a PNG file, and the backend is left as the
+    user chose it."""
+    import matplotlib
+    import matplotlib.pyplot as plt
+
+    ratio = _script("fig_class_ratio_vs_rogers18")
+    before = matplotlib.get_backend()
+    plt.switch_backend("svg")
+    try:
+        out = str(tmp_path / "ratio.png")
+        assert ratio.main(["--out", out]) == 0
+        assert matplotlib.get_backend().lower() == "svg"
+        assert open(out, "rb").read(8) == b"\x89PNG\r\n\x1a\n"
+    finally:
+        plt.switch_backend(before)

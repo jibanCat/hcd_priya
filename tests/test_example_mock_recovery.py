@@ -785,3 +785,24 @@ def test_every_column_of_the_figure_per_redshift_has_a_labelled_x_axis(monkeypat
         shown = any(t.get_visible() and t.get_text() for t in ax.get_xticklabels(which="both"))
         assert shown is labelled, ax.get_title()
     assert [ax.get_ylabel() for ax in axes[:, 0]] == ["k P(k) / pi"] * 2
+
+
+def test_the_example_draws_under_the_backend_the_user_chose(download, monkeypatch, tmp_path):
+    """The example does not choose a matplotlib backend: under one that is not Agg it still writes its PNG files,
+    and it leaves the backend as the user chose it."""
+    import matplotlib
+    import matplotlib.pyplot as plt
+
+    ex = _script()
+    monkeypatch.setattr(ex, "DOWNLOAD", download["pins"])
+    mock = download["mock"]
+    before = matplotlib.get_backend()
+    plt.switch_backend("svg")
+    try:
+        paths = ex.draw_reference(_made_up_reference(mock), mock, str(tmp_path))
+        assert matplotlib.get_backend().lower() == "svg"
+        for path in paths:
+            assert open(path, "rb").read(8) == b"\x89PNG\r\n\x1a\n", path
+    finally:
+        plt.switch_backend(before)
+    assert "MPLBACKEND=Agg" in ex.parse.__globals__["__doc__"]
