@@ -141,9 +141,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - The `hcd` command needs an explicit `--config` file and refuses to run without one. Keys the file leaves out
   still take the built-in values of `hcd_analysis.config`, and keys it does not know are ignored.
 - The install name is `hcd-priya`; the import name stays `hcd_analysis`.
-- No code a user runs chooses a matplotlib backend: the example, the figure scripts of `scripts/figures/` and
-  `hcd_analysis.report` save their figures under the backend of the session. Without a display, set
-  `MPLBACKEND=Agg`.
+- The example, the figure scripts of `scripts/figures/` and `hcd_analysis.report` no longer choose a matplotlib
+  backend: they save their figures under the backend of the session. Without a display, set `MPLBACKEND=Agg`.
+  Older research scripts still set one.
 - The README is short: install, load a model, predict. The release format, the runtime data inputs and the
   description of the research pipeline moved, word for word, to `docs/models_and_data.md` and `docs/pipeline.md`.
 - The Python code is formatted with black (line length 100), with no change in behaviour. Catalogues built from

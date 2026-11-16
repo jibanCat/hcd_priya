@@ -874,5 +874,9 @@ def test_the_walk_through_of_the_docs_runs_and_prints_what_the_page_shows(setup)
         assert printed.getvalue().rstrip("\n") == shown, code
     # the walk-through shows no value of a model: its outputs are yes-or-no answers, counts, names, and numbers that
     # do not come from a model (the mean optical depth of a published fit; made-up errors; bins set one mode apart)
-    outputs = "\n".join(shown for _, shown in blocks)
+    outputs = "\n".join(shown for _, shown in blocks if shown)
     assert outputs.count("True") == 8 and "False" not in outputs
+    # every number a block shows after its label is one of these: the mean optical depth of the published fit at
+    # the two redshifts, the count of bins, the made-up chi-square, and the bins set one mode spacing apart
+    values = " ".join(ln.split(": ", 1)[1] for ln in outputs.split("\n"))
+    assert set(re.findall(r"\d+(?:\.\d+)?", values)) == {"0.2467", "0.3624", "6", "1.5", "1.0"}

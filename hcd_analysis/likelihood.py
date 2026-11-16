@@ -427,10 +427,10 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
 
     **When a straight line is enough, and when it is not shown to be.** The model is known only
     at the simulation's modes. Where the data bins are several mode spacings apart (the
-    KODIAQ-SQUAD bins above the lowest ones, for example), the model is a smooth curve sampled
-    finely against the bins: there the straight line and a smoother interpolation through the
-    same modes differ by far less than the data errors (checked privately on one
-    high-resolution simulation). Where the bins are about one mode spacing apart (eBOSS, for
+    KODIAQ-SQUAD bins, for example), the model is a smooth curve sampled finely against the
+    bins: for the data checked (the KODIAQ-SQUAD bins, on one high-resolution simulation,
+    privately) the straight line and a smoother interpolation through the same modes differ by
+    far less than the data errors. Where the bins are about one mode spacing apart (eBOSS, for
     example), the two differ by an amount comparable to that measurement's errors: the rule is
     NOT established for such data, and you should check it before you rely on it.
     ``modes_per_bin`` tells you which case your data are in.
@@ -485,10 +485,13 @@ def modes_per_bin(k_model: ArrayLike, k_data: ArrayLike) -> np.ndarray:
     width: a data set holds centres, not edges.
 
     **How to read it.** A value of 5 means the bins are five mode spacings apart: the model is
-    sampled finely against the data, and the straight line of ``interp_to_bins`` between two modes
-    loses nothing that matters. A value near 1 means the bins are about as fine as the modes: for
-    such data the straight line is NOT established by this package, and you should check it before
-    you rely on it (``docs/likelihood.md``, "Bringing the model to the data's wavenumbers").
+    sampled finely against the data. For the data checked (the KODIAQ-SQUAD bins, at about 4 and
+    more, on one simulation) the straight line of ``interp_to_bins`` and a smoother interpolation
+    differ by far less than the data errors. A value near 1 means the bins are about as fine as
+    the modes: for such data the straight line is NOT established by this package, and you should
+    check it before you rely on it. Values in between, about 1.5 to 3, are not classified: check
+    them as you would a value near 1 (``docs/likelihood.md``, "Bringing the model to the data's
+    wavenumbers").
 
     It only reports. Nothing warns and nothing is refused because of its value, and it uses no
     model value: wavenumbers only.

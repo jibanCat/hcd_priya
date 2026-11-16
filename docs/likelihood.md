@@ -14,7 +14,8 @@ from the example download described below, which is not published yet, or from f
 
 **In short.** You give the likelihood a model, a data set and a point (eleven numbers). It turns the two mean-flux
 numbers into a mean optical depth at each redshift (step 1). It asks the model for the P1D of four classes of
-sightlines (step 2) and mixes them into one spectrum per redshift (step 3). It reads that spectrum at the
+sightlines (step 2) and mixes them into one spectrum per redshift (step 3). The model gives its spectra at
+its own wavenumbers, the modes of the simulation box; the likelihood reads the mixed spectrum at the
 wavenumbers of the data (step 4), multiplies it by the data's factor if there is one (step 5), subtracts it from
 the data (step 6) and weighs the difference with the data's covariance (step 7). Out comes one number, the log
 likelihood. Steps 8 and 9 say what can be added to it and what is left to the sampler.
@@ -53,7 +54,8 @@ theta = dict(params, tau0_amp=1.0, dtau0=0.0)
 z = [2.6, 3.0]  # the redshifts of a small made-up data set, which step 5 builds
 ```
 
-**1. The mean flux.** At each redshift of the data, PRIYA's two-parameter model of the effective optical depth:
+**1. The mean flux.** The forest's mean absorption is set by two numbers. At each redshift of the data they give
+the effective optical depth $\tau_\mathrm{eff}$ (minus the logarithm of the mean transmitted flux), by PRIYA's model:
 
 ```math
 \tau_\mathrm{eff}(z) = \tau_0 \left( \frac{1 + z}{1 + z_\mathrm{pivot}} \right)^{d\tau_0} \tau_\mathrm{Kim}(z),
@@ -79,7 +81,7 @@ predictor does step 1 itself:
 ```python
 pred = emu.predict_many(params, z=z, tau0_amp=theta["tau0_amp"], dtau0=theta["dtau0"])
 print("the classes c, in the order of pred.P_class:", list(hp.CLASSES))
-print("pred.k holds the modes k_n, one row per redshift:", pred.k.shape == (len(z), pred.k.shape[1]))
+print("pred.k holds the modes k_n, one row per redshift:", pred.k.ndim == 2 and len(pred.k) == len(z))
 print("pred.P_class holds P_c(k_n), redshifts x 4 classes x modes:", pred.P_class.shape == (len(z), 4, pred.k.shape[1]))
 ```
 
@@ -152,7 +154,8 @@ the number of bins N: 6
 the factor F of this data set: None
 ```
 
-**6. The residual.** $r = d - m(\theta)$.
+**6. The residual.** $r = d - m(\theta)$. Here every bin is 1 per cent above a positive model value, with an error of
+2 per cent:
 
 ```python
 r = data.p1d - np.concatenate(m)
@@ -172,7 +175,8 @@ once:
 r^T C^{-1} r = \left| L^{-1} r \right|^2, \qquad \ln \det C = 2 \sum_i \ln L_{ii}
 ```
 
-(one triangular solve; no inverse is formed), and
+(the Cholesky factor is only a numerically safe way to compute these two numbers: one triangular solve, and no
+inverse is formed; you never need it to use the class), and
 
 ```math
 \ln \mathcal{L} = -\frac{1}{2} \, r^T C^{-1} r - \frac{1}{2} \ln \det C - \frac{N}{2} \ln (2 \pi).
@@ -228,18 +232,21 @@ simulation box. `interp_to_bins` (step 4 above) draws a straight line between tw
 value at the centre of each data bin. Whether that is good enough depends on how far apart the data bins are,
 counted in mode spacings:
 
-- **Bins several mode spacings apart** (the KODIAQ-SQUAD bins, for example): against such bins the model is a smooth
-  curve sampled finely, and the straight line loses nothing that matters. There the straight line and a smoother
-  interpolation through the same modes differ by far less than the data errors (checked privately on one
-  high-resolution simulation).
+- **Bins several mode spacings apart** (the KODIAQ-SQUAD bins, at about 4 and more): against such bins the model is
+  a smooth curve sampled finely. For the data checked (the KODIAQ-SQUAD bins, on one high-resolution simulation,
+  privately), the straight line and a smoother interpolation through the same modes differ by far less than the
+  data errors.
 - **Bins about one mode spacing apart** (the eBOSS bins, for example): there the two differ by an amount comparable
   to that measurement's errors. **For such data this rule is not established by this package.** Check it before you
   rely on it: compare with a smoother interpolation through the same modes, or bring in the window of the
   measurement.
+- **In between** (about 1.5 to 3 mode spacings, the lowest XQ-100 bins for example): not classified by this
+  package. Check such bins as you would the second case.
 
 **`modes_per_bin` says which case your data are in.** It gives, for each bin, the spacing of the bin centres there
 over the spacing of the modes there. It only reports: nothing warns and nothing is refused because of its value. For
-the made-up data set of the walk-through above, whose bins were put one mode spacing apart on purpose:
+the made-up data set of the walk-through above, whose bins were put one mode spacing apart on purpose (the modes
+of a simulation box are evenly spaced in k at one redshift):
 
 ```python
 ratio = like.modes_per_bin(theta)  # one array per redshift of the data
@@ -250,7 +257,7 @@ print("mode spacings per bin spacing, at the first redshift:", np.round(ratio[0]
 mode spacings per bin spacing, at the first redshift: [1.0, 1.0, 1.0]
 ```
 
-A value near 1, as here, is the second case. The example prints the smallest value for its own mock.
+A value near 1, as here, is the second case. The example's part one prints the smallest value for its own mock.
 
 **A separate point: the value at the bin centre is not an average over the bin.** The rule gives the model AT the
 bin centre. For a wide bin, the average of the spectrum over the bin can differ from the value at its centre by an
@@ -259,8 +266,10 @@ depends on the window of the measurement, which this package does not model. So 
 safe; they do not make the comparison safe in every respect. A window that is a multiplicative factor can be given
 as `model_factor`; a true bin average is not computed here.
 
-**The mock recovery of the example is touched by neither effect:** its mock is made with the same rule as the
-model, at the same bin centres.
+**The example's mock recovery is touched by neither effect.** Its mock is the simulation's own spectrum, brought
+from the simulation's modes to the bin centres by this same rule (a straight line between two neighbouring modes,
+read at the centre), and the same resolution table multiplies the mock and the model. The mock and the model are
+therefore treated alike.
 
 **The numbers.** The modes are the box modes of the PRIYA simulations, `k_n = 2 pi n / (120 Mpc/h)`, n = 1 to 172.
 In s/km they depend on z and on `hub` and `omegamh2`; at the midpoint of the parameters their spacing is
@@ -270,10 +279,10 @@ and they reach 0.068 to 0.095 s/km. The data bins, from the public files:
 | Data set | Bins | Spacing of the bin centres | Mode spacings per bin spacing (`modes_per_bin`) |
 |---|---|---|---|
 | eBOSS DR14 (Chabanier et al. 2019) | 35 per redshift, 0.00108 to 0.0195 s/km | 0.000542 s/km, uniform | about 1 |
-| KODIAQ-SQUAD (Karacayli et al. 2022) | 21 per redshift: 0.0011 to 0.0077 s/km in steps of 0.0022, then steps of 0.1 in log10 k to 0.40 s/km | 0.0022 to 0.081 s/km | about 4 at the lowest k, more above |
+| KODIAQ-SQUAD (Karacayli et al. 2022) | 21 per redshift: 0.0011 to 0.0077 s/km in steps of 0.0022, then steps of 0.1 in log10 k to 0.40 s/km | 0.0020 to 0.081 s/km | about 4 at the lowest k, more above |
 | XQ-100 (`load_xq100`) | 13 per redshift, 0.00316 to 0.0631 s/km | 0.108 in log10 k (0.0009 to 0.014 s/km) | about 2 at the lowest k, more above |
 
-**What the rule cannot do:**
+**The situations to avoid:**
 
 - **Data beyond the modes.** A data wavenumber below the first or above the last mode at a point is refused
   (`OutsideModesError`), never extrapolated. The modes move with `hub` and `omegamh2`, so a bin near an end can be
@@ -404,8 +413,9 @@ python examples/mock_recovery.py --release RELEASE_DIR SHA256 --data MOCK_FILE S
 The first two lines read the mock, its model and the stored reference from the example download (next section). The
 third runs on a model and a mock of your own, and then has no stored reference.
 
-- **Part 1** prints the chi-square and the log likelihood at the point the mock was made at, and the flags of that
-  point. Every line is labelled.
+- **Part 1** prints the chi-square and the log likelihood at the point the mock was made at, the flags of that
+  point, and how coarse the data bins are against the model's modes there (the smallest value of
+  `modes_per_bin`). Every line is labelled.
 - **Part 2** needs Cobaya, which is not a requirement of the package (`pip install cobaya`). `--demo N` runs one
   short chain of N accepted steps and labels it "A DEMONSTRATION CHAIN, NOT CONVERGED": its numbers are not results.
   `--full` runs one chain with the settings written out in the script until Cobaya's own convergence test stops it.

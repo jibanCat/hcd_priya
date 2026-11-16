@@ -557,11 +557,13 @@ def test_a_band_with_every_point_refused_stops_with_a_message(release):
         C.envelope(emu, [not_a_point], 3.0, "dndx")
 
 
-def test_no_code_a_user_runs_forces_a_matplotlib_backend():
+def test_the_example_the_figure_scripts_and_the_report_module_force_no_matplotlib_backend():
     """The choice of backend is the user's (the PI's review of 2026-11-16). The example, the figure scripts and the
     report module only save files, which works under any backend, so none of them calls matplotlib.use. A session
-    without a display sets MPLBACKEND=Agg, and the example's help and the docs say so."""
+    without a display sets MPLBACKEND=Agg, and the example's help and the docs say so. (Older research scripts
+    still set a backend; they are not in this list.)"""
     import glob
+    import re
 
     files = ["examples/mock_recovery.py", "hcd_analysis/report.py"]
     files += sorted(
@@ -571,7 +573,7 @@ def test_no_code_a_user_runs_forces_a_matplotlib_backend():
     assert len(files) >= 6
     for name in files:
         src = open(os.path.join(REPO, name), encoding="utf-8").read()
-        assert "matplotlib.use(" not in src, name
+        assert not re.search(r"\b(matplotlib|mpl)\.use\(|switch_backend\(", src), name
     for name in ("examples/mock_recovery.py", "docs/likelihood.md", "docs/model_figures.md"):
         assert "MPLBACKEND=Agg" in open(os.path.join(REPO, name), encoding="utf-8").read(), name
 
