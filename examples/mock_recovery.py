@@ -304,7 +304,7 @@ def part_one(like: L.GaussianP1DLikelihood) -> dict:
         pred.w_c[0].tolist(),
     )
     try:  # a report only: it never stops the example (a redshift with a single bin has no bin spacing)
-        coarseness = min(float(row.min()) for row in like.modes_per_bin(theta))
+        coarseness = f"{min(float(row.min()) for row in like.modes_per_bin(theta)):.2f}"
     except L.LikelihoodInputError as exc:
         coarseness = f"not defined for this data set ({exc})"
     line(

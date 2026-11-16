@@ -419,7 +419,9 @@ def test_the_download_gives_the_model_the_mock_and_the_reference_and_part_three_
         "model mode spacings per bin spacing, the smallest over all bins and redshifts "
         "(likelihood.modes_per_bin; near 1 the straight line between modes is not established): "
     )
-    assert float(modes.rsplit(": ", 1)[1]) == smallest
+    assert (
+        modes.rsplit(": ", 1)[1] == f"{smallest:.2f}"
+    )  # two decimals: a ratio for a reader, not sixteen digits
     assert "=== Part 2: no chain was asked for (--demo N, or --full)" in lines
     assert "=== Part 3: the posterior predictive of the data vector" in lines
     (holds,) = [ln for ln in lines if ln.startswith("the stored reference holds")]
@@ -831,7 +833,9 @@ def test_part_one_reports_the_coarseness_of_the_bins_and_is_never_stopped_by_it(
     (line,) = [
         ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("model mode spacings")
     ]
-    assert float(line.rsplit(": ", 1)[1]) == min(float(r.min()) for r in like.modes_per_bin(THETA))
+    assert (
+        line.rsplit(": ", 1)[1] == f"{min(float(r.min()) for r in like.modes_per_bin(THETA)):.2f}"
+    )
     sl = data.slices()
     one = L.P1DData.from_blocks(
         z=data.z,
