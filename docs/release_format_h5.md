@@ -477,8 +477,8 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
 - **On a prediction:** the held-out range on the quantity itself is in `dndx_lower` and `dndx_upper` (3,) and in
   `cddf_lower` and `cddf_upper` (Nbin,). `dndx_err` (3,) and `cddf_err` (Nbin,) are the held-out rms of
   ln(prediction / truth) of `dndx` and `cddf`: numbers on the logarithm, as the record stores them. A lower bound is
-  the value times exp(-err) and an upper bound the value times exp(+err), each transformed on its own, so the range is
-  asymmetric about the value. They are given
+  the value times exp(-err) and an upper bound the value times exp(+err), each transformed on its own, so for a
+  non-zero error the range is asymmetric about the value. They are given
   for the fidelity of the prediction: the `lf` tables for an LF prediction, the `lfmf` tables for an
   LF+MF one. It is an indication of size from a handful of held-out simulations, not the standard deviation of a
   known distribution; `labels["incidence_mf_error"]` gives the record's definition word for word, and
@@ -493,7 +493,8 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
 - **The w_c map at the corrected incidence.** The map from dN/dX to the class fractions is a Poisson model with a
   small term per class fitted on LF counts, and it is applied unchanged to the corrected dN/dX. It has no range
   check on dN/dX: nothing flags a corrected dN/dX outside the counts that term was fitted on. `w_c` has no held-out
-  error of its own: it inherits the error of the corrected dN/dX (`dndx_err`) and the map's own error.
+  error of its own: it inherits the error of the corrected dN/dX (the range `dndx_lower` to `dndx_upper`; on the
+  logarithm `dndx_err`) and the map's own error.
   Tested on the training simulations. Evaluated as the predictor evaluates it, at each high-resolution run's
   own dN/dX, the shipped map returns that run's counted class fractions with an rms relative error of 0.5 to 0.6 per
   cent for LLS, subDLA and DLA at z 2.2 to 4.6 (largest 1.3 per cent), the same as for the low-resolution runs (0.5

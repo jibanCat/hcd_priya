@@ -977,14 +977,15 @@ def test_a_prediction_carries_the_held_out_error_of_its_fidelity(rel_err):
     ), "a finite estimate beside every corrected value: nothing to warn about"
     label = mf.labels["incidence_mf_error"]
     assert label.startswith(
-        "The held-out error of this prediction's dndx and cddf is in dndx_err and cddf_err"
+        "The held-out error of this prediction's dndx and cddf is given on the quantity, as the range dndx_lower to "
+        "dndx_upper and cddf_lower to cddf_upper, and on the logarithm, as dndx_err and cddf_err"
     )
     for text in (
         "A synthetic definition of the synthetic numbers.",
         "rms_log_error_heldout",
         "2 in number",
-        "the held-out range of a value v is v * exp(-err) to v * exp(+err)",
-        "the range is asymmetric about v",
+        "The two ends of the range of a value v are v * exp(-err) and v * exp(+err)",
+        "for a non-zero err the range is asymmetric about v",
     ):
         assert text in label
     assert "No held-out error" not in label
@@ -1178,6 +1179,11 @@ def test_a_fold_model_takes_an_incidence_record_built_without_its_held_out_simul
     assert p.P_class.tobytes() == a.P_class.tobytes()  # the class spectra are not touched
     assert not np.array_equal(p.w_c, a.w_c)  # the fractions follow the corrected incidence
     assert p.provenance["incidence_mf"]["record_sha256"] == sha
+    for (
+        name
+    ) in BOUNDS:  # a fold model's record without a held-out error: the bounds exist and are NaN
+        assert getattr(p, name).shape == getattr(p, name[:4]).shape, name
+        assert np.all(np.isnan(getattr(p, name))) and getattr(a, name) is None, name
     assert p.provenance["model_kind"] == "research" and "incidence_mf" not in a.provenance
     lf, lf0 = (m.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF") for m in (rp, plain))
     assert lf.flags["incidence_mf_applied"] is False
@@ -1286,11 +1292,12 @@ def test_a_prediction_carries_the_held_out_range_on_the_quantity_itself(rel_err)
         assert np.array_equal(np.isnan(p.cddf_upper), np.isnan(p.cddf_err))
     np.testing.assert_allclose(mf.dndx_upper / mf.dndx, np.exp([0.05, 0.06, 0.07]), rtol=1e-15)
     np.testing.assert_allclose(lf.dndx_lower / lf.dndx, np.exp([-0.11, -0.12, -0.13]), rtol=1e-15)
-    label = mf.labels["incidence_mf_error"]
+    # the label names the range first, and the label of w_c and the warning name the bounds too
     assert (
-        "the prediction carries the two ends: dndx_lower and dndx_upper, cddf_lower and cddf_upper"
-        in label
+        "as the range dndx_lower to dndx_upper and cddf_lower to cddf_upper"
+        in mf.labels["incidence_mf_error"]
     )
+    assert "(the range dndx_lower to dndx_upper; on the logarithm dndx_err)" in mf.labels["w_c"]
 
 
 def test_a_bound_is_nan_where_there_is_no_estimate_and_none_without_a_record(
@@ -1318,9 +1325,23 @@ def test_a_bound_is_nan_where_there_is_no_estimate_and_none_without_a_record(
         assert not getattr(stack, name).flags.writeable
     assert stack.dndx_lower.shape == stack.dndx_upper.shape == (2, 3)
     assert stack.cddf_lower.shape == stack.cddf_upper.shape == (2, 30)
-    np.testing.assert_array_equal(stack.dndx_upper, stack.dndx * np.exp(stack.dndx_err))
-    np.testing.assert_array_equal(stack.cddf_lower, stack.cddf * np.exp(-stack.cddf_err))
-    assert np.array_equal(np.isnan(stack.dndx_lower), np.isnan(stack.dndx_err))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        stack_lf = rel_err.predict_many(PARAMS, [3.0, 5.0], tau_eff=[0.4, 1.5], fidelity="LF")
+    assert not np.array_equal(
+        stack_lf.dndx, stack.dndx
+    )  # the uncorrected values, with their own error table
+    for s in (stack, stack_lf):
+        np.testing.assert_array_equal(s.dndx_lower, s.dndx * np.exp(-s.dndx_err))
+        np.testing.assert_array_equal(s.dndx_upper, s.dndx * np.exp(+s.dndx_err))
+        np.testing.assert_array_equal(s.cddf_lower, s.cddf * np.exp(-s.cddf_err))
+        np.testing.assert_array_equal(s.cddf_upper, s.cddf * np.exp(+s.cddf_err))
+        for name in BOUNDS:
+            assert getattr(s, name).dtype == np.float64, name
+            assert np.array_equal(
+                np.isnan(getattr(s, name)), np.isnan(getattr(s, name[:4] + "_err"))
+            ), name
+    assert np.isnan(stack.dndx_lower[1, 1]) and np.all(np.isfinite(stack_lf.dndx_lower))
     assert (
         "dndx_err and cddf_err, and with them the four bounds, are NaN"
         in no_error.labels["incidence_mf_error"]
@@ -1333,7 +1354,10 @@ def test_the_error_fields_are_described_on_the_quantity_without_an_approximation
     approximation from the logarithm, and never call the range symmetric."""
     import re
 
-    forbidden = r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|1 ?sigma|gaussian"
+    forbidden = (
+        r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|gaussian"
+        r"|1[- ]?sigma|one sigma|1σ|±|lineari[sz]|approximat|propagat"
+    )
     doc = hp.Prediction.__doc__
     order = ("dndx_err", "cddf_err", *BOUNDS, "member_std")
     fields = {}
@@ -1352,6 +1376,12 @@ def test_the_error_fields_are_described_on_the_quantity_without_an_approximation
     assert "``cddf * exp(-cddf_err)``" in flat["cddf_lower"]
     assert "``cddf * exp(+cddf_err)``" in flat["cddf_upper"]
     assert "asymmetric" in flat["dndx_upper"] and "asymmetric" in flat["module"]
+    assert "``dndx * exp(-dndx_err)`` and ``dndx * exp(+dndx_err)``" in flat["module"]
+    assert "on its own" in flat["module"] and "on its own" in flat["dndx_upper"]
+    # asymmetric is said of a non-zero error only: at an error of zero both ends equal the value
+    assert "for a non-zero error the range is asymmetric" in flat["module"]
+    assert "for a non-zero ``dndx_err`` the range is asymmetric" in flat["dndx_upper"]
+    assert "a number on the logarithm" in flat["cddf_err"]
     # the log numbers say they are on the logarithm and point to the fields on the quantity
     assert "a number on the logarithm" in flat["dndx_err"]
     assert "``dndx_lower``" in flat["dndx_err"] and "``dndx_upper``" in flat["dndx_err"]

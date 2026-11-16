@@ -100,7 +100,8 @@ then every prediction carries it too, for the fidelity of the prediction, in two
 held-out range, from ``dndx_lower`` to ``dndx_upper`` and from ``cddf_lower`` to ``cddf_upper``. On the logarithm:
 ``dndx_err`` and ``cddf_err``, the held-out rms of ln(prediction / truth), which is what the record stores. Each bound
 is computed from the logarithm on its own, ``dndx * exp(-dndx_err)`` and ``dndx * exp(+dndx_err)`` (the same for
-``cddf``), so the range is asymmetric about the value. All six are NaN where the record has no estimate; an error is
+``cddf``), so for a non-zero error the range is asymmetric about the value. All six are NaN where the record has no
+estimate; an error is
 never interpolated between redshifts. ``labels["incidence_mf_error"]`` says what the numbers are, in the record's own words. An LF+MF
 prediction that returns a corrected value without an estimate beside it emits ``HeldOutErrorWarning``, once per
 process for each record.
@@ -684,7 +685,8 @@ class Prediction:
         parameters and redshift, from ``dndx`` through the w_c map of the bundle.
         With an incidence MF record (flag ``incidence_mf_applied``), from the corrected ``dndx``;
         it then has no held-out error of its own and inherits that of the corrected ``dndx``
-        (``dndx_err``) and the map's own error.
+        (the range ``dndx_lower`` to ``dndx_upper``; on the logarithm ``dndx_err``) and the
+        map's own error.
         Without one it is the low-fidelity model's also under LF+MF: the multi-fidelity
         correction of the spectra acts on ``P_class`` only, so ``add_hcd(pred, pred.w_c)`` then
         mixes corrected class spectra with LF fractions.
@@ -721,8 +723,9 @@ class Prediction:
         record.
     dndx_upper : numpy.ndarray or None
         Shape (3,). The upper end of that range: ``dndx * exp(+dndx_err)``. Each end is computed
-        from the logarithm on its own, so the range is asymmetric about ``dndx``: the upper end
-        lies farther from ``dndx`` than the lower end. Like ``dndx_err``, the range is an
+        from the logarithm on its own, so for a non-zero ``dndx_err`` the range is asymmetric
+        about ``dndx``: the upper end lies farther from ``dndx`` than the lower end (at an
+        error of exactly zero both ends equal ``dndx``). Like ``dndx_err``, the range is an
         indication of size, not an interval of a known distribution. NaN where ``dndx_err`` is
         NaN; None without an incidence record.
     cddf_lower : numpy.ndarray or None
@@ -1211,7 +1214,8 @@ class _PredictorBase:
                 labels["w_c"]
                 + "; the dN/dX is multiplied by the incidence MF factor R_c(z) before the map (the map itself "
                 "was fitted on LF counts). w_c has no held-out error of its own: it inherits the error of the "
-                "corrected dN/dX (dndx_err) and the map's own error"
+                "corrected dN/dX (the range dndx_lower to dndx_upper; on the logarithm dndx_err) and the map's "
+                "own error"
             )
             if _W_C_STAYS_LF not in labels["mf"]:
                 raise RuntimeError("the MF label no longer carries the statement about w_c")
@@ -1674,8 +1678,9 @@ class _PredictorBase:
         )
         warnings.warn(
             HeldOutErrorWarning(
-                f"the corrected dN/dX and CDDF of this prediction are not exact, and {why}: dndx_err and cddf_err "
-                "are NaN there (labels['incidence_mf_error'] says what a held-out error is). w_c is computed from "
+                f"the corrected dN/dX and CDDF of this prediction are not exact, and {why}: dndx_err and cddf_err, "
+                "and with them the bounds dndx_lower, dndx_upper, cddf_lower and cddf_upper, are NaN there "
+                "(labels['incidence_mf_error'] says what a held-out error is). w_c is computed from "
                 "the corrected dN/dX and never has a held-out error of its own: it inherits that of dN/dX and the "
                 "map's own error. This warning is shown once per process for this record."
             ),

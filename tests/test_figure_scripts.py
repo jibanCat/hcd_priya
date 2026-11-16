@@ -399,7 +399,10 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
 
 # the PI's rule (2026-11-15): a held-out error is stated on the quantity, never propagated from the logarithm by an
 # approximation, and its range is never called symmetric
-FORBIDDEN = r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|1 ?sigma|gaussian"
+FORBIDDEN = (
+    r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|gaussian"
+    r"|1[- ]?sigma|one sigma|1σ|±|lineari[sz]|approximat|propagat"
+)
 
 
 def test_no_public_text_on_the_held_out_error_uses_an_approximation_or_calls_it_symmetric():
@@ -418,9 +421,10 @@ def test_no_public_text_on_the_held_out_error_uses_an_approximation_or_calls_it_
         "scripts/figures/fig_dndx_vs_ho21.py",
         "hcd_analysis/predictor.py",
         "hcd_analysis/emulator/incidence_mf.py",
+        "docs/figures/dndx_vs_ho21.json",
     )
-    checked = 0
     for name in files:
+        checked = 0
         text = open(os.path.join(REPO, name), encoding="utf-8").read()
         # a unit is a paragraph, and in a list each item on its own (a changelog lists one change per item)
         for paragraph in re.split(r"\n\s*\n|\n(?=\s*- )", text):
@@ -428,7 +432,7 @@ def test_no_public_text_on_the_held_out_error_uses_an_approximation_or_calls_it_
                 checked += 1
                 hit = re.search(FORBIDDEN, paragraph, re.I)
                 assert hit is None, (name, hit and hit.group(0), paragraph[:300])
-    assert checked >= len(files)
+        assert checked >= 1, f"{name}: no paragraph on the held-out error was found to check"
     # and the figure takes its bars from the two bounds the prediction carries: it transforms nothing itself, and
     # never forms the error times the value
     src = open(os.path.join(REPO, "scripts/figures/fig_dndx_vs_ho21.py"), encoding="utf-8").read()
