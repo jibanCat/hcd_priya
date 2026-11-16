@@ -407,6 +407,19 @@ def test_the_download_gives_the_model_the_mock_and_the_reference_and_part_three_
     )
     (chi2,) = [ln for ln in lines if ln.startswith("chi-square at the truth")]
     assert chi2.endswith(": 0.0")  # the mock was made from this model at this point
+    # part one says how coarse the bins are against the model's modes: the smallest value of modes_per_bin
+    (modes,) = [ln for ln in lines if ln.startswith("model mode spacings per bin spacing")]
+    like = L.GaussianP1DLikelihood(
+        ex.open_download(str(download["root"]))[0],
+        download["mock"],
+        gaussian_terms=ex.GAUSSIAN_TERMS,
+    )
+    smallest = min(float(row.min()) for row in like.modes_per_bin(THETA))
+    assert modes.startswith(
+        "model mode spacings per bin spacing, the smallest over all bins and redshifts "
+        "(likelihood.modes_per_bin; near 1 the straight line between modes is not established): "
+    )
+    assert float(modes.rsplit(": ", 1)[1]) == smallest
     assert "=== Part 2: no chain was asked for (--demo N, or --full)" in lines
     assert "=== Part 3: the posterior predictive of the data vector" in lines
     (holds,) = [ln for ln in lines if ln.startswith("the stored reference holds")]
@@ -806,3 +819,29 @@ def test_the_example_draws_under_the_backend_the_user_chose(download, monkeypatc
     finally:
         plt.switch_backend(before)
     assert "MPLBACKEND=Agg" in ex.parse.__globals__["__doc__"]
+
+
+def test_part_one_reports_the_coarseness_of_the_bins_and_is_never_stopped_by_it(setup, capsys):
+    """The line on modes_per_bin is a report. For a data set with a single bin at a redshift the ratio is not
+    defined; part one says so and goes on to the chi-square."""
+    ex = _script()
+    data = L.read_p1d_data(setup["data"][0], expected_sha256=setup["data"][1])
+    like = L.GaussianP1DLikelihood(setup["emu"], data)
+    ex.part_one(like)
+    (line,) = [
+        ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("model mode spacings")
+    ]
+    assert float(line.rsplit(": ", 1)[1]) == min(float(r.min()) for r in like.modes_per_bin(THETA))
+    sl = data.slices()
+    one = L.P1DData.from_blocks(
+        z=data.z,
+        k=[r[:1] for r in data.k],
+        p1d=[data.p1d[s][:1] for s in sl],
+        cov_blocks=[data.cov[s, s][:1, :1] for s in sl],
+        truth=data.truth,
+    )
+    ex.part_one(L.GaussianP1DLikelihood(like.emu, one))
+    out = capsys.readouterr().out.splitlines()
+    (line,) = [ln for ln in out if ln.startswith("model mode spacings")]
+    assert "not defined for this data set" in line and "a single bin has no spacing" in line
+    assert any(ln.startswith("chi-square at the truth") for ln in out)

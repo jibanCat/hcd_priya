@@ -81,6 +81,7 @@ __all__ = [
     "P1DReference",
     "SAMPLER_REFUSALS",
     "interp_to_bins",
+    "modes_per_bin",
     "load_xq100",
     "read_p1d_data",
     "read_reference",
@@ -421,11 +422,24 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
 
         P(k) = P_j + (P_(j+1) - P_j) * (k - k_j) / (k_(j+1) - k_j)
 
-    That is all. It is the value of the model AT k: not an average over the width of a data bin,
-    not a re-binning, and nothing in it is fitted or tuned. A data wavenumber outside
-    [k_model[0], k_model[-1]] is refused, never extrapolated. ``docs/likelihood.md`` says when this
-    rule is accurate (the model's modes are close together compared with the data bins) and when it
-    is not.
+    That is all. Nothing in it is fitted or tuned, and a data wavenumber outside
+    [k_model[0], k_model[-1]] is refused, never extrapolated.
+
+    **When a straight line is enough, and when it is not shown to be.** The model is known only
+    at the simulation's modes. Where the data bins are several mode spacings apart (the
+    KODIAQ-SQUAD bins above the lowest ones, for example), the model is a smooth curve sampled
+    finely against the bins: there the straight line and a smoother interpolation through the
+    same modes differ by far less than the data errors (checked privately on one
+    high-resolution simulation). Where the bins are about one mode spacing apart (eBOSS, for
+    example), the two differ by an amount comparable to that measurement's errors: the rule is
+    NOT established for such data, and you should check it before you rely on it.
+    ``modes_per_bin`` tells you which case your data are in.
+
+    **A separate point: this is the value AT the bin centre, not an average over the bin.** For
+    a wide bin the average of the spectrum over the bin can differ from the value at its centre
+    by an amount that is not small against the data errors. Which of the two is right depends on
+    the window of the measurement, which this package does not model.
+    ``docs/likelihood.md`` ("Bringing the model to the data's wavenumbers") says more.
 
     Parameters
     ----------
@@ -460,6 +474,72 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
     _refuse_outside_modes(k_model, k_data)
     # numpy.interp evaluates exactly the straight line of the docstring between each pair of neighbouring modes
     return np.interp(k_data, k_model, p_model)
+
+
+def modes_per_bin(k_model: ArrayLike, k_data: ArrayLike) -> np.ndarray:
+    """How coarse the data bins are against the model's modes: bin spacing over mode spacing.
+
+    For each data wavenumber, the spacing of the data's bin centres there (the mean of the gaps to
+    its two neighbours; at an end, the one gap) divided by the spacing of the model's wavenumbers
+    there (the gap between the two that bracket it). It is a spacing of bin CENTRES, not a bin
+    width: a data set holds centres, not edges.
+
+    **How to read it.** A value of 5 means the bins are five mode spacings apart: the model is
+    sampled finely against the data, and the straight line of ``interp_to_bins`` between two modes
+    loses nothing that matters. A value near 1 means the bins are about as fine as the modes: for
+    such data the straight line is NOT established by this package, and you should check it before
+    you rely on it (``docs/likelihood.md``, "Bringing the model to the data's wavenumbers").
+
+    It only reports. Nothing warns and nothing is refused because of its value, and it uses no
+    model value: wavenumbers only.
+
+    Parameters
+    ----------
+    k_model : array_like
+        Shape (K,). The model's wavenumbers, strictly ascending (``pred.k`` at one redshift).
+    k_data : array_like
+        Shape (M,), M at least 2. The centres of the data bins, strictly ascending, in the units of
+        ``k_model``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape (M,). The ratio at each data wavenumber.
+
+    Raises
+    ------
+    OutsideModesError
+        If a data wavenumber lies outside the model's wavenumbers, as for ``interp_to_bins``.
+    LikelihoodInputError
+        If ``k_data`` holds a single wavenumber (one bin has no spacing), if either input is not a
+        finite, strictly ascending vector, or if ``k_model`` has fewer than two points.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> from hcd_analysis.likelihood import modes_per_bin
+    >>> modes = np.linspace(0.0, 2.0, 21)          # made-up model wavenumbers, 0.1 apart
+    >>> out = modes_per_bin(modes, [0.25, 0.75, 1.25])  # made-up bin centres, 0.5 apart
+    >>> print("mode spacings per bin spacing:", np.round(out, 6).tolist())
+    mode spacings per bin spacing: [5.0, 5.0, 5.0]
+    """
+    km = _vector("k_model", k_model)
+    kd = _vector("k_data", k_data)
+    if km.size < 2 or np.any(np.diff(km) <= 0):
+        raise LikelihoodInputError("k_model must be strictly ascending, with at least two points")
+    if kd.size < 2:
+        raise LikelihoodInputError(
+            "k_data must hold at least two wavenumbers: a single bin has no spacing"
+        )
+    if np.any(np.diff(kd) <= 0):
+        raise LikelihoodInputError("k_data must be strictly ascending")
+    _refuse_outside_modes(km, kd)
+    gaps = np.diff(kd)
+    # the spacing of the bin centres at each centre: the one gap at an end, the mean of the two gaps elsewhere
+    bin_spacing = np.concatenate([gaps[:1], 0.5 * (gaps[:-1] + gaps[1:]), gaps[-1:]])
+    # the two modes that bracket each centre: k_j <= k < k_(j+1); a centre on the last mode takes the last interval
+    j = np.clip(np.searchsorted(km, kd, side="right") - 1, 0, km.size - 2)
+    return bin_spacing / (km[j + 1] - km[j])
 
 
 def _interp_inputs(k_model, p_model, k_data):
@@ -811,6 +891,44 @@ class GaussianP1DLikelihood:
         return self.emu.predict_many(
             params, z=list(self._z), tau0_amp=tau0_amp, dtau0=dtau0, fidelity=self.fidelity
         )
+
+    def modes_per_bin(self, theta: Mapping[str, float]) -> tuple:
+        """How coarse the data bins are against the model's modes at ``theta``, redshift by redshift.
+
+        The model's wavenumbers in s/km move with ``hub``, ``omegamh2`` and the redshift, so the
+        ratio needs a point. It is ``modes_per_bin`` of this module (bin spacing over mode
+        spacing) at each redshift of the data. It only reports: no warning, no refusal, and no
+        effect on any number of the likelihood. A value near 1 is the case in which the straight
+        line of ``interp_to_bins`` is not established (``docs/likelihood.md``).
+
+        Parameters
+        ----------
+        theta : dict
+            The eleven parameters by name (``param_names``).
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            One array per redshift of the data, in the data's order, of the shape of that
+            redshift's wavenumbers.
+
+        Raises
+        ------
+        OutsideModesError
+            If a data wavenumber lies outside the model's wavenumbers at this point.
+        LikelihoodInputError
+            If a redshift of the data has a single bin: one bin has no spacing.
+        """
+        pred = self.prediction(theta)
+        out = []
+        for i, kd in enumerate(self.data.k):
+            try:
+                out.append(modes_per_bin(pred.k[i], kd))
+            except OutsideModesError as exc:
+                raise OutsideModesError(f"at z = {self._z[i]:g}: {exc}") from None
+            except LikelihoodInputError as exc:
+                raise LikelihoodInputError(f"at z = {self._z[i]:g}: {exc}") from None
+        return tuple(out)
 
     def model_vector(self, theta: Mapping[str, float]) -> np.ndarray:
         """The model vector m(theta): the prediction at theta, mixed, interpolated and scaled.

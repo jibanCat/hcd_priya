@@ -150,6 +150,66 @@ def test_interpolation_is_exact_for_a_line_and_never_extrapolates():
         L.interp_to_bins(k[::-1], line, at)
 
 
+def test_modes_per_bin_is_the_spacing_of_the_bin_centres_over_the_spacing_of_the_modes():
+    """How coarse the data bins are against the model's modes (the PI's concern of 2026-11-16 about interp_to_bins):
+    for each bin centre, the spacing of the centres there over the gap between the two modes that bracket it.
+    """
+    modes = np.linspace(0.0, 2.0, 21)  # modes 0.1 apart
+    np.testing.assert_allclose(
+        L.modes_per_bin(modes, [0.25, 0.75, 1.25]), [5.0, 5.0, 5.0], rtol=1e-12
+    )
+    # unequal centres: the mean of the two neighbouring gaps, and the one gap at an end
+    np.testing.assert_allclose(
+        L.modes_per_bin(modes, [0.25, 0.35, 0.75]), [1.0, 2.5, 4.0], rtol=1e-12
+    )
+    # unequal modes: the gap between the two modes that bracket the centre
+    uneven = [0.0, 0.1, 0.3, 0.7, 1.5]
+    np.testing.assert_allclose(
+        L.modes_per_bin(uneven, [0.2, 0.5, 1.0]), [0.3 / 0.2, 0.4 / 0.4, 0.5 / 0.8], rtol=1e-12
+    )
+    # a centre on a mode belongs to the interval that starts there; on the last mode, to the last interval
+    np.testing.assert_allclose(
+        L.modes_per_bin(uneven, [0.3, 1.5]), [1.2 / 0.4, 1.2 / 0.8], rtol=1e-12
+    )
+    out = L.modes_per_bin(modes, [0.25, 0.75, 1.25])
+    assert isinstance(out, np.ndarray) and out.dtype == np.float64 and out.shape == (3,)
+    # it only reports: as interp_to_bins, it has no value outside the modes; one bin has no spacing
+    with pytest.raises(L.OutsideModesError, match="nothing is extrapolated"):
+        L.modes_per_bin(modes, [0.5, 2.5])
+    with pytest.raises(E, match="a single bin has no spacing"):
+        L.modes_per_bin(modes, [0.5])
+    with pytest.raises(E, match="k_data must be strictly ascending"):
+        L.modes_per_bin(modes, [0.75, 0.25])
+    with pytest.raises(E, match="k_model must be strictly ascending"):
+        L.modes_per_bin(modes[::-1], [0.25, 0.75])
+    assert not isinstance(L.OutsideModesError("x"), type(None)) and issubclass(
+        L.OutsideModesError, E
+    )
+
+
+def test_the_likelihood_reports_modes_per_bin_at_a_point_and_changes_nothing(emu, recwarn):
+    """The method uses the model's modes at the point (they move with hub, omegamh2 and the redshift). It reports
+    and nothing else: no warning, no refusal, and the likelihood's numbers are what they were."""
+    data = _data(emu)
+    like = L.GaussianP1DLikelihood(emu, data)
+    before = like.chi2(THETA), like.loglike(THETA)
+    out = like.modes_per_bin(THETA)
+    pred = like.prediction(THETA)
+    assert isinstance(out, tuple) and len(out) == len(data.z)
+    for i, (row, k) in enumerate(zip(out, data.k)):
+        np.testing.assert_array_equal(row, L.modes_per_bin(pred.k[i], k))
+        assert row.shape == k.shape and np.all(np.isfinite(row)) and np.all(row > 0)
+    assert (like.chi2(THETA), like.loglike(THETA)) == before
+    assert not [w for w in recwarn.list if "modes" in str(w.message).lower()]
+    other = dict(THETA, hub=THETA["hub"] * 1.05)  # the modes in s/km move with hub
+    assert not np.array_equal(like.modes_per_bin(other)[0], out[0])
+    one_bin = L.P1DData.from_blocks(
+        z=[ZS[0]], k=[data.k[0][:1]], p1d=[np.ones(1)], cov_blocks=[np.eye(1)]
+    )
+    with pytest.raises(E, match=f"at z = {ZS[0]:g}: .*a single bin has no spacing"):
+        L.GaussianP1DLikelihood(emu, one_bin).modes_per_bin(THETA)
+
+
 # ----------------------------------------------------------------------------------------- the likelihood
 def test_the_model_vector_is_the_mixed_spectrum_at_the_data_wavenumbers_times_the_factor(emu):
     rows = _bins(emu)

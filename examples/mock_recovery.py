@@ -303,6 +303,15 @@ def part_one(like: L.GaussianP1DLikelihood) -> dict:
         "the model's class fractions (LLS, subDLA, DLA) at the first redshift, used for the mixture",
         pred.w_c[0].tolist(),
     )
+    try:  # a report only: it never stops the example (a redshift with a single bin has no bin spacing)
+        coarseness = min(float(row.min()) for row in like.modes_per_bin(theta))
+    except L.LikelihoodInputError as exc:
+        coarseness = f"not defined for this data set ({exc})"
+    line(
+        "model mode spacings per bin spacing, the smallest over all bins and redshifts "
+        "(likelihood.modes_per_bin; near 1 the straight line between modes is not established)",
+        coarseness,
+    )
     chi2 = like.chi2(theta)
     line("chi-square at the truth (0 would mean the model reproduces the mock exactly)", chi2)
     line("chi-square per bin at the truth", chi2 / data.n)
