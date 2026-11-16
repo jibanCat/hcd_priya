@@ -12,49 +12,157 @@ from the example download described below, which is not published yet, or from f
 
 ## The mathematics, step by step
 
-A point $\theta$ is the nine PRIYA parameters (`predictor.PARAM_NAMES`) and the two mean-flux parameters `tau0_amp`
-and `dtau0`, written $\tau_0$ and $d\tau_0$ below. A data set has redshifts $z_i$, at each redshift the wavenumbers
-$k_{ij}$ of its bins (angular, in s/km), the data vector $d$ of length $N$ (km/s), its covariance $C$ ($N \times N$),
-and optionally a factor $F$ (one number per bin). `GaussianP1DLikelihood.loglike(theta)` computes:
+**In short.** You give the likelihood a model, a data set and a point (eleven numbers). It turns the two mean-flux
+numbers into a mean optical depth at each redshift (step 1). It asks the model for the P1D of four classes of
+sightlines (step 2) and mixes them into one spectrum per redshift (step 3). It reads that spectrum at the
+wavenumbers of the data (step 4), multiplies it by the data's factor if there is one (step 5), subtracts it from
+the data (step 6) and weighs the difference with the data's covariance (step 7). Out comes one number, the log
+likelihood. Steps 8 and 9 say what can be added to it and what is left to the sampler.
 
-**1. The mean flux.** At each redshift of the data, PRIYA's two-parameter model of the effective optical depth
-(`predictor.tau_eff_priya`):
+Each step below has its equation and the lines of code that do it, so that you can follow one evaluation by hand.
+The code runs as it stands, top to bottom, once `emu` is a loaded model (the README's first example loads one).
+**The outputs shown are those of the synthetic stand-in model of the tests** (untrained networks): shapes and
+yes-or-no answers, not science.
+
+**The symbols, and their names in the code.**
+
+| Symbol | What it is | In the code |
+|---|---|---|
+| $\theta$ | a point: the nine PRIYA parameters and the two mean-flux parameters | a dict with the eleven names of `like.param_names` |
+| $\tau_0$, $d\tau_0$ | the two mean-flux parameters | `tau0_amp`, `dtau0` |
+| $z_i$ | the redshifts of the data | `data.z` |
+| $k_{ij}$ | the wavenumbers of the data's bins at redshift $z_i$ (angular, in s/km) | `data.k[i]` |
+| $d$, $N$ | the data vector (km/s) and its length | `data.p1d`, `data.n` |
+| $C$ | the covariance of $d$, $N \times N$ | `data.cov` |
+| $F$ | an optional factor, one number per bin | `data.model_factor` |
+| $k_n$ | the model's own wavenumbers, its "modes" | `pred.k[i]` |
+| $P_c(k_n)$ | the P1D of class $c$ on the modes | `pred.P_class[i]` |
+| $A_c$ | the fraction of all sightlines in class $c$ | `pred.w_c[i]` by default |
+| $m(\theta)$ | the model vector, on the data's bins | `like.model_vector(theta)` |
+
+```python
+import numpy as np
+import hcd_analysis.predictor as hp
+from hcd_analysis import likelihood as L
+
+# emu is a loaded model. The point theta: the nine PRIYA parameters, written out (here the midpoint
+# of the range each was trained on), and the two mean-flux parameters.
+params = {"ns": 0.925, "Ap": 1.9e-9, "herei": 4.0, "heref": 2.7, "alphaq": 2.15,
+          "hub": 0.70, "omegamh2": 0.143, "hireionz": 7.25, "bhfeedback": 0.05}
+theta = dict(params, tau0_amp=1.0, dtau0=0.0)
+z = [2.6, 3.0]  # the redshifts of a small made-up data set, which step 5 builds
+```
+
+**1. The mean flux.** At each redshift of the data, PRIYA's two-parameter model of the effective optical depth:
 
 ```math
 \tau_\mathrm{eff}(z) = \tau_0 \left( \frac{1 + z}{1 + z_\mathrm{pivot}} \right)^{d\tau_0} \tau_\mathrm{Kim}(z),
 \qquad \tau_\mathrm{Kim}(z) = 0.0023 \, (1 + z)^{3.65},
 ```
 
-with $z_\mathrm{pivot} = 3$; $\tau_\mathrm{Kim}$ is the fit of Kim et al. (2007).
+with $z_\mathrm{pivot} = 3$; $\tau_\mathrm{Kim}$ is the fit of Kim et al. (2007). In the code it is
+`predictor.tau_eff_priya`:
+
+```python
+tau_eff = [hp.tau_eff_priya(zi, tau0_amp=theta["tau0_amp"], dtau0=theta["dtau0"]) for zi in z]
+print("tau_eff at z = 2.6 and at z = 3.0:", np.round(tau_eff, 4).tolist())
+```
+
+```text
+tau_eff at z = 2.6 and at z = 3.0: [0.2467, 0.3624]
+```
 
 **2. The class spectra.** The predictor gives, at each $z_i$, the P1D of the four classes of sightlines, $c$ = clean,
-LLS, subDLA, DLA: $P_c(k_n)$, on the model's own wavenumbers $k_n$ (its "modes", step 4).
+LLS, subDLA, DLA: $P_c(k_n)$, on the model's own wavenumbers $k_n$. You pass the two mean-flux parameters and the
+predictor does step 1 itself:
 
-**3. The mixture.** One spectrum per redshift, as `predictor.add_hcd` forms it:
+```python
+pred = emu.predict_many(params, z=z, tau0_amp=theta["tau0_amp"], dtau0=theta["dtau0"])
+print("the classes c, in the order of pred.P_class:", list(hp.CLASSES))
+print("pred.k holds the modes k_n, one row per redshift:", pred.k.shape == (len(z), pred.k.shape[1]))
+print("pred.P_class holds P_c(k_n), redshifts x 4 classes x modes:", pred.P_class.shape == (len(z), 4, pred.k.shape[1]))
+```
+
+```text
+the classes c, in the order of pred.P_class: ['clean', 'LLS', 'subDLA', 'DLA']
+pred.k holds the modes k_n, one row per redshift: True
+pred.P_class holds P_c(k_n), redshifts x 4 classes x modes: True
+```
+
+**3. The mixture.** One spectrum per redshift:
 
 ```math
 P_\mathrm{model}(k_n) = P_\mathrm{clean}(k_n) + \sum_c A_c \left[ P_c(k_n) - P_\mathrm{clean}(k_n) \right],
 ```
 
-with $c$ over LLS, subDLA and DLA, where $A_c$ is the fraction of all sightlines that belong to class $c$ (each
-in [0, 1], their sum at most 1; the rest is clean forest). By default $A_c$ is the model's own fraction at the
-point, `pred.w_c`, so the HCD content follows the nine parameters; the section on the HCD content gives the two
-other ways.
+with $c$ over LLS, subDLA and DLA. $A_c$ is the fraction of all sightlines that belong to class $c$ (each in
+[0, 1], their sum at most 1; the rest is clean forest). By default $A_c$ is the model's own fraction at the point,
+`pred.w_c`, so the HCD content follows the nine parameters; the section on the HCD content gives the two other
+ways. In the code it is `predictor.add_hcd`:
 
-**4. The model at the data's wavenumbers.** `interp_to_bins` takes $P_\mathrm{model}$ at each $k_{ij}$ by linear
-interpolation between the two neighbouring modes, $k_n \le k_{ij} \le k_{n+1}$:
+```python
+A = pred.w_c  # redshifts x 3: the model's own fractions of LLS, subDLA and DLA
+P_model = hp.add_hcd(pred, A)  # one spectrum per redshift, on the modes
+clean, hcd = pred.P_class[:, 0], pred.P_class[:, 1:]
+written_out = clean + np.sum(A[:, :, None] * (hcd - clean[:, None, :]), axis=1)
+print("add_hcd is the equation, written out:", bool(np.allclose(P_model, written_out, rtol=1e-12, atol=0)))
+```
+
+```text
+add_hcd is the equation, written out: True
+```
+
+**4. The model at the data's wavenumbers.** The model is known at its modes only. At each data wavenumber
+$k_{ij}$ the value is read off the straight line between the two neighbouring modes, $k_n \le k_{ij} \le k_{n+1}$:
 
 ```math
 m_{ij} = P_\mathrm{model}(k_n) + \left[ P_\mathrm{model}(k_{n+1}) - P_\mathrm{model}(k_n) \right]
 \frac{k_{ij} - k_n}{k_{n+1} - k_n}.
 ```
 
-A data wavenumber outside the modes is refused (the next section says more).
+A data wavenumber outside the modes is refused. The next section says when a straight line is enough and when
+that is not established. In the code it is `likelihood.interp_to_bins`:
+
+```python
+# made-up bin centres for this walk-through: three per redshift, each halfway between two modes
+k_data = [0.5 * (pred.k[i][1:4] + pred.k[i][2:5]) for i in range(len(z))]
+m = [L.interp_to_bins(pred.k[i], P_model[i], k_data[i]) for i in range(len(z))]
+mean_of_the_two = 0.5 * (P_model[0][1:4] + P_model[0][2:5])
+print("halfway between two modes the line gives their mean:", bool(np.allclose(m[0], mean_of_the_two, rtol=1e-12, atol=0)))
+```
+
+```text
+halfway between two modes the line gives their mean: True
+```
 
 **5. The factor.** With a factor, $m_{ij}$ is multiplied by $F_{ij}$ (for example a resolution table that the data
-also carry). The result, joined redshift by redshift in the order of $d$, is the model vector $m(\theta)$.
+also carry). The result, joined redshift by redshift in the order of $d$, is the model vector $m(\theta)$. The
+walk-through now needs a data set; this one is made up, and it has no factor:
+
+```python
+d = [1.01 * mi for mi in m]  # made-up "data": 1 per cent above the model in every bin
+C = [np.diag((0.02 * mi) ** 2) for mi in m]  # made-up errors: 2 per cent, uncorrelated
+data = L.P1DData.from_blocks(z=z, k=k_data, p1d=d, cov_blocks=C)  # no model_factor: F is 1
+print("the number of bins N:", data.n)
+print("the factor F of this data set:", data.model_factor)
+```
+
+```text
+the number of bins N: 6
+the factor F of this data set: None
+```
 
 **6. The residual.** $r = d - m(\theta)$.
+
+```python
+r = data.p1d - np.concatenate(m)
+in_error_bars = r / np.sqrt(np.diag(data.cov))
+print("every bin lies half an error bar above the model:", bool(np.allclose(in_error_bars, 0.5)))
+```
+
+```text
+every bin lies half an error bar above the model: True
+```
 
 **7. The Gaussian.** With $C_\mathrm{sym} = (C + C^T) / 2$ ($C$ itself when it is symmetric; a covariance may differ
 from its transpose by rounding, `SYMMETRY_RTOL`) and its Cholesky factor $L$, $C_\mathrm{sym} = L L^T$, computed
@@ -70,7 +178,25 @@ r^T C^{-1} r = \left| L^{-1} r \right|^2, \qquad \ln \det C = 2 \sum_i \ln L_{ii
 \ln \mathcal{L} = -\frac{1}{2} \, r^T C^{-1} r - \frac{1}{2} \ln \det C - \frac{N}{2} \ln (2 \pi).
 ```
 
-`chi2(theta)` returns $r^T C^{-1} r$; `loglike(theta)` returns $\ln \mathcal{L}$.
+`chi2(theta)` returns $r^T C^{-1} r$; `loglike(theta)` returns $\ln \mathcal{L}$. By hand, and then with the class,
+which does steps 1 to 7 in one call:
+
+```python
+chi2_by_hand = float(r @ np.linalg.solve(data.cov, r))
+ln_det_C = np.linalg.slogdet(data.cov)[1]
+loglike_by_hand = -0.5 * chi2_by_hand - 0.5 * ln_det_C - 0.5 * data.n * np.log(2 * np.pi)
+print("chi-square by hand, six bins at half an error bar each:", round(chi2_by_hand, 6))
+
+like = L.GaussianP1DLikelihood(emu, data)
+print("like.chi2(theta) gives the same number:", bool(np.isclose(like.chi2(theta), chi2_by_hand, rtol=1e-9)))
+print("like.loglike(theta) gives ln L:", bool(np.isclose(like.loglike(theta), loglike_by_hand, rtol=1e-9)))
+```
+
+```text
+chi-square by hand, six bins at half an error bar each: 1.5
+like.chi2(theta) gives the same number: True
+like.loglike(theta) gives ln L: True
+```
 
 **8. Gaussian terms on parameters,** when the likelihood is made with them (`gaussian_terms={name: (mean, sd)}`):
 each adds, for the value $x$ of its parameter,
@@ -81,52 +207,84 @@ each adds, for the value $x$ of its parameter,
 
 `logp(theta)` is $\ln \mathcal{L}$ plus these terms; `loglike` has none of them.
 
+```python
+with_a_term = L.GaussianP1DLikelihood(emu, data, gaussian_terms={"hub": (0.70, 0.01)})
+added = with_a_term.logp(theta) - with_a_term.loglike(theta)  # theta has hub = 0.70, the mean of the term
+print("logp adds the term; at the mean it is -ln(sd sqrt(2 pi)):", bool(np.isclose(added, -np.log(0.01 * np.sqrt(2 * np.pi)))))
+```
+
+```text
+logp adds the term; at the mean it is -ln(sd sqrt(2 pi)): True
+```
+
 **9. The flat boxes** are not in the likelihood: they belong to the sampler. The example gives its sampler a flat
 prior on each of the eleven parameters (`BOXES` in the script) and the two Gaussian terms on `hub` and
 `bhfeedback` (`GAUSSIAN_TERMS`), and samples `sampler_logp`.
 
 ## Bringing the model to the data's wavenumbers
 
-**The algorithm** is step 4 above and nothing more: the straight line between the two neighbouring modes, evaluated
-at each data wavenumber. It is `interp_to_bins`, whose body is that line (through `numpy.interp`) after two small
-checks. It is not a re-binning and not an average over the width of a bin, and nothing in it is fitted or tuned: it
-is the value of the model AT the data wavenumber.
+**Why a straight line between modes, and when that is enough.** The model is known only at the modes of the
+simulation box. `interp_to_bins` (step 4 above) draws a straight line between two neighbouring modes and reads the
+value at the centre of each data bin. Whether that is good enough depends on how far apart the data bins are,
+counted in mode spacings:
 
-**Why this is enough for the data this package was tried with.** The modes are the box modes of the PRIYA
-simulations, `k_n = 2 pi n / (120 Mpc/h)`, n = 1 to 172. In s/km they depend on z and on `hub` and `omegamh2`; at the
-midpoint of the parameters their spacing is 0.00052 s/km at z = 2.2 and 0.00042 s/km at z = 4.2 (0.00040 to 0.00055
-over the corners of `hub` and `omegamh2`), and they reach 0.068 to 0.095 s/km. The data bins, from the public files:
+- **Bins several mode spacings apart** (the KODIAQ-SQUAD bins, for example): against such bins the model is a smooth
+  curve sampled finely, and the straight line loses nothing that matters. There the straight line and a smoother
+  interpolation through the same modes differ by far less than the data errors (checked privately on one
+  high-resolution simulation).
+- **Bins about one mode spacing apart** (the eBOSS bins, for example): there the two differ by an amount comparable
+  to that measurement's errors. **For such data this rule is not established by this package.** Check it before you
+  rely on it: compare with a smoother interpolation through the same modes, or bring in the window of the
+  measurement.
 
-| Data set | Bins | Spacing of the bins | Modes per bin |
+**`modes_per_bin` says which case your data are in.** It gives, for each bin, the spacing of the bin centres there
+over the spacing of the modes there. It only reports: nothing warns and nothing is refused because of its value. For
+the made-up data set of the walk-through above, whose bins were put one mode spacing apart on purpose:
+
+```python
+ratio = like.modes_per_bin(theta)  # one array per redshift of the data
+print("mode spacings per bin spacing, at the first redshift:", np.round(ratio[0], 2).tolist())
+```
+
+```text
+mode spacings per bin spacing, at the first redshift: [1.0, 1.0, 1.0]
+```
+
+A value near 1, as here, is the second case. The example prints the smallest value for its own mock.
+
+**A separate point: the value at the bin centre is not an average over the bin.** The rule gives the model AT the
+bin centre. For a wide bin, the average of the spectrum over the bin can differ from the value at its centre by an
+amount that is not small against the data errors. Which of the two is the right thing to compare with the data
+depends on the window of the measurement, which this package does not model. So wide bins make the straight line
+safe; they do not make the comparison safe in every respect. A window that is a multiplicative factor can be given
+as `model_factor`; a true bin average is not computed here.
+
+**The mock recovery of the example is touched by neither effect:** its mock is made with the same rule as the
+model, at the same bin centres.
+
+**The numbers.** The modes are the box modes of the PRIYA simulations, `k_n = 2 pi n / (120 Mpc/h)`, n = 1 to 172.
+In s/km they depend on z and on `hub` and `omegamh2`; at the midpoint of the parameters their spacing is
+0.00052 s/km at z = 2.2 and 0.00042 s/km at z = 4.2 (0.00040 to 0.00055 over the corners of `hub` and `omegamh2`),
+and they reach 0.068 to 0.095 s/km. The data bins, from the public files:
+
+| Data set | Bins | Spacing of the bin centres | Mode spacings per bin spacing (`modes_per_bin`) |
 |---|---|---|---|
 | eBOSS DR14 (Chabanier et al. 2019) | 35 per redshift, 0.00108 to 0.0195 s/km | 0.000542 s/km, uniform | about 1 |
-| KODIAQ-SQUAD (Karacayli et al. 2022) | 21 per redshift: 0.0011 to 0.0077 s/km in steps of 0.0022, then steps of 0.1 in log10 k to 0.40 s/km | 0.0022 to 0.081 s/km | about 4 at the lowest k, many more above |
-| XQ-100 (`load_xq100`) | 13 per redshift, 0.00316 to 0.0631 s/km | 0.108 in log10 k (0.0009 to 0.014 s/km) | about 2 at the lowest k, many more above |
+| KODIAQ-SQUAD (Karacayli et al. 2022) | 21 per redshift: 0.0011 to 0.0077 s/km in steps of 0.0022, then steps of 0.1 in log10 k to 0.40 s/km | 0.0022 to 0.081 s/km | about 4 at the lowest k, more above |
+| XQ-100 (`load_xq100`) | 13 per redshift, 0.00316 to 0.0631 s/km | 0.108 in log10 k (0.0009 to 0.014 s/km) | about 2 at the lowest k, more above |
 
-Where the data bins are a few modes apart or more, the model is a smooth function sampled finely, and the line
-between two modes is close to it. Where a bin is about one mode wide (eBOSS), the value at the bin centre and the
-average over the bin can differ, and this rule takes the value at the centre.
+**What the rule cannot do:**
 
-**The situations to avoid:**
-
-- **Bins wider than the mode spacing, compared with a bin average.** If a data set reports the average of the power
-  over a wide bin, a point value of the model at the bin centre is not the same thing where the spectrum curves.
-  Give the data's own window as `model_factor` only if it is a multiplicative factor; a true bin average is not
-  computed here.
-- **The lowest wavenumbers.** Below about 0.003 s/km a data bin holds only a few modes. The first mode lies between
-  about 0.0004 and 0.0006 s/km, depending on the point: a data bin below about 0.0004 s/km is refused at every
-  point, and one between 0.0004 and 0.0006 s/km at some points.
 - **Data beyond the modes.** A data wavenumber below the first or above the last mode at a point is refused
   (`OutsideModesError`), never extrapolated. The modes move with `hub` and `omegamh2`, so a bin near an end can be
   inside the modes at one point and outside at another: `sampler_logp` returns minus infinity there. Keep the data
-  well inside the modes over the whole box (the KODIAQ-SQUAD bins above about 0.07 s/km are outside them at some
-  points of the box).
-- **Features finer than the mode spacing.** The model is known at its modes only: a feature narrower than about two
-  mode spacings is not resolved by interpolating it.
-- **Features the model does not have.** Interpolating never creates a feature that is not in the model. For example
-  the oscillation of the SiIII-Lyman-alpha cross term (period 2 pi / 2271 km/s = 0.0028 s/km, five to seven mode
-  spacings, so the modes would resolve it) is not in the class spectra: such a term must be part of the model or of
-  the data's treatment, not of this rule.
+  well inside the modes over the whole box. The first mode lies between about 0.0004 and 0.0006 s/km, and the
+  KODIAQ-SQUAD bins above about 0.07 s/km are outside the modes at some points of the box.
+- **Features finer than the mode spacing.** A feature narrower than about two mode spacings is not resolved by
+  interpolating it.
+- **Features the model does not have.** Interpolating never creates one. The oscillation of the
+  SiIII-Lyman-alpha cross term, for example (period 2 pi / 2271 km/s = 0.0028 s/km), is not in the class spectra:
+  such a term must be part of the model or of the data's treatment, not of this rule.
 
 ## The HCD content: three ways, each explicit
 

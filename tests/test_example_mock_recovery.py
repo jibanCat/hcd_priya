@@ -845,3 +845,34 @@ def test_part_one_reports_the_coarseness_of_the_bins_and_is_never_stopped_by_it(
     (line,) = [ln for ln in out if ln.startswith("model mode spacings")]
     assert "not defined for this data set" in line and "a single bin has no spacing" in line
     assert any(ln.startswith("chi-square at the truth") for ln in out)
+
+
+def test_the_walk_through_of_the_docs_runs_and_prints_what_the_page_shows(setup):
+    """The mathematics section of docs/likelihood.md and the section after it are a walk-through in code. Every
+    python block of the two is run here, in order and in one namespace, with a synthetic model as ``emu``; a block
+    that prints must print exactly the text block shown under it, so the page cannot drift from the code.
+    """
+    import contextlib
+    import io
+    import re
+    import warnings
+
+    text = open(os.path.join(REPO, "docs", "likelihood.md"), encoding="utf-8").read()
+    start = text.index("## The mathematics, step by step\n")
+    walk = text[start : text.index("## The HCD content: three ways, each explicit\n")]
+    blocks = re.findall(r"```python\n(.*?)\n```\n(?:\n```text\n(.*?)\n```\n)?", walk, flags=re.S)
+    assert len(blocks) == 10 and sum(1 for _, shown in blocks if shown) == 9
+    assert (
+        walk.count("```text\n") == 9
+    )  # every text block of the two sections belongs to a python block
+    scope = {"emu": setup["emu"]}
+    for code, shown in blocks:
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed), warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            exec(code, scope)
+        assert printed.getvalue().rstrip("\n") == shown, code
+    # the walk-through shows no value of a model: its outputs are yes-or-no answers, counts, names, and numbers that
+    # do not come from a model (the mean optical depth of a published fit; made-up errors; bins set one mode apart)
+    outputs = "\n".join(shown for _, shown in blocks)
+    assert outputs.count("True") == 8 and "False" not in outputs

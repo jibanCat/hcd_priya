@@ -39,6 +39,7 @@ OBJECTS = [
     wc_map.WcMap.w_c,
     likelihood.P1DData.from_blocks,
     likelihood.interp_to_bins,
+    likelihood.modes_per_bin,
     likelihood.GaussianP1DLikelihood,
     hp.same_run,
 ]

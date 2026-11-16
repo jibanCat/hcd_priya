@@ -62,8 +62,11 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   The HCD content is the model's own class fractions at each point, or given explicitly in one of two ways:
   absolute fractions (`hcd_fractions`) or factors on the model's own (`hcd_relative_to_priya`), each a mapping of
   the three classes. `SAMPLER_REFUSALS` lists every condition under which `sampler_logp` returns minus infinity;
-  `refuse_flags` adds conditions for diagnosis only. The page gives the mathematics step by step and says when the
-  linear interpolation to the data's wavenumbers is accurate and when it is not.
+  `refuse_flags` adds conditions for diagnosis only. The page gives the mathematics step by step, as equations and
+  as a walk-through in code that a test runs, and says when the linear interpolation to the data's wavenumbers is
+  enough (bins several mode spacings apart) and when it is not established (bins about one mode spacing apart).
+  `modes_per_bin`, a function and a method of the likelihood, reports which case a data set is in; it never warns
+  or refuses.
 - **A stored reference of a mock recovery** (`likelihood.P1DReference`, `read_reference`, `write_reference`): the
   truth, the posterior mean and two central intervals of each parameter, and percentiles of the posterior predictive
   on the bins of a data set; a strict file format, read only against its sha256. No reference is shipped.
@@ -138,6 +141,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - The `hcd` command needs an explicit `--config` file and refuses to run without one. Keys the file leaves out
   still take the built-in values of `hcd_analysis.config`, and keys it does not know are ignored.
 - The install name is `hcd-priya`; the import name stays `hcd_analysis`.
+- No code a user runs chooses a matplotlib backend: the example, the figure scripts of `scripts/figures/` and
+  `hcd_analysis.report` save their figures under the backend of the session. Without a display, set
+  `MPLBACKEND=Agg`.
 - The README is short: install, load a model, predict. The release format, the runtime data inputs and the
   description of the research pipeline moved, word for word, to `docs/models_and_data.md` and `docs/pipeline.md`.
 - The Python code is formatted with black (line length 100), with no change in behaviour. Catalogues built from
