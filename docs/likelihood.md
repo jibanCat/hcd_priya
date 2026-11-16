@@ -156,6 +156,14 @@ mistake can be caught: small values meant as absolute fractions but given to `hc
 - **No prior.** Flat boxes belong to the sampler. Gaussian terms on parameters can be given when the likelihood is
   made; `logp` adds them and `loglike` does not.
 
+**Why the example's stored reference uses the data covariance alone.** The example is a recovery test: the mock is
+made from a simulation that the model never saw, and the question is whether the model recovers the point the mock
+was made at. In such a test the error of the emulator is the thing being measured. With the data covariance alone,
+any error of the emulator shows up as a shift of the posterior against the truth, and that shift is what the stored
+reference reports. Adding an emulator term to C would widen the posterior and make the same test more lenient. For a
+fit to a measurement you may want an emulator term. This module does not add one; a covariance is used as it is
+given, so you can add such a term to the covariance of your data set before you make the likelihood.
+
 ## When a sampler gets minus infinity
 
 `sampler_logp(theta)` returns `logp(theta)` or minus infinity, and counts every minus infinity in `refusals` by kind,
