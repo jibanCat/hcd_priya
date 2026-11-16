@@ -727,3 +727,17 @@ def test_the_panels_per_redshift_are_the_mock_and_the_stored_bands_at_that_redsh
         np.testing.assert_allclose(p[(16.0, 84.0)][0], k * (mock.p1d[sl] - sigma[sl]) / np.pi)
         np.testing.assert_allclose(p[(16.0, 84.0)][1], k * (mock.p1d[sl] + sigma[sl]) / np.pi)
         np.testing.assert_allclose(p[(2.5, 97.5)][1], k * (mock.p1d[sl] + 2 * sigma[sl]) / np.pi)
+
+
+def test_the_mathematics_of_the_docs_page_is_written_so_that_github_and_sphinx_both_draw_it():
+    """Display equations are ```math blocks and inline ones are $...$: GitHub draws both, and the Sphinx build draws
+    them because docs/conf.py switches the two MyST options on. No $$ block: inside a list GitHub does not draw one.
+    """
+    text = open(os.path.join(REPO, "docs", "likelihood.md"), encoding="utf-8").read()
+    start = text.index("## The mathematics, step by step\n")
+    section = text[start : text.index("## Bringing the model to the data's wavenumbers\n")]
+    assert section.count("```math\n") == 6 and "$$" not in text
+    assert section.count("$") > 0 and section.count("$") % 2 == 0
+    conf = open(os.path.join(REPO, "docs", "conf.py"), encoding="utf-8").read()
+    assert 'myst_fence_as_directive = ["mermaid", "math"]' in conf
+    assert 'myst_enable_extensions = ["dollarmath"]' in conf

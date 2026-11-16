@@ -46,9 +46,9 @@ napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 napoleon_use_ivar = True
 source_suffix = {".md": "markdown"}
-myst_fence_as_directive = [
-    "mermaid"
-]  # a ```mermaid block is drawn as a diagram, as GitHub draws it
+# a ```mermaid block is drawn as a diagram and a ```math block as an equation, as GitHub draws them
+myst_fence_as_directive = ["mermaid", "math"]
+myst_enable_extensions = ["dollarmath"]  # $...$ is inline mathematics, as on GitHub
 root_doc = "index"
 include_patterns = [
     "index.md",
