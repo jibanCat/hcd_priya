@@ -750,3 +750,38 @@ def test_the_mathematics_of_the_docs_page_is_written_so_that_github_and_sphinx_b
     conf = open(os.path.join(REPO, "docs", "conf.py"), encoding="utf-8").read()
     assert 'myst_fence_as_directive = ["mermaid", "math"]' in conf
     assert 'myst_enable_extensions = ["dollarmath"]' in conf
+
+
+def test_every_column_of_the_figure_per_redshift_has_a_labelled_x_axis(monkeypatch, tmp_path):
+    """With a number of redshifts that does not fill the grid (the example download has 11, in three columns), the
+    last row has empty places. The lowest panel of EVERY column carries the x label and its tick labels, also where
+    that panel is not in the last row; no panel above it does."""
+    ex = _script()
+    zs = (2.2, 2.4, 2.6, 2.8, 3.0)  # five redshifts: a 3 by 2 grid with one empty place
+    k = np.array([0.01, 0.02, 0.04])
+    data = L.P1DData.from_blocks(
+        z=zs,
+        k=[k] * len(zs),
+        p1d=[np.array([3.0, 2.0, 1.0])] * len(zs),
+        cov_blocks=[0.01 * np.eye(3)] * len(zs),
+        truth=THETA,
+    )
+    kept = {}
+    monkeypatch.setattr(
+        ex,
+        "_write_figure",
+        lambda fig, path, facts: kept.setdefault(os.path.basename(path), fig),
+    )
+    ex.draw_reference(_made_up_reference(data), data, str(tmp_path))
+    fig = kept["posterior_predictive_per_redshift.png"]
+    axes = np.array(fig.axes).reshape(2, 3)
+    assert [ax.get_visible() for ax in axes.flat] == [True] * 5 + [False]
+    assert [ax.get_title() for ax in axes.flat[:5]] == [f"z = {z:.1f}" for z in zs]
+    lowest = [axes[1, 0], axes[1, 1], axes[0, 2]]  # the third column ends one row higher
+    for ax in axes.flat[:5]:
+        labelled = any(ax is low for low in lowest)
+        assert (ax.get_xlabel() == "k (s/km)") is labelled, ax.get_title()
+        fig.canvas.draw()
+        shown = any(t.get_visible() and t.get_text() for t in ax.get_xticklabels(which="both"))
+        assert shown is labelled, ax.get_title()
+    assert [ax.get_ylabel() for ax in axes[:, 0]] == ["k P(k) / pi"] * 2

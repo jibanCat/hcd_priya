@@ -661,8 +661,11 @@ def draw_reference(reference, data, out: str, *, chain_summary=None, demo: bool 
         ax.set_title(f"z = {panel['z']:.1f}")
     for ax in axes.flat[len(panels) :]:
         ax.set_visible(False)  # a grid has more places than there are redshifts
-    for ax in axes[-1]:
-        ax.set_xlabel("k (s/km)")
+    # the x axis is labelled on the lowest panel of each column, also where that panel is not in the last row
+    for column in axes.T:
+        lowest = [ax for ax in column if ax.get_visible()][-1]
+        lowest.set_xlabel("k (s/km)")
+        lowest.tick_params(axis="x", which="both", labelbottom=True)
     for ax in axes[:, 0]:
         ax.set_ylabel("k P(k) / pi")
     fig.suptitle("The mock and the posterior predictive of the stored reference (in grey)")
