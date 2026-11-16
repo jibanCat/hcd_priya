@@ -732,11 +732,20 @@ def test_the_panels_per_redshift_are_the_mock_and_the_stored_bands_at_that_redsh
 def test_the_mathematics_of_the_docs_page_is_written_so_that_github_and_sphinx_both_draw_it():
     """Display equations are ```math blocks and inline ones are $...$: GitHub draws both, and the Sphinx build draws
     them because docs/conf.py switches the two MyST options on. No $$ block: inside a list GitHub does not draw one.
+    Every math block is at top level, and the numbered steps are paragraphs, not list items: GitHub shows a math
+    block as code when it sits inside a list item that also holds inline mathematics.
     """
+    import re
+
     text = open(os.path.join(REPO, "docs", "likelihood.md"), encoding="utf-8").read()
     start = text.index("## The mathematics, step by step\n")
     section = text[start : text.index("## Bringing the model to the data's wavenumbers\n")]
     assert section.count("```math\n") == 6 and "$$" not in text
+    assert len(re.findall(r"(?m)^```math$", text)) == text.count(
+        "```math"
+    ), "a math block is indented"
+    assert not re.search(r"(?m)^\d+\. ", section), "a numbered list item in the section"
+    assert len(re.findall(r"(?m)^\*\*\d\. ", section)) == 9  # the nine steps, each a paragraph
     assert section.count("$") > 0 and section.count("$") % 2 == 0
     conf = open(os.path.join(REPO, "docs", "conf.py"), encoding="utf-8").read()
     assert 'myst_fence_as_directive = ["mermaid", "math"]' in conf

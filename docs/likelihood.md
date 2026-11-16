@@ -17,73 +17,73 @@ and `dtau0`, written $\tau_0$ and $d\tau_0$ below. A data set has redshifts $z_i
 $k_{ij}$ of its bins (angular, in s/km), the data vector $d$ of length $N$ (km/s), its covariance $C$ ($N \times N$),
 and optionally a factor $F$ (one number per bin). `GaussianP1DLikelihood.loglike(theta)` computes:
 
-1. **The mean flux.** At each redshift of the data, PRIYA's two-parameter model of the effective optical depth
-   (`predictor.tau_eff_priya`):
+**1. The mean flux.** At each redshift of the data, PRIYA's two-parameter model of the effective optical depth
+(`predictor.tau_eff_priya`):
 
-   ```math
-   \tau_\mathrm{eff}(z) = \tau_0 \left( \frac{1 + z}{1 + z_\mathrm{pivot}} \right)^{d\tau_0} \tau_\mathrm{Kim}(z),
-   \qquad \tau_\mathrm{Kim}(z) = 0.0023 \, (1 + z)^{3.65},
-   ```
+```math
+\tau_\mathrm{eff}(z) = \tau_0 \left( \frac{1 + z}{1 + z_\mathrm{pivot}} \right)^{d\tau_0} \tau_\mathrm{Kim}(z),
+\qquad \tau_\mathrm{Kim}(z) = 0.0023 \, (1 + z)^{3.65},
+```
 
-   with $z_\mathrm{pivot} = 3$; $\tau_\mathrm{Kim}$ is the fit of Kim et al. (2007).
+with $z_\mathrm{pivot} = 3$; $\tau_\mathrm{Kim}$ is the fit of Kim et al. (2007).
 
-2. **The class spectra.** The predictor gives, at each $z_i$, the P1D of the four classes of sightlines, $c$ = clean,
-   LLS, subDLA, DLA: $P_c(k_n)$, on the model's own wavenumbers $k_n$ (its "modes", step 4).
+**2. The class spectra.** The predictor gives, at each $z_i$, the P1D of the four classes of sightlines, $c$ = clean,
+LLS, subDLA, DLA: $P_c(k_n)$, on the model's own wavenumbers $k_n$ (its "modes", step 4).
 
-3. **The mixture.** One spectrum per redshift, as `predictor.add_hcd` forms it:
+**3. The mixture.** One spectrum per redshift, as `predictor.add_hcd` forms it:
 
-   ```math
-   P_\mathrm{model}(k_n) = P_\mathrm{clean}(k_n) + \sum_c A_c \left[ P_c(k_n) - P_\mathrm{clean}(k_n) \right],
-   ```
+```math
+P_\mathrm{model}(k_n) = P_\mathrm{clean}(k_n) + \sum_c A_c \left[ P_c(k_n) - P_\mathrm{clean}(k_n) \right],
+```
 
-   with $c$ over LLS, subDLA and DLA, where $A_c$ is the fraction of all sightlines that belong to class $c$ (each
-   in [0, 1], their sum at most 1; the rest is clean forest). By default $A_c$ is the model's own fraction at the
-   point, `pred.w_c`, so the HCD content follows the nine parameters; the section on the HCD content gives the two
-   other ways.
+with $c$ over LLS, subDLA and DLA, where $A_c$ is the fraction of all sightlines that belong to class $c$ (each
+in [0, 1], their sum at most 1; the rest is clean forest). By default $A_c$ is the model's own fraction at the
+point, `pred.w_c`, so the HCD content follows the nine parameters; the section on the HCD content gives the two
+other ways.
 
-4. **The model at the data's wavenumbers.** `interp_to_bins` takes $P_\mathrm{model}$ at each $k_{ij}$ by linear
-   interpolation between the two neighbouring modes, $k_n \le k_{ij} \le k_{n+1}$:
+**4. The model at the data's wavenumbers.** `interp_to_bins` takes $P_\mathrm{model}$ at each $k_{ij}$ by linear
+interpolation between the two neighbouring modes, $k_n \le k_{ij} \le k_{n+1}$:
 
-   ```math
-   m_{ij} = P_\mathrm{model}(k_n) + \left[ P_\mathrm{model}(k_{n+1}) - P_\mathrm{model}(k_n) \right]
-   \frac{k_{ij} - k_n}{k_{n+1} - k_n}.
-   ```
+```math
+m_{ij} = P_\mathrm{model}(k_n) + \left[ P_\mathrm{model}(k_{n+1}) - P_\mathrm{model}(k_n) \right]
+\frac{k_{ij} - k_n}{k_{n+1} - k_n}.
+```
 
-   A data wavenumber outside the modes is refused (the next section says more).
+A data wavenumber outside the modes is refused (the next section says more).
 
-5. **The factor.** With a factor, $m_{ij}$ is multiplied by $F_{ij}$ (for example a resolution table that the data
-   also carry). The result, joined redshift by redshift in the order of $d$, is the model vector $m(\theta)$.
+**5. The factor.** With a factor, $m_{ij}$ is multiplied by $F_{ij}$ (for example a resolution table that the data
+also carry). The result, joined redshift by redshift in the order of $d$, is the model vector $m(\theta)$.
 
-6. **The residual.** $r = d - m(\theta)$.
+**6. The residual.** $r = d - m(\theta)$.
 
-7. **The Gaussian.** With $C_\mathrm{sym} = (C + C^T) / 2$ ($C$ itself when it is symmetric; a covariance may differ
-   from its transpose by rounding, `SYMMETRY_RTOL`) and its Cholesky factor $L$, $C_\mathrm{sym} = L L^T$, computed
-   once:
+**7. The Gaussian.** With $C_\mathrm{sym} = (C + C^T) / 2$ ($C$ itself when it is symmetric; a covariance may differ
+from its transpose by rounding, `SYMMETRY_RTOL`) and its Cholesky factor $L$, $C_\mathrm{sym} = L L^T$, computed
+once:
 
-   ```math
-   r^T C^{-1} r = \left| L^{-1} r \right|^2, \qquad \ln \det C = 2 \sum_i \ln L_{ii}
-   ```
+```math
+r^T C^{-1} r = \left| L^{-1} r \right|^2, \qquad \ln \det C = 2 \sum_i \ln L_{ii}
+```
 
-   (one triangular solve; no inverse is formed), and
+(one triangular solve; no inverse is formed), and
 
-   ```math
-   \ln \mathcal{L} = -\frac{1}{2} \, r^T C^{-1} r - \frac{1}{2} \ln \det C - \frac{N}{2} \ln (2 \pi).
-   ```
+```math
+\ln \mathcal{L} = -\frac{1}{2} \, r^T C^{-1} r - \frac{1}{2} \ln \det C - \frac{N}{2} \ln (2 \pi).
+```
 
-   `chi2(theta)` returns $r^T C^{-1} r$; `loglike(theta)` returns $\ln \mathcal{L}$.
+`chi2(theta)` returns $r^T C^{-1} r$; `loglike(theta)` returns $\ln \mathcal{L}$.
 
-8. **Gaussian terms on parameters,** when the likelihood is made with them (`gaussian_terms={name: (mean, sd)}`):
-   each adds, for the value $x$ of its parameter,
+**8. Gaussian terms on parameters,** when the likelihood is made with them (`gaussian_terms={name: (mean, sd)}`):
+each adds, for the value $x$ of its parameter,
 
-   ```math
-   -\frac{1}{2} \left( \frac{x - \mathrm{mean}}{\mathrm{sd}} \right)^2 - \ln \left( \mathrm{sd} \sqrt{2 \pi} \right).
-   ```
+```math
+-\frac{1}{2} \left( \frac{x - \mathrm{mean}}{\mathrm{sd}} \right)^2 - \ln \left( \mathrm{sd} \sqrt{2 \pi} \right).
+```
 
-   `logp(theta)` is $\ln \mathcal{L}$ plus these terms; `loglike` has none of them.
+`logp(theta)` is $\ln \mathcal{L}$ plus these terms; `loglike` has none of them.
 
-9. **The flat boxes** are not in the likelihood: they belong to the sampler. The example gives its sampler a flat
-   prior on each of the eleven parameters (`BOXES` in the script) and the two Gaussian terms on `hub` and
-   `bhfeedback` (`GAUSSIAN_TERMS`), and samples `sampler_logp`.
+**9. The flat boxes** are not in the likelihood: they belong to the sampler. The example gives its sampler a flat
+prior on each of the eleven parameters (`BOXES` in the script) and the two Gaussian terms on `hub` and
+`bhfeedback` (`GAUSSIAN_TERMS`), and samples `sampler_logp`.
 
 ## Bringing the model to the data's wavenumbers
 
