@@ -136,9 +136,10 @@ names the record, its two inputs and the HR simulations it was fitted on. A rele
 its `dndx` and `w_c` are the LF model's, as before, and it has no `cddf`. With the record a prediction also
 carries the column-density distribution `pred.cddf` at the bin centres `pred.log_nhi`, with NaN in every bin where
 no HR/LF simulation pair has absorbers at any tabulated redshift and, under LF+MF, where none has them at the
-redshift used. A record may also carry a held-out error of the dN/dX and the CDDF; a prediction then returns it as
-`dndx_err` and `cddf_err`, the held-out rms of ln(prediction / truth) (on the quantity, the range from the value times
-exp(-err) to the value times exp(+err), asymmetric about the value), and an LF+MF prediction without one warns
+redshift used. A record may also carry a held-out error of the dN/dX and the CDDF; a prediction then returns it on the
+quantity, as the range `dndx_lower` to `dndx_upper` and `cddf_lower` to `cddf_upper` (the value times exp(-err) and the
+value times exp(+err), each bound computed on its own, asymmetric about the value), and on the logarithm, as `dndx_err`
+and `cddf_err`, the held-out rms of ln(prediction / truth); an LF+MF prediction without one warns
 (`HeldOutErrorWarning`). No such record is
 released yet. A predictor also says which corrections it applies in one INFO record on the Python logger
 `hcd_analysis.predictor`, with the sha256 of each record applied: once per predictor, at its first corrected call of

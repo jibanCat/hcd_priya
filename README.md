@@ -296,8 +296,8 @@ not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
 where the measured value is zero are not drawn). One
 snapshot stands beside each bin (z = 3.4 for the bin 3 to 4). The bin 4 to 5 is left out because it reaches beyond
 z = 4.6, the edge of the range that the grouped validation of the model's P1D correction covers; the correction of
-the CDDF itself is not validated at any redshift. The model's held-out error is not drawn here; a prediction
-carries it per bin (`pred.cddf_err`).
+the CDDF itself is not validated at any redshift. The model's held-out range is not drawn here; a prediction
+carries it per bin (`pred.cddf_lower` to `pred.cddf_upper`).
 
 ![The class power ratio at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](docs/figures/class_ratio_vs_rogers18.png)
 

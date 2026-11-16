@@ -96,11 +96,12 @@ facts are on every prediction without any logging: the flags ``mf_applied`` and 
 ``provenance``.
 
 **The held-out error.** A corrected dN/dX or CDDF is not exact. An incidence record may carry a held-out error, and
-then every prediction carries it too: ``dndx_err`` and ``cddf_err``, the held-out rms of ln(prediction / truth), for the
-fidelity of the prediction (NaN where the record has no estimate; an error is never interpolated between redshifts).
-They are numbers on the logarithm. On the quantity itself the held-out range is ``dndx * exp(-dndx_err)`` to
-``dndx * exp(+dndx_err)`` (the same for ``cddf``): each bound is transformed on its own, and the range is
-asymmetric about the value. ``labels["incidence_mf_error"]`` says what the numbers are, in the record's own words. An LF+MF
+then every prediction carries it too, for the fidelity of the prediction, in two forms. On the quantity itself: the
+held-out range, from ``dndx_lower`` to ``dndx_upper`` and from ``cddf_lower`` to ``cddf_upper``. On the logarithm:
+``dndx_err`` and ``cddf_err``, the held-out rms of ln(prediction / truth), which is what the record stores. Each bound
+is computed from the logarithm on its own, ``dndx * exp(-dndx_err)`` and ``dndx * exp(+dndx_err)`` (the same for
+``cddf``), so the range is asymmetric about the value. All six are NaN where the record has no estimate; an error is
+never interpolated between redshifts. ``labels["incidence_mf_error"]`` says what the numbers are, in the record's own words. An LF+MF
 prediction that returns a corrected value without an estimate beside it emits ``HeldOutErrorWarning``, once per
 process for each record.
 
@@ -224,7 +225,8 @@ class HeldOutErrorWarning(UserWarning):
     """A corrected dN/dX or CDDF was returned without a held-out error beside it.
 
     With an incidence MF record an LF+MF prediction returns a corrected ``dndx`` and ``cddf``. They are not exact.
-    When the record carries a held-out error, the prediction carries it too (``dndx_err``, ``cddf_err``), and
+    When the record carries a held-out error, the prediction carries it too (the range ``dndx_lower`` to
+    ``dndx_upper`` and ``cddf_lower`` to ``cddf_upper``; on the logarithm ``dndx_err``, ``cddf_err``), and
     nothing is warned. When the record carries none, or has no estimate for a class or bin at the redshift asked
     for, those fields are NaN there and this warning says so: once per process for each incidence record, not
     once per call, because a sampler calls the predictor thousands of times.
@@ -649,6 +651,10 @@ class Prediction:
         w_c, dndx     (3,)        (n_z, 3)
         cddf          (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         log_nhi       (Nbin,)     (Nbin,)         only with an incidence record; else None
+        dndx_lower    (3,)        (n_z, 3)        only with an incidence record; else None
+        dndx_upper    (3,)        (n_z, 3)        only with an incidence record; else None
+        cddf_lower    (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
+        cddf_upper    (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         dndx_err      (3,)        (n_z, 3)        only with an incidence record; else None
         cddf_err      (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         member_std    (4, K)      (n_z, 4, K)
@@ -698,17 +704,34 @@ class Prediction:
         Shape (Nbin,). The bin centres, log10 of N_HI in cm^-2, from the incidence record.
     dndx_err : numpy.ndarray or None
         Shape (3,), in the order of ``dndx``. The held-out rms of ln(prediction / truth) of
-        ``dndx``: a number on the logarithm, not on ``dndx``. On ``dndx`` itself the held-out
-        range is ``dndx * exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``, each bound computed on
-        its own; the range is asymmetric about ``dndx``. It is an indication of size, not
+        ``dndx``: a number on the logarithm, not on ``dndx``. The held-out range on ``dndx``
+        itself is in ``dndx_lower`` and ``dndx_upper``. It is an indication of size, not
         the standard deviation of a known distribution; see ``labels["incidence_mf_error"]`` for
         what it is and what it does not cover. For an LF prediction it is that of the uncorrected value,
         for an LF+MF prediction that of the corrected one. NaN where the incidence record has no
         estimate (it carries no held-out error, or none at this redshift; an error is never
         interpolated between redshifts). None without an incidence record.
     cddf_err : numpy.ndarray or None
-        Shape (Nbin,). The same for ``cddf``, per column-density bin: the held-out range is
-        ``cddf * exp(-cddf_err)`` to ``cddf * exp(+cddf_err)``. NaN also where ``cddf`` is.
+        Shape (Nbin,). The same for ``cddf``, per column-density bin: a number on the logarithm.
+        The held-out range on ``cddf`` itself is in ``cddf_lower`` and ``cddf_upper``. NaN also
+        where ``cddf`` is.
+    dndx_lower : numpy.ndarray or None
+        Shape (3,). The lower end of the held-out range of ``dndx``, on ``dndx`` itself:
+        ``dndx * exp(-dndx_err)``. NaN where ``dndx_err`` is NaN; None without an incidence
+        record.
+    dndx_upper : numpy.ndarray or None
+        Shape (3,). The upper end of that range: ``dndx * exp(+dndx_err)``. Each end is computed
+        from the logarithm on its own, so the range is asymmetric about ``dndx``: the upper end
+        lies farther from ``dndx`` than the lower end. Like ``dndx_err``, the range is an
+        indication of size, not an interval of a known distribution. NaN where ``dndx_err`` is
+        NaN; None without an incidence record.
+    cddf_lower : numpy.ndarray or None
+        Shape (Nbin,). The lower end of the held-out range of ``cddf``, per column-density bin, on
+        ``cddf`` itself: ``cddf * exp(-cddf_err)``. NaN where ``cddf_err`` is NaN (so also where
+        ``cddf`` is); None without an incidence record.
+    cddf_upper : numpy.ndarray or None
+        Shape (Nbin,). The upper end of that range: ``cddf * exp(+cddf_err)``, computed on its own
+        as for ``dndx``. NaN where ``cddf_err`` is NaN; None without an incidence record.
     member_std : numpy.ndarray or None
         Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
         members disagree. It is not a calibrated emulator error and not a covariance. None for a
@@ -777,6 +800,10 @@ class Prediction:
     log_nhi: np.ndarray | None = None
     dndx_err: np.ndarray | None = None
     cddf_err: np.ndarray | None = None
+    dndx_lower: np.ndarray | None = None
+    dndx_upper: np.ndarray | None = None
+    cddf_lower: np.ndarray | None = None
+    cddf_upper: np.ndarray | None = None
 
 
 class _PredictorBase:
@@ -1365,8 +1392,9 @@ class _PredictorBase:
           (these three say how the table was looked up, so they are False on an LF prediction);
           ``cddf_bins_without_support``, some bins of ``cddf`` are NaN because no correction was
           measured there at this redshift; ``incidence_heldout_error_available``, every class of
-          ``dndx`` has a held-out error beside it in ``dndx_err`` (the per-bin gaps of ``cddf_err``
-          are NaN in that array).
+          ``dndx`` has a held-out error beside it in ``dndx_err``, and so a range in ``dndx_lower``
+          and ``dndx_upper`` (the per-bin gaps of ``cddf_err`` are NaN in that array and in the
+          two bounds of ``cddf``).
         - ``synthetic_build``: present, and True, only for a model package built with untrained
           networks for tests; ``labels["synthetic_build"]`` says so in words.
 
@@ -1590,6 +1618,15 @@ class _PredictorBase:
         elif use_mf and flags["mf_tau0_clamped"]:
             self._warn_mf_tau0_clamped(zs, taus)
         sel = (lambda a: a[0]) if single else (lambda a: a)
+        bounds = {}
+        if dndx_err is not None:
+            # the held-out range on the quantity itself: each end from the log rms on its own (NaN stays NaN)
+            bounds = {
+                "dndx_lower": dmean * np.exp(-dndx_err),
+                "dndx_upper": dmean * np.exp(+dndx_err),
+                "cddf_lower": cddf * np.exp(-cddf_err),
+                "cddf_upper": cddf * np.exp(+cddf_err),
+            }
         return Prediction(
             z=zs[0] if single else _frozen(zs),
             k=_frozen(sel(kout)),
@@ -1608,6 +1645,7 @@ class _PredictorBase:
             log_nhi=None if cddf is None else _frozen(self._inc.log_nhi_centres),
             dndx_err=None if dndx_err is None else _frozen(sel(dndx_err)),
             cddf_err=None if cddf_err is None else _frozen(sel(cddf_err)),
+            **{name: _frozen(sel(a)) for name, a in bounds.items()},
         )
 
     def _heldout_errors(self, zs, use_mf, cddf):

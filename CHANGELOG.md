@@ -89,6 +89,10 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   no estimate exists. An LF+MF prediction that returns a corrected value without an estimate beside it emits the new
   `HeldOutErrorWarning`, once per process for each record. The builder refuses to run unless the held-out error is
   stated (`--heldout-error FILE SHA256` or `--no-heldout-error`).
+- **The held-out range as fields of a prediction.** `dndx_lower`, `dndx_upper`, `cddf_lower` and `cddf_upper`: the
+  two ends of the held-out range on the quantity itself, each computed on its own from the record's held-out rms of
+  ln(prediction / truth) (the value times exp(-err), the value times exp(+err)); NaN where there is no estimate,
+  None without an incidence record. `dndx_err` and `cddf_err` stay beside them, unchanged: numbers on the logarithm.
 - **A documentation page on the class spectra against the per-class model of Rogers et al. (2018)**
   ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)): what was compared, the numbers, and what the
   comparison is not.

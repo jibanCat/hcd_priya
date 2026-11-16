@@ -1256,16 +1256,88 @@ def test_a_record_that_trains_on_the_other_spelling_of_a_held_out_run_is_refused
     assert rp._inc is None  # nothing was attached by either
 
 
-def test_the_two_error_fields_are_described_on_the_quantity_without_an_approximation():
-    """The PI's rule (2026-11-15): the docstrings of dndx_err and cddf_err, and the module's paragraph on the held-out
-    error, state the range on the quantity (the bounds transformed separately) and never an approximation from the
-    logarithm, and never call the range symmetric."""
+BOUNDS = ("dndx_lower", "dndx_upper", "cddf_lower", "cddf_upper")
+
+
+def test_a_prediction_carries_the_held_out_range_on_the_quantity_itself(rel_err):
+    """The PI's rule (2026-11-15): the held-out error is on dN/dX, not on its logarithm. Every prediction carries the
+    two ends of the range on the quantity, each computed on its own from the record's log rms e: value * exp(-e) and
+    value * exp(+e). The log rms stays beside them, unchanged."""
+    mf = rel_err.predict(PARAMS, 3.0, tau_eff=0.4)
+    lf = rel_err.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")
+    np.testing.assert_array_equal(mf.dndx_err, [0.05, 0.06, 0.07])  # the log rms is what it was
+    for p in (mf, lf):
+        np.testing.assert_array_equal(p.dndx_lower, p.dndx * np.exp(-p.dndx_err))
+        np.testing.assert_array_equal(p.dndx_upper, p.dndx * np.exp(+p.dndx_err))
+        np.testing.assert_array_equal(p.cddf_lower, p.cddf * np.exp(-p.cddf_err))
+        np.testing.assert_array_equal(p.cddf_upper, p.cddf * np.exp(+p.cddf_err))
+        for name in BOUNDS:
+            a = getattr(p, name)
+            assert a.dtype == np.float64 and not a.flags.writeable, name
+        assert p.dndx_lower.shape == p.dndx_upper.shape == (3,)
+        assert p.cddf_lower.shape == p.cddf_upper.shape == p.cddf.shape
+        # the two ends enclose the value, and the upper end lies farther from it than the lower one
+        assert np.all(p.dndx_lower < p.dndx) and np.all(p.dndx < p.dndx_upper)
+        assert np.all(p.dndx_upper - p.dndx > p.dndx - p.dndx_lower)
+        ok = np.isfinite(p.cddf) & (p.cddf > 0)
+        assert np.all(p.cddf_upper[ok] - p.cddf[ok] > p.cddf[ok] - p.cddf_lower[ok])
+        # a bound is NaN exactly where the log rms is
+        assert np.array_equal(np.isnan(p.cddf_lower), np.isnan(p.cddf_err))
+        assert np.array_equal(np.isnan(p.cddf_upper), np.isnan(p.cddf_err))
+    np.testing.assert_allclose(mf.dndx_upper / mf.dndx, np.exp([0.05, 0.06, 0.07]), rtol=1e-15)
+    np.testing.assert_allclose(lf.dndx_lower / lf.dndx, np.exp([-0.11, -0.12, -0.13]), rtol=1e-15)
+    label = mf.labels["incidence_mf_error"]
+    assert (
+        "the prediction carries the two ends: dndx_lower and dndx_upper, cddf_lower and cddf_upper"
+        in label
+    )
+
+
+def test_a_bound_is_nan_where_there_is_no_estimate_and_none_without_a_record(
+    rel_err, rel, monkeypatch
+):
+    import warnings
+
+    monkeypatch.setattr(hp, "_HELDOUT_WARNED", set())
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", hp.HeldOutErrorWarning)
+        mf = rel_err.predict(
+            PARAMS, 5.0, tau_eff=1.5
+        )  # the subDLA class has no LF+MF estimate at z 5.0
+        between = rel_err.predict(PARAMS, 2.6, tau_eff=0.4)  # not a redshift of the error table
+        stack = rel_err.predict_many(PARAMS, [3.0, 5.0], tau_eff=[0.4, 1.5])
+        no_error = rel["two"].predict(PARAMS, 3.0, tau_eff=0.4)  # a record without a held-out error
+        no_record = rel["one"].predict(PARAMS, 3.0, tau_eff=0.4)  # no incidence record at all
+    assert np.array_equal(np.isnan(mf.dndx_lower), [False, True, False])
+    assert np.array_equal(np.isnan(mf.dndx_upper), [False, True, False])
+    for name in BOUNDS:
+        assert np.all(np.isnan(getattr(between, name))), name
+        assert np.all(np.isnan(getattr(no_error, name))), name
+        assert getattr(no_error, name).shape == getattr(no_error, name[:4]).shape
+        assert getattr(no_record, name) is None, name
+        assert not getattr(stack, name).flags.writeable
+    assert stack.dndx_lower.shape == stack.dndx_upper.shape == (2, 3)
+    assert stack.cddf_lower.shape == stack.cddf_upper.shape == (2, 30)
+    np.testing.assert_array_equal(stack.dndx_upper, stack.dndx * np.exp(stack.dndx_err))
+    np.testing.assert_array_equal(stack.cddf_lower, stack.cddf * np.exp(-stack.cddf_err))
+    assert np.array_equal(np.isnan(stack.dndx_lower), np.isnan(stack.dndx_err))
+    assert (
+        "dndx_err and cddf_err, and with them the four bounds, are NaN"
+        in no_error.labels["incidence_mf_error"]
+    )
+
+
+def test_the_error_fields_are_described_on_the_quantity_without_an_approximation():
+    """The PI's rule (2026-11-15): the docstrings of the held-out fields, and the module's paragraph on the held-out
+    error, state the range on the quantity (the bounds transformed separately, each a field of its own) and never an
+    approximation from the logarithm, and never call the range symmetric."""
     import re
 
     forbidden = r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|1 ?sigma|gaussian"
     doc = hp.Prediction.__doc__
+    order = ("dndx_err", "cddf_err", *BOUNDS, "member_std")
     fields = {}
-    for name, nxt in (("dndx_err", "cddf_err"), ("cddf_err", "member_std")):
+    for name, nxt in zip(order, order[1:]):
         a = doc.index(f"    {name} : ")
         fields[name] = doc[a : doc.index(f"    {nxt} : ", a)]
     paragraph = hp.__doc__[hp.__doc__.index("**The held-out error.**") :]
@@ -1274,7 +1346,23 @@ def test_the_two_error_fields_are_described_on_the_quantity_without_an_approxima
         hit = re.search(forbidden, text, re.I)
         assert hit is None, (where, hit and hit.group(0))
     flat = {k: " ".join(v.split()) for k, v in dict(fields, module=paragraph).items()}
-    assert "dndx * exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``" in flat["dndx_err"]
-    assert "cddf * exp(-cddf_err)`` to ``cddf * exp(+cddf_err)``" in flat["cddf_err"]
-    assert "asymmetric" in flat["dndx_err"] and "asymmetric" in flat["module"]
-    assert "exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``" in flat["module"]
+    # each bound says what it is computed from, on its own
+    assert "``dndx * exp(-dndx_err)``" in flat["dndx_lower"]
+    assert "``dndx * exp(+dndx_err)``" in flat["dndx_upper"]
+    assert "``cddf * exp(-cddf_err)``" in flat["cddf_lower"]
+    assert "``cddf * exp(+cddf_err)``" in flat["cddf_upper"]
+    assert "asymmetric" in flat["dndx_upper"] and "asymmetric" in flat["module"]
+    # the log numbers say they are on the logarithm and point to the fields on the quantity
+    assert "a number on the logarithm" in flat["dndx_err"]
+    assert "``dndx_lower``" in flat["dndx_err"] and "``dndx_upper``" in flat["dndx_err"]
+    assert "``cddf_lower``" in flat["cddf_err"] and "``cddf_upper``" in flat["cddf_err"]
+    for name in BOUNDS:
+        assert f"``{name}``" in flat["module"], name
+    # the shapes table lists the four fields
+    table = doc[
+        doc.index("attribute     predict     predict_many") : doc.index(
+            "Every array is a read-only"
+        )
+    ]
+    for name in BOUNDS:
+        assert name in table, name

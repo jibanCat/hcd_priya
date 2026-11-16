@@ -392,7 +392,8 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
         np.testing.assert_allclose(y + above, y * np.exp(e), rtol=1e-12, atol=0)
         assert np.all(above > below) and np.all(y > 0)  # asymmetric: exp(+e) - 1 > 1 - exp(-e)
     assert _facts(out2)["heldout_error"].startswith(
-        "drawn on the model lines (LF+MF): the range pred.dndx * exp(-pred.dndx_err) to pred.dndx * exp(+pred.dndx_err)"
+        "drawn on the model lines (LF+MF): the held-out range from pred.dndx_lower to pred.dndx_upper "
+        "(pred.dndx * exp(-pred.dndx_err) and pred.dndx * exp(+pred.dndx_err), each bound computed on its own"
     )
 
 
@@ -404,7 +405,10 @@ FORBIDDEN = r"to first order|first-order|for small values|fractional error|multi
 def test_no_public_text_on_the_held_out_error_uses_an_approximation_or_calls_it_symmetric():
     import re
 
-    held_out = re.compile(r"dndx_err|cddf_err|held-out (error|range|rms)", re.I)
+    held_out = re.compile(
+        r"dndx_err|cddf_err|dndx_lower|dndx_upper|cddf_lower|cddf_upper|held-out (error|range|rms)",
+        re.I,
+    )
     files = (
         "README.md",
         "CHANGELOG.md",
@@ -425,10 +429,11 @@ def test_no_public_text_on_the_held_out_error_uses_an_approximation_or_calls_it_
                 hit = re.search(FORBIDDEN, paragraph, re.I)
                 assert hit is None, (name, hit and hit.group(0), paragraph[:300])
     assert checked >= len(files)
-    # and the figure computes its bars from the two bounds, never as the error times the value
+    # and the figure takes its bars from the two bounds the prediction carries: it transforms nothing itself, and
+    # never forms the error times the value
     src = open(os.path.join(REPO, "scripts/figures/fig_dndx_vs_ho21.py"), encoding="utf-8").read()
     assert not re.search(r"dndx_err[^\n]*\*\s*[\w.]*dndx\b|dndx\[[^\n]*\*\s*[\w.]*dndx_err", src)
-    assert "np.exp(-log_err[ok])" in src and "np.exp(log_err[ok])" in src
+    assert "stack.dndx_lower" in src and "stack.dndx_upper" in src and "np.exp" not in src
 
 
 def test_the_dndx_figure_refuses_a_model_without_an_incidence_record(tmp_path):
