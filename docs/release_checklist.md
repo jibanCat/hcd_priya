@@ -18,7 +18,9 @@ code release (see the last section).
 - [ ] The latest nightly run on the release commit passed (`.github/workflows/nightly.yml`, all three stacks), and the
       release validation workflow (`.github/workflows/release-validation.yml`, started by hand on that commit) passes:
       it refuses to go on otherwise. Nightly failures block a release. A failure of a newer-dependency stack is
-      fixed, or listed in the release notes and never hidden, before a passing nightly run is made on the commit.
+      fixed, or listed in the release notes and never hidden, before a passing nightly run is made on the commit. A
+      commit that no daily run tested (a commit of the release stack's branch, or any commit before the daily
+      schedule exists on `main`) needs a nightly run started on it by hand first.
 - [ ] The release-level tests (`tests/ci_tiers.toml`) ran with the real assets on the release commit (`python
       tools/ci/run_test_tier.py --tier assets`), and the record of that run is attached to the release.
 - [ ] The older-libhdf5 job passes.

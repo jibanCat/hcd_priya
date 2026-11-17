@@ -440,7 +440,7 @@ def run_tier(tier, out, workdir=None, wheel=None, level="nightly"):
         failed_files=failed,
         slow_not_run=slow,
         slow_listing_error=slow_error,
-        not_run=not_run(files, ran=(ASSET_JOB,) if tier == ASSET_JOB else ()),
+        not_run=not_run(files, ran=(ASSET_JOB,) if tier == ASSET_JOB else (), ran_files=todo),
         not_run_at_level=None if tier == ASSET_JOB else not_run_at_level(files, level),
     )
     with open(os.path.join(out, "summary.json"), "w") as f:
@@ -473,11 +473,13 @@ def run_tier(tier, out, workdir=None, wheel=None, level="nightly"):
     return 1 if failed or slow is None else 0
 
 
-def not_run(files, ran=()):
-    """{tier: [(file, reason)]} for the files outside the CI tiers (and outside `ran`, the tiers this job ran)."""
+def not_run(files, ran=(), ran_files=()):
+    """{tier: [(file, reason)]} for the files outside the CI tiers (and outside `ran`, the tiers this job ran, and
+    `ran_files`, the files it ran: the external tier's file of the nightly level, when the nightly job ran it).
+    """
     out = {}
     for path, entry in sorted(files.items()):
-        if entry["tier"] in CI_TIERS or entry["tier"] in ran:
+        if entry["tier"] in CI_TIERS or entry["tier"] in ran or path in ran_files:
             continue
         out.setdefault(entry["tier"], []).append((path, entry.get("reason", "")))
     return out

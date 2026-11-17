@@ -5,7 +5,10 @@
 # by hand on any branch. A failure fails the run, visibly (no issue is opened: that would need a write permission).
 # A release is refused unless the latest run of this workflow on the release commit passed (tools/ci/nightly_gate.py,
 # in .github/workflows/release-validation.yml and publish.yml). A schedule runs only from the default branch: until
-# this file is on the default branch, the release stack's branch is tested here on each push to it and by hand.
+# this file is on the default branch, the release stack's branch is tested here on each push to it and by hand. A
+# scheduled run is recorded under the default branch's commit, legs on the stack branch included: a failure of
+# either blocks a release of that commit. A commit of the stack branch passes the gate only through a run on it, by a
+# push or by hand, and a push starts this workflow only once this file is on that branch.
 name: nightly
 
 on:

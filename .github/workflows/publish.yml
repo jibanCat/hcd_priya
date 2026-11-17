@@ -69,7 +69,8 @@ jobs:
         with:
           python-version: "3.11"
       # Nightly failures block a release: the latest nightly run on this commit must have passed. The repository is
-      # public, so the runs are read without a token and this disabled workflow keeps its permissions as they are.
+      # public, so the runs are read without a token and this disabled workflow keeps its permissions as they are. An
+      # anonymous request can meet GitHub's rate limit on a shared runner: that is a refusal, never a pass; run again.
       - name: The latest nightly run on this commit passed
         run: python tools/ci/nightly_gate.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
       - name: Build the code package

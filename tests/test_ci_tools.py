@@ -607,6 +607,9 @@ def test_the_nightly_level_runs_every_ci_file_whole_except_its_release_tests():
     assert len(multi) == 19
     ext = RT.tier_plan("external", files, "nightly")
     assert ext["todo"] == ["tests/external/test_safetensors_interop.py"]
+    # a run lists as not run only what it did not run: the external file, once run, is not among them
+    listed = [p for p, _ in RT.not_run(files, ran_files=ext["todo"]).get("external", [])]
+    assert ext["todo"][0] not in listed and listed
     with pytest.raises(SystemExit):
         RT.tier_plan("external", files, "pr")
     with pytest.raises(SystemExit):
