@@ -14,7 +14,8 @@ code release (see the last section).
       knowingly.
 
 ## 2. Tests and continuous integration
-- [ ] The supported CI job ("Python 3.11, pinned (supported)") passes on the release commit on GitHub.
+- [ ] The two supported CI jobs ("Python 3.11, pinned (supported), wheel tier" and "Python 3.11, pinned (supported),
+      source tier") pass on the release commit on GitHub.
 - [ ] The latest nightly run on the release commit passed (`.github/workflows/nightly.yml`, all three stacks), and the
       release validation workflow (`.github/workflows/release-validation.yml`, started by hand on that commit) passes:
       it refuses to go on otherwise. Nightly failures block a release. A failure of a newer-dependency stack is

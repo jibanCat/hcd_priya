@@ -5,7 +5,7 @@ stage only one environment is supported; wider support will be considered before
 
 | Environment | Status |
 |---|---|
-| Linux x86-64, CPython 3.11, the versions pinned in `tools/ci/constraints-devenv.txt` | **Supported.** The CI job "Python 3.11, pinned (supported)" installs these versions; the packages the file does not pin (click, joblib, pandas, pyyaml and some of their dependencies) take the newest allowed version. |
+| Linux x86-64, CPython 3.11, the versions pinned in `tools/ci/constraints-devenv.txt` | **Supported.** The CI jobs "Python 3.11, pinned (supported), wheel tier" and "Python 3.11, pinned (supported), source tier" install these versions; the packages the file does not pin (click, joblib, pandas, pyyaml and some of their dependencies) take the newest allowed version. |
 | Linux x86-64, CPython 3.11, the newest versions the dependency bounds allow | Tested in the nightly CI, **not supported**. |
 | Linux x86-64, CPython 3.12, the newest versions the dependency bounds allow | Tested in the nightly CI, **not supported**. |
 | CPython 3.13 or later | Not tested. `requires-python` does not exclude it. |
@@ -34,7 +34,7 @@ outputs) are not run in CI. They are listed with their reasons in `tests/ci_tier
 Every test file also has a level in `tests/ci_tiers.toml`, which says when it runs:
 
 - **pr:** every pull request and every push to `main` (`.github/workflows/tests.yml`), on the supported pinned stack
-  only. It holds the tests of what a user runs (loading, prediction, the likelihood, the release formats and their
+  only, as two jobs in parallel, one per tier (each builds, checks and installs on its own). It holds the tests of what a user runs (loading, prediction, the likelihood, the release formats and their
   writers) and the tests that check a scientific result against an independent computation in five areas: the
   likelihood, the covariance, normalisation, the predictor's reconstruction and the incidence model.
   `tests/test_ci_tiers.py` lists those tests and fails if one of them leaves this level.

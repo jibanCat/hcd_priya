@@ -23,8 +23,11 @@ defaults:
     shell: bash
 
 jobs:
+  # The pr level on the supported stack runs as two jobs in parallel, one per tier (wheel; source), so that a pull
+  # request waits for the longer of the two, not for both. Each job builds, checks, scans and installs on its own; the
+  # fresh install of both wheels with the README's first example runs in the wheel job only. No test changes level.
   fixture-tests:
-    name: ${{ matrix.label }}
+    name: ${{ matrix.label }}, wheel tier
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -97,11 +100,6 @@ jobs:
         run: >-
           "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier wheel --level pr --wheel "$(ls dist/*.whl)"
           --workdir "$RUNNER_TEMP/wheeltest" --out "$RUNNER_TEMP/results/wheel"
-      - name: Source tier (tests that also read repository files, from the checkout)
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-        run: >-
-          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier source --level pr
-          --out "$RUNNER_TEMP/results/source"
       - name: List the tests this workflow does not run (other levels and tiers)
         if: ${{ !cancelled() }}
         run: python tools/ci/run_test_tier.py --list-not-run --level pr
@@ -109,7 +107,74 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          name: results-py${{ matrix.python }}-${{ matrix.deps }}
+          name: results-py${{ matrix.python }}-${{ matrix.deps }}-wheel
+          path: ${{ runner.temp }}/results
+          retention-days: 14
+
+
+  fixture-tests-source:
+    name: ${{ matrix.label }}, source tier
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only the pinned job is a supported environment (docs/compatibility.md). The newer-dependency stacks run in
+        # the nightly workflow, where their failures stay visible (no continue-on-error) and do not make them supported.
+        include:
+          - python: "3.11"
+            deps: development-environment
+            label: Python 3.11, pinned (supported)
+    env:
+      JAX_PLATFORMS: cpu
+      MPLBACKEND: Agg
+      # "1" only in the pinned (supported) job: tests that check bit-level results on the pinned stack then require
+      # the running versions to be the pins, so the supported job cannot pass on another stack by mistake.
+      HCD_PINNED_STACK: ${{ matrix.deps == 'development-environment' && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Build the sdist and the wheel (SOURCE_DATE_EPOCH set to the commit time)
+        run: |
+          python -m pip install build
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist .
+          sha256sum dist/*
+      - name: Check the distribution contents against the commit
+        run: python tools/ci/check_dist.py dist
+      # The archives can match the commit and still carry private content: scan what they hold. A finding not in the
+      # known list fails; the release gate (docs/release_checklist.md) runs the same scan with --release, no list.
+      # A failure here stops the job before the install and both test tiers, on purpose: fix the content first.
+      - name: Scan the distribution for private or internal content
+        run: python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt
+      # hcd-priya requires the model package hcd-priya-models. CI never needs the real models: the script builds the
+      # model package with a synthetic bundle (untrained networks; version 0+synthetic) and installs both wheels.
+      - name: Install the wheel and a synthetic model package into a fresh virtual environment
+        id: install
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          constraints=()
+          if [ "${{ matrix.deps }}" = development-environment ]; then
+            constraints=(-c tools/ci/constraints-devenv.txt)
+          fi
+          tools/ci/install_with_synthetic_models.sh "$RUNNER_TEMP/venv/bin/python" "$(ls dist/*.whl)[test]" \
+            "$RUNNER_TEMP/dist_models" "${constraints[@]}"
+          sha256sum "$RUNNER_TEMP"/dist_models/*.whl
+          "$RUNNER_TEMP/venv/bin/python" -m pip check
+          mkdir -p "$RUNNER_TEMP/results"
+          "$RUNNER_TEMP/venv/bin/python" -m pip freeze | tee "$RUNNER_TEMP/results/pip-freeze.txt"
+      - name: Source tier (tests that also read repository files, from the checkout)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: >-
+          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier source --level pr
+          --out "$RUNNER_TEMP/results/source"
+      - name: Keep the results (junit reports, tier summaries and the pip freeze)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-py${{ matrix.python }}-${{ matrix.deps }}-source
           path: ${{ runner.temp }}/results
           retention-days: 14
 

@@ -3,6 +3,7 @@ development-environment versions against pyproject.toml's lower bounds. Syntheti
 
 import importlib.util
 import io
+import json
 import os
 import re
 import tarfile
@@ -433,33 +434,41 @@ def _workflow(name="tests.yml"):
     return yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", name)))
 
 
+PR_JOBS = (
+    "fixture-tests",
+    "fixture-tests-source",
+)  # the pr level: the wheel tier's job and the source tier's
+
+
 def test_only_the_pinned_job_declares_the_pinned_stack():
-    """HCD_PINNED_STACK is "1" in the development-environment (supported) job and empty in the others, and it is set
-    nowhere else: the name occurs exactly once in the workflow outside comments (the fixture-tests job's env), so no
-    other env, run command or $GITHUB_ENV write can set it. The matrix is exactly its include list (no other axis)
-    and holds the one supported job (Python 3.11 with the pinned versions) and the two newest-dependency jobs.
+    """HCD_PINNED_STACK is "1" in the development-environment (supported) jobs and empty in the others, and it is set
+    nowhere else: in tests.yml the name occurs exactly twice outside comments (the env of the two pr jobs, one per
+    tier), so no other env, run command or $GITHUB_ENV write can set it. Each pr job's matrix is exactly its include
+    list (no other axis) and holds the one supported stack (Python 3.11 with the pinned versions); the nightly
+    workflow holds it and the two newest-dependency stacks.
     """
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
     code = "\n".join(re.sub(r"(^|\s)#.*", "", line) for line in text.splitlines())
-    assert code.count("HCD_PINNED_STACK") == 1
+    assert code.count("HCD_PINNED_STACK") == len(PR_JOBS)
     wf = _workflow()
     assert "HCD_PINNED_STACK" not in (wf.get("env") or {})
     for name, job in wf["jobs"].items():
-        if name != "fixture-tests":
+        if name not in PR_JOBS:
             assert "HCD_PINNED_STACK" not in (job.get("env") or {}), name
         for step in job["steps"]:
             assert "HCD_PINNED_STACK" not in (step.get("env") or {}), (name, step.get("name"))
-    job = wf["jobs"]["fixture-tests"]
-    assert (
-        job["env"]["HCD_PINNED_STACK"]
-        == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
-    )
-    assert set(job["strategy"]["matrix"]) == {"include"}
-    include = job["strategy"]["matrix"]["include"]
-    # the PR level runs on the supported stack only; the newer stacks run at the nightly level
-    assert [(e["python"], e["deps"], e["label"]) for e in include] == [
-        ("3.11", "development-environment", "Python 3.11, pinned (supported)")
-    ]
+    for name in PR_JOBS:
+        job = wf["jobs"][name]
+        assert (
+            job["env"]["HCD_PINNED_STACK"]
+            == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
+        )
+        assert set(job["strategy"]["matrix"]) == {"include"}
+        include = job["strategy"]["matrix"]["include"]
+        # the PR level runs on the supported stack only; the newer stacks run at the nightly level
+        assert [(e["python"], e["deps"], e["label"]) for e in include] == [
+            ("3.11", "development-environment", "Python 3.11, pinned (supported)")
+        ], name
     nightly = _workflow("nightly.yml")
     stacks = nightly["jobs"]["nightly"]["strategy"]["matrix"]["stack"]
     assert [(e["python"], e["deps"]) for e in stacks] == [
@@ -712,7 +721,7 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
     """tests.yml (pull requests, pushes to main) runs the pr level on the pinned stack; nightly.yml runs the same
     steps at the nightly level on the three stacks, plus the external tests of that level, once a day (and on the
     release stack's branch while it is open), on each push to that branch and by hand."""
-    pr = _workflow("tests.yml")["jobs"]["fixture-tests"]
+    jobs = _workflow("tests.yml")["jobs"]
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
     assert text.count("--level pr") == 3 and "--level nightly" not in text
     flow = _workflow("nightly.yml")
@@ -728,7 +737,22 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
     nightly_steps = _steps_without_level(job)
     extra = [s for s in nightly_steps if "--tier external" in s.get("run", "")]
     assert len(extra) == 1 and "pip install safetensors" in extra[0]["run"]
-    assert [s for s in nightly_steps if s not in extra] == _steps_without_level(pr)
+    # the pr level runs as two jobs, one per tier: the wheel job holds the fresh install, the wheel tier and the list
+    # of what is not run; the source job holds the same preparation (build, checks, scan, install) and the source tier
+    wheel = _steps_without_level(jobs["fixture-tests"])
+    source = _steps_without_level(jobs["fixture-tests-source"])
+    i_install = next(i for i, s in enumerate(wheel) if s.get("id") == "install")
+    i_wheel = next(i for i, s in enumerate(wheel) if "--tier wheel" in s.get("run", ""))
+    src_tier = [s for s in source if "--tier source" in s.get("run", "")]
+    assert len(src_tier) == 1 and not [s for s in wheel if "--tier source" in s.get("run", "")]
+    assert source == wheel[: i_install + 1] + src_tier + wheel[-1:]
+    assert "readme_first_example" not in json.dumps(
+        source
+    ) and "readme_first_example" in json.dumps(wheel)
+    # the nightly job is the wheel job with the source tier after the wheel tier, and the external step
+    assert [s for s in nightly_steps if s not in extra] == wheel[: i_wheel + 1] + src_tier + wheel[
+        i_wheel + 1 :
+    ]
     ntext = open(os.path.join(REPO, ".github", "workflows", "nightly.yml"), encoding="utf-8").read()
     assert ntext.count("--level nightly") == 4 and "--level pr" not in ntext
 

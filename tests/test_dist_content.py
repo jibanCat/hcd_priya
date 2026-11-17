@@ -512,17 +512,20 @@ def test_the_committed_known_list_only_shrinks_and_holds_no_private_text():
     assert CC.scan_text(open(KNOWN_FILE, encoding="utf-8").read()) == []
 
 
-def _steps():
+def _steps(job):
     import yaml
 
     wf = yaml.safe_load(
         open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8")
     )
-    return wf["jobs"]["fixture-tests"]["steps"]
+    return wf["jobs"][job]["steps"]
 
 
-def test_the_workflow_runs_the_scan_right_after_the_contents_check_and_nothing_can_skip_it():
-    steps = _steps()
+@pytest.mark.parametrize(
+    "job", ["fixture-tests", "fixture-tests-source"]
+)  # the pr level's two jobs, one per tier
+def test_the_workflow_runs_the_scan_right_after_the_contents_check_and_nothing_can_skip_it(job):
+    steps = _steps(job)
     runs = [s.get("run", "") for s in steps]
     i = runs.index(
         "python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt"
