@@ -1,7 +1,11 @@
 # Test tiers and levels: how and when CI runs each test file. Every tests/test_*.py, tests/regression/test_*.py,
 # tests/integration/test_*.py and tests/external/test_*.py file appears in [files] below exactly once
-# (tests/test_ci_tiers.py checks this), one line per file:
-#   "path" = { tier = "...", level = "...", and optional keys }
+# (tests/test_ci_tiers.py checks this), in one of two TOML forms that mean the same:
+#   "path" = { tier = "...", level = "...", reason = "..." }     one line, for an entry with a few keys;
+#   [files."path"]                                                a table, for an entry with long lists, one key
+#   tier = "..."                                                  per line (the table ends where the next one
+#   level = "..."                                                 starts)
+#   asset_tests = ["test_a", "test_b"]
 #
 # Two words that sound alike; every file has both:
 # - The TIER says HOW a file runs: the wheel tier from a directory holding only tests/, so the code under test is the
@@ -32,13 +36,25 @@
 #                        configuration named by HCD_MF_INTEGRATION_CONFIG (tests/integration/test_mf_release_real.py);
 #   fake_spectra         the separately installed package that computes spectra from simulation snapshots
 #                        (docs/fake_spectra_integration.md).
+# Other project words in the reasons and file names:
+#   HCD           high-column-density absorbers, the subject of this code (README.md); also the prefix of its
+#                 environment variables (HCD_...);
+#   P1D           the one-dimensional flux power spectrum of the Lyman-alpha forest, the measured data (README.md);
+#   leg           one P1D measurement used in a fit (DESI, KODIAQ-SQUAD or eBOSS), with its own covariance
+#                 (hcd_analysis/emulator/data_likelihood.py);
+#   nightly gate  tools/ci/nightly_gate.py: it refuses a release unless the latest nightly run on its commit passed;
+#   invariant     a scientific check that must run on every pull request; PR_INVARIANTS in tests/test_ci_tiers.py
+#                 lists them.
 #
 # Skipped is not passed. tools/ci/run_test_tier.py runs one tier at one level, one pytest process per file. In CI:
 #   a skip of a test not named in asset_tests or skipped_by_design   the file FAILS;
 #   a skip of a test named there                                      allowed: reported as NOT RUN, never as passed;
 #   a test named there that runs instead of skipping                  the file FAILS (the list is stale);
 #   a test named in release_tests                                     not skipped: CI leaves it out (deselects it).
-# In full, a file fails on any failure, error, undeclared skip or undeclared expected failure, or when no test passes:
+# Two similar words: the runner's report label NOT RUN marks what one run did not run (a declared skip, a test marked
+# slow, a file of another tier or level), never as passed; the level value "not run" marks a file that never runs in CI.
+# The same rules in full: a file fails on any failure, error, undeclared skip or undeclared expected failure, or when
+# no test passes:
 # - asset_tests and skipped_by_design name the only tests allowed to skip in CI. They are reported as NOT RUN, never as
 #   passed, and they must skip: a declared test that runs instead fails its file, so the lists stay exact.
 # - Expected failures are allowed only as exact deferrals: the deferred_legacy causes of tests/gate_helpers.py (each

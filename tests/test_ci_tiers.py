@@ -47,6 +47,8 @@ TIER_LEVELS = {
 #   release_tests  sits in a pr or nightly file: CI leaves them out; they run only with the real assets.
 PER_TEST = {"pr_tests": "nightly", "nightly_tests": "pr", "release_tests": None}
 
+# In plain words: an "invariant" here is a test we have decided must never drop out of the fast check that runs on
+# every pull request; PR_INVARIANTS is that list, grouped by what each test protects.
 # PR_INVARIANTS: the tests that must run on every pull request (the pr level), grouped by area. Each checks a
 # scientific result against something independent of the code under test: a closed formula, a second implementation,
 # a known identity, or a stored reference from another code path. The five areas (the likelihood, the covariance,
@@ -244,6 +246,7 @@ N_PR_INVARIANTS = 72
 
 
 def _doc():
+    """tests/ci_tiers.toml, parsed into a dict (read again at each call: it is small)."""
     with open(os.path.join(TESTS_DIR, "ci_tiers.toml"), "rb") as f:
         return tomllib.load(f)
 

@@ -531,7 +531,9 @@ SCAN = "python tools/ci/check_dist_content.py dist --known tools/ci/dist_content
 def test_the_workflow_runs_the_scan_right_after_the_contents_check_and_nothing_can_skip_it(job):
     """In each pr job of tests.yml, the content scan runs straight after the distribution check and straight before
     the install, and no condition (if) or continue-on-error lets anything skip or ignore it, so that private content
-    cannot reach the install and the test steps unscanned."""
+    cannot reach the install and the test steps unscanned. (The steps, in .github/workflows/tests.yml: build,
+    tools/ci/check_dist.py, the scan tools/ci/check_dist_content.py, then the install step.) Like many CI tests,
+    this one checks the workflow's configuration, not Python code."""
     steps = _tests_yml_steps(job)
     runs = [s.get("run", "") for s in steps]
     assert SCAN in runs, (

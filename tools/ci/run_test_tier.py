@@ -14,6 +14,9 @@ usage:
   python tools/ci/run_test_tier.py --tier assets --out NEW_DIR
   python tools/ci/run_test_tier.py --list-not-run [--level LEVEL]
 
+Typical local run, as the pr level's source job runs it: python tools/ci/run_test_tier.py --tier source --level pr
+--out results_pr  (a folder that does not exist yet)
+
 NEW_DIR must not exist yet; the runner creates it (--out: each file's log and junit report, and summary.json;
 --workdir: the copy of tests/ that the wheel tier runs from).
 
@@ -31,10 +34,10 @@ Run it with the interpreter under test (CI: the fresh venv holding the installed
 - external tier, at nightly only: the files of tests/external whose level is nightly, from the checkout, in an
   interpreter that has their extra package (the nightly workflow installs it); a skip fails, as everywhere.
 - assets: a job meant to test the real model, never run by the CI workflow (it has no assets). From the checkout,
-  it runs the files of the "assets" tier and every wheel or source file that declares asset_tests, with
-  HCD_GATE_RUN=1 (tests/gate_helpers.py: a missing real cache fails instead of skipping), and with the tests marked
-  slow. There a declared asset test MUST run: if it skips or is not in the junit report at all (not collected, or
-  deselected), its file fails.
+  it runs the files of the "assets" tier and every wheel or source file that declares asset_tests or
+  release_tests, with HCD_GATE_RUN=1 (tests/gate_helpers.py: a missing real cache fails instead of skipping), and
+  with the tests marked slow. There a declared asset test or release test MUST run: if it skips or is not in the
+  junit report at all (not collected, or deselected), its file fails.
 
 A file passes only if pytest exits 0 and its junit report has no failure, no error and no undeclared skip, and at least
 one test passed. Besides passes, only these outcomes are allowed; each is counted and listed, never as a pass:
@@ -179,9 +182,9 @@ def tier_plan(tier, files, level="nightly"):
     - select: per file, the pytest arguments that choose its tests (the file, or node ids of its pr_tests);
     - deselect: per file, the node ids left out.
     """
-    assets = tier == ASSET_JOB
+    is_assets_job = tier == ASSET_JOB
     select, deselect = {}, {}
-    if assets:
+    if is_assets_job:
         todo = asset_job_files(files)
         for rel in todo:
             check_named_tests(rel, files[rel])
@@ -199,9 +202,9 @@ def tier_plan(tier, files, level="nightly"):
                 select[rel], deselect[rel] = sel, desel
     return dict(
         todo=todo,
-        level=None if assets else level,
-        env={"HCD_GATE_RUN": "1"} if assets else {},
-        marker=None if assets else "not slow",
+        level=None if is_assets_job else level,
+        env={"HCD_GATE_RUN": "1"} if is_assets_job else {},
+        marker=None if is_assets_job else "not slow",
         declared={
             rel: files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
             for rel in todo
@@ -209,7 +212,7 @@ def tier_plan(tier, files, level="nightly"):
         required={
             rel: (
                 list(files[rel].get("asset_tests", [])) + list(files[rel].get("release_tests", []))
-                if assets
+                if is_assets_job
                 else []
             )
             for rel in todo
@@ -239,17 +242,25 @@ def junit_counts(xml_path, declared_skips=(), deferrals=(), required=()):
     its function name (all parameters). deferrals are the exact expected-failure messages allowed. required (an
     assets job: the file's asset_tests and release_tests) are tests that must run here: each one that skips, and each
     required name that no test of the report matches (not collected, or deselected), counts as asset_missing.
+
+    Each test lands in exactly one outcome, the first that applies in this order: failures, errors, xfailed or
+    bad_xfail (an expected failure), asset_missing (a required test that skipped), asset_skipped or skipped (any
+    other skip), passed. asset_ran is counted besides the outcome: a declared skip that did not skip.
     """
-    declared, allowed, must = set(declared_skips), set(deferrals), set(required)
+    declared_names, allowed_messages, required_names = (
+        set(declared_skips),
+        set(deferrals),
+        set(required),
+    )
     counts = dict.fromkeys(COUNT_KEYS, 0)
-    seen = set()
+    seen = set()  # the names in the report, full and function-only
     for case in ET.parse(xml_path).getroot().iter("testcase"):
         counts["tests"] += 1
         name = case.get("name", "")
         base = name.split("[")[0]  # the function name: "test_x[a]" -> "test_x"
         seen |= {name, base}
-        is_declared = name in declared or base in declared
-        is_required = name in must or base in must
+        is_declared = name in declared_names or base in declared_names
+        is_required = name in required_names or base in required_names
         skip_tag = case.find("skipped")  # the report's <skipped> element, or None
         if case.find("failure") is not None:
             counts["failures"] += 1
@@ -257,7 +268,7 @@ def junit_counts(xml_path, declared_skips=(), deferrals=(), required=()):
             counts["errors"] += 1
         elif skip_tag is not None and skip_tag.get("type") == "pytest.xfail":
             # pytest writes an expected failure as a skip of type pytest.xfail; only an allowed message is a deferral
-            counts["xfailed" if skip_tag.get("message") in allowed else "bad_xfail"] += 1
+            counts["xfailed" if skip_tag.get("message") in allowed_messages else "bad_xfail"] += 1
         elif skip_tag is not None and is_required:
             # a test that this job must run skipped: its asset is missing
             counts["asset_missing"] += 1
@@ -270,12 +281,14 @@ def junit_counts(xml_path, declared_skips=(), deferrals=(), required=()):
             # a declared skip that ran instead of skipping (outside the tests a job requires): the file fails
             counts["asset_ran"] += 1
     # a required test that is not in the report at all (not collected, or deselected)
-    counts["asset_missing"] += len(must - seen)
+    counts["asset_missing"] += len(required_names - seen)
     return counts
 
 
 def file_verdict(returncode, counts):
-    """(passed, reason) for one file's pytest run."""
+    """(passed, reason) for one file's pytest run. The checks run in this order and the first that fails gives the
+    reason: a timeout; no readable report; any count in the list below; no test passed; a non-zero pytest exit.
+    """
     if returncode is None:
         return False, f"timeout after {FILE_TIMEOUT_S} s"
     if counts is None:
@@ -345,7 +358,7 @@ def check_installed_is(wheel):
             for line in zf.read(rec).decode().splitlines()
             if line.split("/")[0] == "hcd_analysis"
         }
-    dist = md.distribution("hcd-priya")
+    dist = md.distribution("hcd-priya")  # the installed distribution's name, as in pyproject.toml
     bad = []
     for path, digest in sorted(want.items()):
         data = open(dist.locate_file(path), "rb").read()
@@ -366,7 +379,8 @@ def check_installed_is(wheel):
 
 def slow_tests(cmd_base, cwd, env, args):
     """The tests marked slow among the tests a run selects (deselected by the runs), from one collection-only pass;
-    args are the selections and the --deselect options of every file of the run."""
+    args are the selections and the --deselect options of every file of the run. Returns (the sorted node ids, "")
+    or, when the collection fails, (None, its output)."""
     proc = subprocess.run(
         cmd_base + ["--collect-only", "-q", "-m", "slow", *args],
         cwd=cwd,

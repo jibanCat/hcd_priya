@@ -253,26 +253,38 @@ def test_junit_counts_separate_skips_deferrals_and_other_expected_failures(tmp_p
     message is exactly a declared one."""
     p = tmp_path / "r.xml"
     p.write_text(_JUNIT)
-    assert RT.junit_counts(str(p), deferrals=DEFERRAL) == _counts(
+    c = RT.junit_counts(str(p), deferrals=DEFERRAL)
+    assert c == _counts(
         tests=6, passed=1, failures=1, errors=1, skipped=1, xfailed=1, bad_xfail=1
-    )
+    ), f"each row of _JUNIT must land in its own count (rows a to f), with e a declared deferral; got {c}"
     # no deferral declared: both expected failures, e and f, are undeclared (bad_xfail)
-    assert RT.junit_counts(str(p))["bad_xfail"] == 2
+    c = RT.junit_counts(str(p))
+    assert (
+        c["bad_xfail"] == 2
+    ), f"with no deferral declared, rows e and f must both count as bad_xfail; got {c}"
 
 
 def test_junit_counts_declared_skips(tmp_path):
     """A declared skip that skips is NOT RUN, not a skip; a declared test that runs anyway is flagged."""
     p = tmp_path / "r.xml"
     p.write_text(_JUNIT)
-    # each tuple below: (undeclared skips, declared skips that skipped, declared skips that ran); a failure prints all
-    # the counts by name
+    # each tuple below: (undeclared skips, declared skips that skipped, declared skips that ran)
     c = RT.junit_counts(str(p), declared_skips=["d", "a"])
-    assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 1), c
+    assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 1), (
+        "declaring d and a: d's skip must count as a declared skip (asset_skipped), not an undeclared one, and a, "
+        f"which passed, as a declared skip that ran (asset_ran); got {c}"
+    )
     c = RT.junit_counts(str(p), declared_skips=["d[p1]"])  # one parameter case, named exactly
-    assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0), c
+    assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0), (
+        "declaring the case d[p1] by its full name must cover the skip of d[p1], which then counts as a "
+        f"declared skip; got {c}"
+    )
     # another case: the skip of d[p1] stays undeclared
     c = RT.junit_counts(str(p), declared_skips=["d[p2]"])
-    assert (c["skipped"], c["asset_skipped"]) == (1, 0), c
+    assert (c["skipped"], c["asset_skipped"]) == (1, 0), (
+        "declaring d[p2] must not cover the skip of d[p1], which stays an undeclared skip; "
+        f"got {c}"
+    )
 
 
 def test_junit_counts_in_an_assets_job_a_required_test_must_run(tmp_path):
@@ -282,9 +294,15 @@ def test_junit_counts_in_an_assets_job_a_required_test_must_run(tmp_path):
     p.write_text(_JUNIT)
     # (required tests not run, declared skips that skipped, declared skips that ran, undeclared skips)
     c = RT.junit_counts(str(p), declared_skips=["d", "a"], required=["d", "a"])
-    assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"], c["skipped"]) == (1, 0, 0, 0), c
+    assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"], c["skipped"]) == (1, 0, 0, 0), (
+        "requiring d and a: d's skip must count as a required test not run (asset_missing), and a, which ran, as "
+        f"nothing wrong; got {c}"
+    )
     c = RT.junit_counts(str(p), declared_skips=["d", "a"], required=["a"])  # d skipped by design
-    assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0), c
+    assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0), (
+        "d declared but not required (skipped by design) may skip: it must count as asset_skipped; "
+        f"got {c}"
+    )
 
 
 def test_junit_counts_in_an_assets_job_a_required_test_absent_from_the_report_is_missing(tmp_path):
@@ -295,16 +313,23 @@ def test_junit_counts_in_an_assets_job_a_required_test_absent_from_the_report_is
     p.write_text(_JUNIT)
     # zz is not in the report: (required tests not run, passed) = (1, 1)
     c = RT.junit_counts(str(p), declared_skips=["a", "zz"], required=["a", "zz"])
-    assert (c["asset_missing"], c["passed"]) == (1, 1), c
+    assert (c["asset_missing"], c["passed"]) == (1, 1), (
+        "the required name zz, absent from the report, must count as asset_missing; a still passes; "
+        f"got {c}"
+    )
     c = RT.junit_counts(
         str(p), declared_skips=["d[p1]", "d[p9]", "a"], required=["d[p1]", "d[p9]", "a"]
     )
-    assert c["asset_missing"] == 2, c  # d[p1] skipped, d[p9] absent
+    assert (
+        c["asset_missing"] == 2
+    ), f"d[p1] (skipped) and d[p9] (absent) must both count as asset_missing; got {c}"
     c = RT.junit_counts(str(p), declared_skips=["a"], required=["a"])
-    assert c["asset_missing"] == 0, c
+    assert c["asset_missing"] == 0, f"a required test that ran (a) is not missing; got {c}"
     # zz declared but not required: its absence is not counted
     c = RT.junit_counts(str(p), declared_skips=["zz"])
-    assert c["asset_missing"] == 0, c
+    assert (
+        c["asset_missing"] == 0
+    ), f"zz is declared but not required: its absence is not counted; got {c}"
 
 
 def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_or_release_tests():
@@ -414,7 +439,8 @@ def test_deferred_legacy_messages_are_exactly_what_conftest_writes():
         (1, _counts(), False),
         (1, _counts(failures=1), False),
         (None, None, False),  # timeout
-        (4, None, False),  # no readable junit report
+        # no readable junit report (any non-zero exit status; 4 is only an example)
+        (4, None, False),
     ],
 )
 def test_file_verdict(rc, counts, ok):
@@ -443,6 +469,7 @@ def _lower_bounds():
     reqs = proj["dependencies"] + proj["optional-dependencies"]["test"]
     out = {}
     for r in reqs:
+        # "numpy>=2.0" -> ("numpy", ">=", "2.0"); a requirement without ">=" gets an empty bound
         name, _, bound = r.partition(">=")
         out[name.strip().lower()] = bound.strip()
     return out
@@ -483,9 +510,10 @@ def test_devenv_pins_sit_in_the_release_series_of_the_lower_bounds():
         # the versions as lists of their parts: "0.10.1" -> ["0", "10", "1"]
         bound_parts, pin_parts = bounds[name].split("."), pins[name].split(".")
         if name in BOUND_BELOW_PIN:
-            assert BOUND_BELOW_PIN[name].startswith(
-                bounds[name] + ":"
-            ), f"{name}: the stated bound is not the bound"
+            assert BOUND_BELOW_PIN[name].startswith(bounds[name] + ":"), (
+                f"{name}: BOUND_BELOW_PIN says {BOUND_BELOW_PIN[name]!r}, which does not start with the lower bound "
+                f"in pyproject.toml, {bounds[name]!r}; keep the two in step"
+            )
             assert tuple(map(int, bound_parts)) <= tuple(
                 map(int, pin_parts[: len(bound_parts)])
             ), f"{name}: bound {bounds[name]} above the pin"
@@ -515,6 +543,8 @@ def test_the_workflow_calls_the_ci_helpers_that_exist():
 # Shell text that hides a failure. The first branch matches "set +e" and "set +o ..." (such as "set +o pipefail"),
 # which turn off stopping on an error; the second matches "|| true", "|| :" and "|| exit 0", which make a failing
 # command count as a success. (?![\w-]) stops the second branch matching the start of a longer word ("|| true-x").
+# Matches: "set +e", "set +o pipefail", "set +eux", "cmd || true", "cmd || exit 0". Does not match: "set -e",
+# "cmd || true-x".
 UNDO_FAILURE = re.compile(r"set\s+\+[a-zA-Z]*[eo]|\|\|\s*(true|:|exit\s+0)(?![\w-])")
 
 
@@ -559,11 +589,15 @@ def test_only_the_pinned_job_declares_the_pinned_stack():
     "stack", a Python version and a set of dependency versions. The pinned stack, Python 3.11 with the exact versions
     of tools/ci/constraints-devenv.txt, is the only supported environment (docs/compatibility.md).
 
-    HCD_PINNED_STACK is "1" in the development-environment (supported) jobs and empty in the others, and it is set
-    nowhere else: in tests.yml the name occurs exactly twice outside comments (the env of the two pr jobs, one per
-    tier), so no other env, run command or write to $GITHUB_ENV (the file a step writes to set a variable for later
-    steps) can set it. Each pr job's matrix is exactly its include list (no other axis) and holds the one supported
-    stack; the nightly workflow holds it and the two newest-dependency stacks.
+    The test checks both workflows that run tests:
+    1. HCD_PINNED_STACK is "1" in the development-environment (supported) jobs and empty in the others, and it is set
+       nowhere else: in tests.yml the name occurs exactly twice outside comments (the env of the two pr jobs, one per
+       tier), so no other env, run command or write to $GITHUB_ENV (the file a step writes to set a variable for
+       later steps) can set it.
+    2. Each pr job's matrix in tests.yml is exactly its include list (no other axis) and holds the one supported
+       stack.
+    3. nightly.yml's matrix holds the supported stack and the two newest-dependency stacks, and sets
+       HCD_PINNED_STACK to "1" only on the supported one.
     """
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
     # drop the YAML comments (a "#" at the start of a line or after a space), so a mention in a comment is not counted
@@ -764,11 +798,17 @@ def test_the_pr_level_runs_the_pr_files_and_the_pr_tests_of_nightly_files_and_le
     # tests; test_emulator_data.py, a nightly file, names pr_tests; test_emulator_multifidelity.py, a nightly file
     # without pr_tests, does not run at pr. If you change those entries, change the number here too.
     model = RT.tier_plan("wheel", files, "pr")
-    assert len(model["deselect"]["tests/test_emulator_model.py"]) == 17
+    left_out = model["deselect"]["tests/test_emulator_model.py"]
+    assert len(left_out) == 17, (
+        f"tests/ci_tiers.toml now lists {len(left_out)} nightly_tests for test_emulator_model.py, not 17; if that "
+        "was intended, change 17 here"
+    )
     assert model["select"]["tests/test_emulator_data.py"][0].startswith(
         "tests/test_emulator_data.py::"
-    )
-    assert "tests/test_emulator_multifidelity.py" not in model["todo"]
+    ), "test_emulator_data.py (a nightly file) must run only its named pr_tests at pr"
+    assert (
+        "tests/test_emulator_multifidelity.py" not in model["todo"]
+    ), "test_emulator_multifidelity.py (a nightly file without pr_tests) must not run at pr"
 
 
 def test_the_nightly_level_runs_every_ci_file_whole_except_its_release_tests():
@@ -780,7 +820,7 @@ def test_the_nightly_level_runs_every_ci_file_whole_except_its_release_tests():
         plan = RT.tier_plan(tier, files, "nightly")
         assert plan["todo"] == sorted(
             p for p, e in files.items() if e["tier"] == tier and e["level"] in ("pr", "nightly")
-        )
+        ), f"{tier} tier: the nightly level must run every pr and nightly file of the tier"
         for rel in plan["todo"]:
             assert plan["select"][rel] == [rel], f"{rel}: the nightly level runs every file whole"
             assert plan["deselect"][rel] == [
@@ -792,9 +832,14 @@ def test_the_nightly_level_runs_every_ci_file_whole_except_its_release_tests():
     multi = RT.tier_plan("wheel", files, "nightly")["deselect"][
         "tests/test_emulator_multifidelity.py"
     ]
-    assert len(multi) == 19
+    assert len(multi) == 19, (
+        f"tests/ci_tiers.toml now lists {len(multi)} release_tests for test_emulator_multifidelity.py, not 19; if "
+        "that was intended, change 19 here"
+    )
     ext = RT.tier_plan("external", files, "nightly")
-    assert ext["todo"] == ["tests/external/test_safetensors_interop.py"]
+    assert ext["todo"] == [
+        "tests/external/test_safetensors_interop.py"
+    ], "the external tier at nightly must run exactly tests/external/test_safetensors_interop.py"
     # a run lists as not run only what it did not run: the external file, once run, is not among them
     listed = [p for p, _ in RT.not_run(files, ran_files=ext["todo"]).get("external", [])]
     assert ext["todo"][0] not in listed, "the external file that ran is still listed as not run"
@@ -823,7 +868,7 @@ def test_a_named_test_that_is_the_start_of_another_name_is_refused(tmp_path, mon
         RT.check_named_tests("tests/test_x.py", dict(base, release_tests=["test_c"]))
 
 
-def _run(sha, status="completed", conclusion="success", started="2026-11-17T06:00:00Z", rid=1):
+def _fake_run(sha, status="completed", conclusion="success", started="2026-11-17T06:00:00Z", rid=1):
     """A made-up entry of the GitHub Actions list of workflow runs, with the keys nightly_gate.decide reads; by
     default a finished, passed run."""
     return dict(
@@ -843,30 +888,30 @@ SHA = "a" * 40  # a made-up full commit id (40 hexadecimal digits)
     "runs, passed",
     [
         ([], False),  # no nightly run on the commit
-        ([_run("b" * 40)], False),  # a run of another commit does not count
-        ([_run(SHA)], True),
-        ([_run(SHA, conclusion="failure")], False),
-        ([_run(SHA, conclusion="cancelled")], False),
+        ([_fake_run("b" * 40)], False),  # a run of another commit does not count
+        ([_fake_run(SHA)], True),
+        ([_fake_run(SHA, conclusion="failure")], False),
+        ([_fake_run(SHA, conclusion="cancelled")], False),
         # the latest run decides: an older pass does not outweigh a newer failure, and the other way round
         (
             [
-                _run(SHA, rid=1),
-                _run(SHA, conclusion="failure", started="2026-11-17T07:00:00Z", rid=2),
+                _fake_run(SHA, rid=1),
+                _fake_run(SHA, conclusion="failure", started="2026-11-17T07:00:00Z", rid=2),
             ],
             False,
         ),
         (
             [
-                _run(SHA, conclusion="failure", rid=1),
-                _run(SHA, started="2026-11-17T07:00:00Z", rid=2),
+                _fake_run(SHA, conclusion="failure", rid=1),
+                _fake_run(SHA, started="2026-11-17T07:00:00Z", rid=2),
             ],
             True,
         ),
         # a newer run still going is a refusal until it has passed
         (
             [
-                _run(SHA, rid=1),
-                _run(
+                _fake_run(SHA, rid=1),
+                _fake_run(
                     SHA,
                     status="in_progress",
                     conclusion=None,
@@ -886,8 +931,8 @@ def test_the_nightly_gate_passes_only_when_the_latest_run_on_the_commit_passed(r
 
 
 def test_the_nightly_gate_refuses_when_the_runs_cannot_be_read(monkeypatch, capsys):
-    """The gate fails closed: if the GitHub API cannot be read, or the commit id is not a full 40-digit id, it
-    refuses (exit status 1)."""
+    """The gate fails closed (when it cannot be sure, it refuses): if the GitHub API cannot be read, or the commit id
+    is not a full 40-digit id, it refuses (exit status 1)."""
 
     def broken(*a, **k):
         raise OSError("no network")
@@ -927,13 +972,19 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
     """tests.yml (pull requests, pushes to main) runs the pr level on the pinned stack; nightly.yml runs the same
     steps at the nightly level on the three stacks, plus the external tests of that level, once a day (and on the
     release stack's branch while it is open), on each push to that branch and by hand. Why the same steps: if the two
-    workflows drifted apart, a green pull request would no longer predict a green nightly run."""
+    workflows drifted apart, a green pull request would no longer predict a green nightly run.
+
+    It checks, in this order: 1. the levels each workflow passes; 2. nightly.yml's triggers, permissions and branch;
+    3. its external step; 4. the two pr jobs against each other; 5. the nightly job against the pr jobs.
+    """
+    # 1. the levels each workflow passes (and 5. ends with nightly.yml's count)
     jobs = _workflow("tests.yml")["jobs"]
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
     # the three places tests.yml passes "--level pr": the wheel tier, the source tier and the list of what is not run
     assert (
         text.count("--level pr") == 3 and "--level nightly" not in text
     ), "tests.yml must pass the pr level three times and never the nightly level"
+    # 2. nightly.yml's triggers, permissions and branch
     flow = _workflow("nightly.yml")
     # YAML 1.1 reads the workflow key `on` as the boolean True, so the parsed dict may hold it under either name
     on = flow.get("on", flow.get(True))
@@ -955,13 +1006,15 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
         "ci/joss-stack-optb" in job["strategy"]["matrix"]["ref"]
         and "schedule" in job["strategy"]["matrix"]["ref"]
     ), "nightly.yml: the daily schedule must also check out the release stack's branch"
+    # 3. the external step: the one step nightly.yml has beyond the pr jobs. Its tests need an extra package,
+    # safetensors (tests/external), which the step installs first.
     nightly_steps = _steps_without_level(job)
     extra = [s for s in nightly_steps if "--tier external" in s.get("run", "")]
     assert (
         len(extra) == 1 and "pip install safetensors" in extra[0]["run"]
     ), "nightly.yml: one external-tier step, which installs the extra package (safetensors) first"
-    # the pr level runs as two jobs, one per tier: the wheel job holds the fresh install, the wheel tier and the list
-    # of what is not run; the source job holds the same preparation (build, checks, scan, install) and the source tier
+    # 4. the two pr jobs, one per tier: the wheel job holds the fresh install, the wheel tier and the list of what is
+    # not run; the source job holds the same preparation (build, checks, scan, install) and the source tier
     wheel = _steps_without_level(jobs["fixture-tests"])
     source = _steps_without_level(jobs["fixture-tests-source"])
     i_install = next(i for i, s in enumerate(wheel) if s.get("id") == "install")
@@ -980,11 +1033,14 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
     in_wheel = "readme_first_example" in json.dumps(wheel)
     in_source = "readme_first_example" in json.dumps(source)
     assert in_wheel and not in_source, "tests.yml: the README's example runs in the wheel job only"
-    # the nightly job: the wheel job's steps with the source tier inserted right after the wheel tier, plus the
+    # 5. the nightly job: the wheel job's steps with the source tier inserted right after the wheel tier, plus the
     # external step
-    assert [s for s in nightly_steps if s not in extra] == wheel[: i_wheel + 1] + src_tier + wheel[
-        i_wheel + 1 :
-    ], "nightly.yml's steps must equal the pr jobs' steps (see the comment above); change both files together"
+    up_to_wheel_tier, after_wheel_tier = wheel[: i_wheel + 1], wheel[i_wheel + 1 :]
+    nightly_without_external = [s for s in nightly_steps if s not in extra]
+    assert nightly_without_external == up_to_wheel_tier + src_tier + after_wheel_tier, (
+        "nightly.yml's steps must equal the pr jobs' steps (see the comment above); "
+        "change both files together"
+    )
     ntext = open(os.path.join(REPO, ".github", "workflows", "nightly.yml"), encoding="utf-8").read()
     # the four places nightly.yml passes the nightly level: the wheel, source and external tiers and the list
     assert (

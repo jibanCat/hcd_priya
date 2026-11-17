@@ -25,7 +25,12 @@ API = "https://api.github.com"
 
 
 def decide(runs, sha):
-    """(passed, message) for the runs of the nightly workflow (the API's workflow_runs list) on commit `sha`."""
+    """(passed, message) for the runs of the nightly workflow (the API's workflow_runs list) on commit `sha`.
+
+    The fields read from each run, as the GitHub API names them: head_sha, the full commit id the run tested; status,
+    "queued", "in_progress" or "completed"; conclusion, the result of a completed run, such as "success" or
+    "failure"; run_started_at and created_at, its start and creation times; id and html_url, to name it.
+    """
     mine = [r for r in runs if r.get("head_sha") == sha]
     if not mine:
         return False, f"no nightly run on {sha}: start the nightly workflow on this commit first"
@@ -75,8 +80,12 @@ def main(argv=None):
         return 1
     try:
         runs = fetch_runs(args.repo, args.workflow, args.sha, os.environ.get("GH_TOKEN") or None)
-    except Exception as exc:  # noqa: BLE001  any failure to read the runs is a refusal
-        print(f"REFUSED: the nightly runs could not be read ({type(exc).__name__}: {exc})")
+    except Exception as exc:  # noqa: BLE001
+        # any failure to read the runs is a refusal ("noqa: BLE001" above tells a linter this broad except is meant)
+        print(
+            f"REFUSED: the nightly runs could not be read ({type(exc).__name__}: {exc}); check GH_TOKEN and the "
+            "network access, then run the gate again"
+        )
         return 1
     passed, message = decide(runs, args.sha)
     print(("PASSED: " if passed else "REFUSED: ") + message)

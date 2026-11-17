@@ -1,4 +1,5 @@
-# The nightly level (tests/ci_tiers.toml defines the tiers and levels).
+# The nightly level (tests/ci_tiers.toml defines the tiers and levels). In short: every day this tests the default
+# branch and, for now, the release stack's branch; a release of a commit needs a passed run on that exact commit.
 # - What runs: the pr tests and the nightly tests of the wheel and source tiers, and the external tests of the
 #   nightly level, with the build, the content scans, a fresh install and the README's first example, as in
 #   tests.yml; on the supported pinned stack and on two newer-dependency stacks.
@@ -8,10 +9,11 @@
 # - A failure fails the run, visibly (no issue is opened: that would need a write permission).
 # - A release is refused unless the latest run of this workflow on the release commit passed (tools/ci/nightly_gate.py,
 #   run first in .github/workflows/release-validation.yml and publish.yml).
-# - GitHub runs a schedule only from the default branch. So the daily run also checks out the release stack's branch
-#   as extra jobs, and GitHub records the whole run under the default branch's commit: a failure of any of its jobs
-#   blocks a release of that commit. A commit of the release stack's branch passes the gate only through a run on that
-#   commit, started by a push or by hand; a push starts this workflow only once this file is on that branch.
+# - GitHub starts scheduled runs only from the default branch (main). So the daily run also checks out the release
+#   stack's branch, as extra jobs. GitHub files every job of that run under the commit of main that started it, so a
+#   failure of any of its jobs blocks a release of that commit of main. A commit of the release stack's branch passes
+#   the gate only when a run was started on that exact commit, by a push to the branch or by hand; a push starts this
+#   workflow only once this file is on that branch.
 name: nightly
 
 on:
