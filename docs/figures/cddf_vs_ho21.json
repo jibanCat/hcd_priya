@@ -1,9 +1,10 @@
 {
  "design_table": "docs/figures/data/priya_lf_design_60.csv, sha256 a47f23bfce73b3d765206cef5b116cf42b3705c9a0df85a5e665cda185255d42",
- "figure": "CDDF against Ho, Bird and Garnett (2021)",
+ "figure": "CDDF against Ho, Bird and Garnett (2021) for DLAs and three measurements below the DLA threshold",
  "incidence_hr_simulations": 5,
  "incidence_record": true,
  "measurement_source": "Ho, Bird and Garnett (2021), doi:10.1093/mnras/stab2169; tables of github.com/sbird/DLA_data (commit 147c616), fetched from the fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/ho21/PROVENANCE.md",
+ "measurement_source_below_dla": "Zafar et al. (2013), doi:10.1051/0004-6361/201321154; O'Meara et al. (2007), doi:10.1086/510711; Prochaska, O'Meara and Worseck (2010), doi:10.1088/0004-637X/718/1/392; files of github.com/sbird/DLA_data, fetched from the fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/lls_subdla/PROVENANCE.md",
  "panels": [
   {
    "design_point_flags": {
@@ -15,6 +16,9 @@
    "design_points_in_band": 60,
    "design_points_refused": 0,
    "measurement_bin": "2 < z < 2.5",
+   "measurements_below_dla": [
+    "Zafar et al. (2013), subDLAs, z 1.5 to 5"
+   ],
    "model_bins_absent": 2,
    "model_flags_set": [
     "cddf_bins_without_support",
@@ -35,6 +39,9 @@
    "design_points_in_band": 60,
    "design_points_refused": 0,
    "measurement_bin": "2.5 < z < 3",
+   "measurements_below_dla": [
+    "Zafar et al. (2013), subDLAs, z 1.5 to 5"
+   ],
    "model_bins_absent": 1,
    "model_flags_set": [
     "incidence_heldout_error_available",
@@ -54,6 +61,11 @@
    "design_points_in_band": 60,
    "design_points_refused": 0,
    "measurement_bin": "3 < z < 4",
+   "measurements_below_dla": [
+    "Zafar et al. (2013), subDLAs, z 1.5 to 5",
+    "O'Meara et al. (2007), mean z 3.1",
+    "Prochaska, O'Meara and Worseck (2010), LLS region at z 3.7"
+   ],
    "model_bins_absent": 1,
    "model_flags_set": [
     "incidence_heldout_error_available",

@@ -21,7 +21,12 @@ from tests import synthetic_release as SR
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(REPO, "scripts", "figures")
 DATA = os.path.join(REPO, "docs", "figures", "data")
-NOT_DATA = {"SHA256SUMS", "README.md", "ho21/PROVENANCE.md"}  # the files that describe the data
+NOT_DATA = {
+    "SHA256SUMS",
+    "README.md",
+    "ho21/PROVENANCE.md",
+    "lls_subdla/PROVENANCE.md",
+}  # describe the data
 PNG = b"\x89PNG\r\n\x1a\n"
 # The synthetic model serves LF+MF from z = 2.6 only, so the tests that run a model figure move the script's
 # redshifts there. The redshifts the scripts are written with are checked on their own.
@@ -127,6 +132,79 @@ def test_the_ho21_provenance_names_each_file_with_its_digest_and_the_commit():
         )
         >= 1
     )
+
+
+def test_the_lls_subdla_provenance_names_each_file_with_its_digest_and_the_commits():
+    with open(os.path.join(DATA, "lls_subdla", "PROVENANCE.md"), encoding="utf-8") as fh:
+        text = fh.read()
+    files = {n: d for n, d in _sums().items() if n.startswith("lls_subdla/")}
+    assert sorted(files) == [
+        "lls_subdla/prochaska_lls.dat",
+        "lls_subdla/summary.dat",
+        "lls_subdla/zafar_2013.txt",
+    ]
+    for name, digest in files.items():
+        assert os.path.basename(name) in text and digest in text, name
+    for needed in (
+        "github.com/sbird/DLA_data",  # where the files originate
+        "90104dd49364f0478e7dccd52675a41794af4033",  # the commit that added the subDLA table there
+        "3498694e59701b72c738e5eef950c62b73683c1e",  # the commit that added the other two
+        "github.com/jibanCat/DLA_data",  # the fork they were fetched from
+        "daa595c692254c93b86009318a6e2b029db67112",
+        "10.1051/0004-6361/201321154",
+        "10.1086/510711",
+        "10.1088/0004-637X/718/1/392",
+        "no licence file",
+    ):
+        assert needed in text, needed
+
+
+def test_the_lls_subdla_tables_read_as_the_collections_own_readers_read_them():
+    """The mappings of ``zafar_data``, ``omeara_data`` (with ``format_error_bars``) and ``prochaska_10_data`` of the DLA
+    data collection (PROVENANCE.md compares them step by step), restated here in plain numpy, against the readers of the
+    CDDF figure: the same points, the same error bars, the same polygon. The values of f are near 1e-20, so every
+    comparison is relative, with no absolute tolerance."""
+    cddf = _script("fig_cddf_vs_ho21")
+
+    def same(a, b):
+        return np.allclose(a, b, rtol=1e-12, atol=0.0)
+
+    # zafar_data: N = 10**c0; f = 10**c2; x errors 10**(c0 +- c1) about N; y errors from 10**(c2 + c3) and 10**(c2 - c4)
+    path = os.path.join(DATA, "lls_subdla", "zafar_2013.txt")
+    data = np.loadtxt(path)
+    assert data.shape == (5, 5)
+    nhi, f_theirs = 10 ** data[:, 0], 10 ** data[:, 2]
+    upper_x, lower_x = 10 ** (data[:, 1] + data[:, 0]) - nhi, nhi - 10 ** (-data[:, 1] + data[:, 0])
+    upper_y, lower_y = 10 ** (data[:, 3] + data[:, 2]) - f_theirs, f_theirs - 10 ** (
+        -data[:, 4] + data[:, 2]
+    )
+    logn, half, f, lo, hi = cddf.read_zafar13(path)
+    assert np.array_equal(10**logn, nhi) and np.array_equal(f, f_theirs)
+    assert same(10 ** (logn + half) - 10**logn, upper_x) and same(
+        10**logn - 10 ** (logn - half), lower_x
+    )
+    assert same(hi - f, upper_y) and same(f - lo, lower_y)
+    # column 3 is the upper error and column 4 the lower one, and the file has rows where they differ
+    assert np.any(data[:, 3] != data[:, 4])
+    assert same(np.log10(hi) - np.log10(f), data[:, 3]) and same(
+        np.log10(f) - np.log10(lo), data[:, 4]
+    )
+    # omeara_data: format_error_bars on 10**data: x, y, then the bin edges and the limits of f as distances
+    path = os.path.join(DATA, "lls_subdla", "summary.dat")
+    data = 10 ** np.loadtxt(path)
+    assert data.shape == (4, 6)
+    logn, lo_n, hi_n, f, f_lo, f_hi = cddf.read_omeara07(path)
+    assert same(10**logn, data[:, 0]) and same(f, data[:, 1])
+    assert same(10**logn - 10**lo_n, data[:, 0] - data[:, 2])
+    assert same(10**hi_n - 10**logn, data[:, 3] - data[:, 0])
+    assert same(f - f_lo, data[:, 1] - data[:, 4]) and same(f_hi - f, data[:, 5] - data[:, 1])
+    assert np.all(lo_n < logn) and np.all(logn < hi_n) and np.all(f_lo < f) and np.all(f < f_hi)
+    # prochaska_10_data: ax.fill(10**c0, 10**c1), the corners in the file's order
+    path = os.path.join(DATA, "lls_subdla", "prochaska_lls.dat")
+    data = np.loadtxt(path)
+    assert data.shape == (6, 2)
+    logn, f = cddf.read_prochaska10(path)
+    assert np.array_equal(10**logn, 10 ** data[:, 0]) and np.array_equal(f, 10 ** data[:, 1])
 
 
 def test_a_data_file_whose_bytes_changed_is_refused(tmp_path, monkeypatch):
@@ -288,6 +366,16 @@ def test_the_cddf_figure_runs_on_a_model_with_an_incidence_record(
     facts = _facts(out)
     assert facts["parameters"] == C.MIDPOINT and facts["incidence_record"] is True
     assert "github.com/sbird/DLA_data" in facts["measurement_source"]
+    assert "lls_subdla/PROVENANCE.md" in facts["measurement_source_below_dla"]
+    below = [p["measurements_below_dla"] for p in facts["panels"]]
+    zafar, omeara, prochaska = (
+        cddf.LLS_SUBDLA[n] for n in ("zafar_2013.txt", "summary.dat", "prochaska_lls.dat")
+    )
+    assert below == [
+        [zafar],
+        [zafar],
+        [zafar, omeara, prochaska],
+    ], "the subDLA points in every panel, the others at 3 to 4"
     assert [p["model_z"] for p in facts["panels"]] == list(SYNTHETIC_Z)
     for panel in facts["panels"]:
         assert panel["design_points"] == 3 and panel["design_points_refused"] == 0

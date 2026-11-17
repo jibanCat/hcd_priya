@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Figure: the column-density distribution f(N_HI) the model predicts, against Ho, Bird and Garnett (2021).
+"""Figure: the column-density distribution f(N_HI) the model predicts, against Ho, Bird and Garnett (2021) for DLAs and
+three measurements below the DLA threshold (subDLAs and LLS).
 
     python scripts/figures/fig_cddf_vs_ho21.py (--published | --release RELEASE_DIR SHA256) \\
         [--design OTHER_DESIGN.csv | --no-band] [--out docs/figures/cddf_vs_ho21.png]
@@ -16,7 +17,11 @@ What is drawn, in three panels (one per redshift bin of the measurement):
   which it sets a flag that the drawn line does not have;
 - points: f(N_HI) of Ho, Bird and Garnett (2021) with the limits of their 68 per cent interval, from
   ``docs/figures/data/ho21`` (see PROVENANCE.md there). A bin in which the measured f is zero is not drawn, also
-  where the table gives an upper limit for it.
+  where the table gives an upper limit for it;
+- below the DLA threshold, from ``docs/figures/data/lls_subdla`` (see PROVENANCE.md there), read as the collection's
+  own readers read them: the subDLA f(N_HI) of Zafar et al. (2013), z 1.5 to 5, in every panel; and in the panel
+  3 < z < 4, the f(N_HI) of O'Meara et al. (2007) (mean z 3.1) and the region of f(N_HI) for LLS that Prochaska,
+  O'Meara and Worseck (2010) allow at z 3.7, drawn as a filled region.
 
 The model needs an incidence MF record (an optional part of a release): without one it returns no CDDF. The measurement bin
 from z = 4 to 5 is left out: it reaches beyond z 4.6, the upper edge of the grouped-validation domain of the
@@ -54,6 +59,49 @@ def read_ho21_cddf(path: str):
     return a[0][keep], a[1][keep], a[2][keep], a[3][keep]
 
 
+def read_zafar13(path: str):
+    """The subDLA table of Zafar et al. (2013), as the collection's reader ``zafar_data`` reads it: one row per bin,
+    five columns. Column 0: log10 N_HI. Column 1: the half-width of the bin in log10 N_HI. Column 2: log10 f(N_HI).
+    Columns 3 and 4: the upper and the lower error of log10 f, in dex. Returns log10 N_HI, the half-width, f, and the
+    lower and upper limit of f."""
+    a = np.loadtxt(path, ndmin=2)
+    if a.shape[1] != 5:
+        raise SystemExit(f"{path}: expected five columns, found {a.shape[1]}")
+    logn, half, logf, up, down = a.T
+    return logn, half, 10.0**logf, 10.0 ** (logf - down), 10.0 ** (logf + up)
+
+
+def read_omeara07(path: str):
+    """The table of O'Meara et al. (2007), as the collection's reader ``omeara_data`` reads it (through
+    ``format_error_bars``): a header line, then one row per bin, six columns, all log10. Column 0: N_HI. Column 1:
+    f(N_HI). Columns 2 and 3: the lower and the upper edge of the bin in N_HI. Columns 4 and 5: the lower and the
+    upper limit of f. Returns log10 N_HI, the two edges in log10 N_HI, f, and its two limits."""
+    a = np.loadtxt(path, ndmin=2)
+    if a.shape[1] != 6:
+        raise SystemExit(f"{path}: expected six columns, found {a.shape[1]}")
+    logn, logf, lo_n, hi_n, lo_f, hi_f = a.T
+    return logn, lo_n, hi_n, 10.0**logf, 10.0**lo_f, 10.0**hi_f
+
+
+def read_prochaska10(path: str):
+    """The LLS region of Prochaska, O'Meara and Worseck (2010), as the collection's reader ``prochaska_10_data`` reads
+    it: the corners of a polygon, one per row, log10 N_HI and log10 f(N_HI); the reader fills the polygon. Returns
+    log10 N_HI and f of the corners."""
+    a = np.loadtxt(path, ndmin=2)
+    if a.shape[1] != 2:
+        raise SystemExit(f"{path}: expected two columns, found {a.shape[1]}")
+    return a[:, 0], 10.0 ** a[:, 1]
+
+
+# the measurements below the DLA threshold: the subDLA points in every panel, the other two in the panel 3 < z < 4
+LLS_SUBDLA = {
+    "zafar_2013.txt": "Zafar et al. (2013), subDLAs, z 1.5 to 5",
+    "summary.dat": "O'Meara et al. (2007), mean z 3.1",
+    "prochaska_lls.dat": "Prochaska, O'Meara and Worseck (2010), LLS region at z 3.7",
+}
+LLS_SUBDLA_PANEL = "3 < z < 4"
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -78,10 +126,11 @@ def main(argv=None) -> int:
     )
     facts = dict(
         what,
-        figure="CDDF against Ho, Bird and Garnett (2021)",
+        figure="CDDF against Ho, Bird and Garnett (2021) for DLAs and three measurements below the DLA threshold",
         parameters=C.MIDPOINT,
         design_table=C.design_source(args),
         measurement_source=C.MEASUREMENT_SOURCE,
+        measurement_source_below_dla=C.MEASUREMENT_SOURCE_LLS_SUBDLA,
         panels=[],
     )
     for ax, (bin_label, name, z) in zip(axes, PANELS):
@@ -118,13 +167,37 @@ def main(argv=None) -> int:
             logn, f, yerr=[f - f_lo, f_hi - f], fmt="o", ms=3.4, color=C.INK, ecolor=C.INK_SECONDARY, elinewidth=0.8,
             mec=C.SURFACE, mew=0.5, zorder=3, label="Ho, Bird and Garnett (2021), 68 per cent interval",
         )  # fmt: skip
+        logn, half, f, f_lo, f_hi = read_zafar13(C.data_file("lls_subdla", "zafar_2013.txt"))
+        ax.errorbar(
+            logn, f, xerr=half, yerr=[f - f_lo, f_hi - f], fmt="s", ms=3.2, color=C.INK_SECONDARY, mfc=C.SURFACE,
+            ecolor=C.INK_SECONDARY, elinewidth=0.8, zorder=3, label=LLS_SUBDLA["zafar_2013.txt"],
+        )  # fmt: skip
+        drawn = ["zafar_2013.txt"]
+        if bin_label == LLS_SUBDLA_PANEL:
+            logn, lo_n, hi_n, f, f_lo, f_hi = read_omeara07(
+                C.data_file("lls_subdla", "summary.dat")
+            )
+            ax.errorbar(
+                logn, f, xerr=[logn - lo_n, hi_n - logn], yerr=[f - f_lo, f_hi - f], fmt="D", ms=3.2,
+                color=C.INK_SECONDARY, mfc=C.INK_SECONDARY, ecolor=C.INK_SECONDARY, elinewidth=0.8, zorder=3,
+                label=LLS_SUBDLA["summary.dat"],
+            )  # fmt: skip
+            logn, f = read_prochaska10(C.data_file("lls_subdla", "prochaska_lls.dat"))
+            ax.fill(logn, f, color=C.SHADE, ec=C.INK_SECONDARY, lw=0.6, zorder=0, label=LLS_SUBDLA["prochaska_lls.dat"])  # fmt: skip
+            drawn += ["summary.dat", "prochaska_lls.dat"]
+        panel["measurements_below_dla"] = [LLS_SUBDLA[n] for n in drawn]
         ax.set_yscale("log")
         ax.set_title(f"measured: {bin_label};  model: z = {z:g}", loc="left")
         ax.set_xlabel("log10 of N_HI (cm^-2)")
         facts["panels"].append(panel)
     axes[0].set_ylabel("f(N_HI) (cm^2)")
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="outside lower center", ncols=3)
+    handles, labels = [], []
+    for ax in axes:  # every label once, from whichever panel draws it
+        for h, label in zip(*ax.get_legend_handles_labels()):
+            if label not in labels:
+                handles.append(h)
+                labels.append(label)
+    fig.legend(handles, labels, loc="outside lower center", ncols=2)
     fig.suptitle("Column-density distribution of the absorbers", x=0.01, ha="left", fontsize=10.5)
     C.save(fig, args.out, facts)
     return 0

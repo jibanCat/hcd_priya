@@ -55,7 +55,8 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
   distribution; `labels["incidence_mf_error"]` on a prediction says what it does not cover. It is not the same
   thing as the band, which shows how far the prediction moves across the training set.
 - **Not shown and not tested here.** Nothing was fitted. The
-  measurement covers DLAs only: the subDLA and LLS curves have no measured point in this figure. The simulations and
+  measurement covers DLAs only: the subDLA and LLS curves have no measured point in this figure (the collection of
+  absorber measurements the data come from holds no dN/dX of subDLAs or LLS). The simulations and
   the survey define and find absorbers differently; that difference was not assessed.
 
 To regenerate it (the second form when you hold the files of a release):
@@ -67,7 +68,7 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
 
 ## The column-density distribution against Ho, Bird and Garnett (2021)
 
-![The column-density distribution f(N_HI) of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021) in three redshift bins](figures/cddf_vs_ho21.png)
+![The column-density distribution f(N_HI) of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021) in three redshift bins and three measurements below the DLA threshold](figures/cddf_vs_ho21.png)
 
 - **Model (line):** `pred.cddf` against `pred.log_nhi` of the LF+MF model at the parameters above, at the snapshots
   z = 2.2, 2.8 and 3.4. A bin in which the model has no support is NaN and is absent from the line; it is not drawn
@@ -89,6 +90,12 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
   https://github.com/sbird/DLA_data (fetched from its fork https://github.com/jibanCat/DLA_data), read as that
   collection's own reader `ho21_cddf` reads them where it has a reader; the provenance file compares the two step
   by step.
+- **Data below the DLA threshold:** in every panel, the f(N_HI) of subDLAs that Zafar et al. (2013) measured over
+  z 1.5 to 5 (open squares); in the panel 3 < z < 4, the f(N_HI) of O'Meara et al. (2007) for log10 N_HI 19.0 to
+  20.3 at a mean z of 3.1 (filled diamonds), and the region of f(N_HI) that Prochaska, O'Meara and Worseck (2010)
+  allow for LLS at z 3.7 (the shaded region). They are the files of the same collection, read as its own readers read
+  them; `docs/figures/data/lls_subdla/PROVENANCE.md` in the repository gives their origin and compares the readers
+  step by step. Their redshifts are not the model's snapshots, and Zafar et al. cover a wider range than any panel.
 - **One snapshot against one bin.** Each panel sets one snapshot beside a measurement over a range of redshifts. In
   the third panel the model is at the single redshift 3.4 inside a bin one unit wide.
 - **The bin 4 to 5 is left out.** It reaches beyond z = 4.6, the upper edge of the grouped-validation domain of the
@@ -97,7 +104,7 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
 - **Not shown and not tested here.** The held-out error of the model's CDDF is not drawn in this figure (with 29
   bins and five held-out simulations per bin it would hide the comparison); a prediction carries its range per bin as
   `pred.cddf_lower` and `pred.cddf_upper`. The measurement's tables
-  start at log10 N_HI = 20.05; below it the model has no measured point in this figure. The simulations and the
+  start at log10 N_HI = 20.05; below it the points are the three measurements above, at other redshifts. The simulations and the
   survey define and find absorbers differently; that difference was not assessed.
 
 To regenerate it (the second form when you hold the files of a release):

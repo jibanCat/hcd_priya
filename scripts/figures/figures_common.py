@@ -97,6 +97,11 @@ MEASUREMENT_SOURCE = (
     "Ho, Bird and Garnett (2021), doi:10.1093/mnras/stab2169; tables of github.com/sbird/DLA_data (commit 147c616), "
     "fetched from the fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/ho21/PROVENANCE.md"
 )
+MEASUREMENT_SOURCE_LLS_SUBDLA = (
+    "Zafar et al. (2013), doi:10.1051/0004-6361/201321154; O'Meara et al. (2007), doi:10.1086/510711; Prochaska, "
+    "O'Meara and Worseck (2010), doi:10.1088/0004-637X/718/1/392; files of github.com/sbird/DLA_data, fetched from the "
+    "fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/lls_subdla/PROVENANCE.md"
+)
 DESIGN_FILE = "priya_lf_design_60.csv"  # the 60 low-resolution design points of the PRIYA suite
 
 
