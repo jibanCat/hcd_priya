@@ -151,10 +151,7 @@ jobs:
           sha256sum dist/*
       - name: Check the distribution contents against the commit
         run: python tools/ci/check_dist.py dist
-      # The archives can match the commit and still carry private content: scan what they hold. A finding not in the
-      # known list (tools/ci/dist_content_known.txt: findings already reviewed and accepted) fails; the release
-      # gate (docs/release_checklist.md) runs the same scan with --release, no list.
-      # A failure here stops the job before the install and both test tiers, on purpose: fix the content first.
+      # the same scan as in the wheel job (see the comment there)
       - name: Scan the distribution for private or internal content
         run: python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt
       # hcd-priya requires the model package hcd-priya-models. CI never needs the real models: the script builds the

@@ -20,7 +20,7 @@ on:
   schedule:
     - cron: "23 6 * * *"  # once a day, 06:23 UTC
   push:
-    branches: [ci/joss-stack-optb]  # TEMPORARY: the release stack's branch (pull request #23); remove when #23 merges
+    branches: [ci/joss-stack-optb]  # the release stack's branch (see the header)
   workflow_dispatch:
 
 permissions:
@@ -40,14 +40,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The branch: the one that started the run; on the daily schedule (which GitHub runs on the default branch)
-        # also the release stack's branch (pull request #23). TEMPORARY: remove that entry when #23 merges. (The same
-        # `A && B || C` form: two entries on the daily schedule, one otherwise; "" means the branch that started it.)
+        # The branch: the one that started the run ("") and, on the daily schedule, also the release stack's branch
+        # (see the header). The same `A && B || C` form.
         ref: ${{ fromJSON(github.event_name == 'schedule' && '["", "ci/joss-stack-optb"]' || '[""]') }}
-        # A stack is one Python version with one set of dependency versions; "pinned" (development-environment) means
-        # the exact versions of tools/ci/constraints-devenv.txt.
-        # Only the pinned stack is a supported environment (docs/compatibility.md). The others show how newer
-        # versions behave; their failures stay visible (no continue-on-error) and do not make them supported.
+        # Stacks: see tests/ci_tiers.toml. Only the pinned stack is a supported environment (docs/compatibility.md).
+        # The others show how newer versions behave; their failures stay visible (no continue-on-error) and do not
+        # make them supported.
         stack:
           - python: "3.11"
             deps: development-environment
@@ -63,7 +61,7 @@ jobs:
       MPLBACKEND: Agg
       # "1" only in the pinned (supported) job: tests that check bit-level results on the pinned stack then require
       # the running versions to be the pins, so the supported job cannot pass on another stack by mistake.
-      # (`A && B || C`: "1" on the development-environment stack, empty on the others.)
+      # (The same form: "1" on the development-environment stack, empty on the others.)
       HCD_PINNED_STACK: ${{ matrix.stack.deps == 'development-environment' && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -141,8 +139,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          # `A && B || C` again: the suffix "-stack-branch" only on the release stack's branch leg, so the results of
-          # the two legs of one stack do not share a name
+          # the same form: "-stack-branch" only on that branch's leg, so the two legs' results do not share a name
           name: results-py${{ matrix.stack.python }}-${{ matrix.stack.deps }}${{ matrix.ref != '' && '-stack-branch' || '' }}
           path: ${{ runner.temp }}/results
           retention-days: 14

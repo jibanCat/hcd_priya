@@ -14,12 +14,8 @@ What is covered:
 Most inputs are small synthetic archives, junit reports and run lists; the workflow, tier and level tests read the
 real files of this checkout.
 
-Terms. Tier, level, asset, "slow", HCD_GATE_RUN, the assets job and the per-test keys: the header of tests/ci_tiers.toml
-and the docstring of tools/ci/run_test_tier.py. A stack is one Python version with one set of dependency versions; the
-pinned stack is Python 3.11 with the exact versions of tools/ci/constraints-devenv.txt, the only supported one. The
-older-libhdf5 job is the job of tests.yml that reads the HDF5 release format with an older HDF5 library. The release
-stack's branch, ci/joss-stack-optb, is the branch of pull request #23, which collects the release work; nightly.yml
-names it only until #23 merges (TEMPORARY, see the header of .github/workflows/nightly.yml).
+Terms: see the header of tests/ci_tiers.toml. The release stack's branch ci/joss-stack-optb (pull request #23) is named
+in nightly.yml only until #23 merges.
 
 Run: pytest tests/test_ci_tools.py (CI runs it at the pr level, in the source tier; the workflow tests need PyYAML).
 """
@@ -137,7 +133,10 @@ def test_check_wheel_accepts_exactly_the_committed_package(tmp_path):
 def test_check_wheel_refuses_any_other_file(tmp_path, extra):
     """Data, pickles, tests, an uncommitted module, docs, extra metadata, or the metadata of another distribution
     (also the old name hcd_analysis) never pass."""
-    assert any(extra in p for p in CD.check_wheel(_wheel(tmp_path, extra=[extra]), PACKAGE))
+    problems = CD.check_wheel(_wheel(tmp_path, extra=[extra]), PACKAGE)
+    assert any(
+        extra in p for p in problems
+    ), f"the check did not name {extra}; it reported {problems}"
 
 
 @pytest.mark.parametrize(
@@ -145,9 +144,10 @@ def test_check_wheel_refuses_any_other_file(tmp_path, extra):
 )
 def test_check_wheel_refuses_a_missing_file(tmp_path, drop):
     """A committed module or package data file missing from the wheel is reported."""
+    problems = CD.check_wheel(_wheel(tmp_path, drop=[drop]), PACKAGE)
     assert any(
-        f"missing {drop}" in p for p in CD.check_wheel(_wheel(tmp_path, drop=[drop]), PACKAGE)
-    )
+        f"missing {drop}" in p for p in problems
+    ), f"no 'missing {drop}'; it reported {problems}"
 
 
 def test_check_wheel_refuses_a_file_that_differs_from_head(tmp_path):
@@ -161,7 +161,10 @@ def test_check_wheel_refuses_a_file_that_differs_from_head(tmp_path):
 def test_check_wheel_refuses_another_top_level_package(tmp_path):
     """A generic top-level name such as cli, which another distribution could also install, never ships."""
     for top in ("cli\nhcd_analysis\n", "hcd_analysis\ntests\n"):
-        assert any("top_level" in p for p in CD.check_wheel(_wheel(tmp_path, top=top), PACKAGE))
+        problems = CD.check_wheel(_wheel(tmp_path, top=top), PACKAGE)
+        assert any(
+            "top_level" in p for p in problems
+        ), f"top_level {top!r} passed; it reported {problems}"
 
 
 def test_check_sdist_accepts_exactly_the_committed_package(tmp_path):
@@ -182,7 +185,10 @@ def test_check_sdist_accepts_exactly_the_committed_package(tmp_path):
 )
 def test_check_sdist_refuses_any_other_file(tmp_path, extra):
     """Tests, checkpoints, scripts, data or an uncommitted module in the sdist are reported."""
-    assert any(extra in p for p in CD.check_sdist(_sdist(tmp_path, extra=[extra]), PACKAGE, TOP))
+    problems = CD.check_sdist(_sdist(tmp_path, extra=[extra]), PACKAGE, TOP)
+    assert any(
+        extra in p for p in problems
+    ), f"the check did not name {extra}; it reported {problems}"
 
 
 def test_check_sdist_refuses_links_missing_and_edited_files(tmp_path):
@@ -197,10 +203,13 @@ def test_check_sdist_refuses_links_missing_and_edited_files(tmp_path):
         PACKAGE,
         TOP,
     )
-    assert any("link" in p for p in problems) and any(
+    assert any("link" in p for p in problems), f"the link was not reported; it reported {problems}"
+    assert any(
         "missing pyproject.toml" in p for p in problems
-    )
-    assert "sdist: MANIFEST.in differs from HEAD" in problems
+    ), f"the missing pyproject.toml was not reported; it reported {problems}"
+    assert (
+        "sdist: MANIFEST.in differs from HEAD" in problems
+    ), f"the edited MANIFEST.in was not reported; it reported {problems}"
 
 
 def test_committed_files_cover_the_packages_and_nothing_else():
@@ -351,15 +360,7 @@ def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_or_releas
     assert not listed, f"the not-run list names tiers that ran: {sorted(listed)}"
 
 
-# The tests below read RT.tier_plan(tier, files, level), the runner's plan of one run, a dict of:
-#   todo      the files to run;
-#   env       environment variables the run adds;
-#   marker    the pytest -m expression of each file's run ("not slow" in CI; None: every test);
-#   declared  per file, the tests allowed to skip (asset_tests and skipped_by_design);
-#   required  per file, the tests that must run (the assets job only);
-#   select    per file, the pytest arguments that choose its tests (the file, or node ids of single tests);
-#   deselect  per file, the node ids left out.
-# (The docstring of tier_plan in tools/ci/run_test_tier.py says the same.)
+# The tests below read RT.tier_plan(tier, files, level); its docstring in tools/ci/run_test_tier.py describes the plan.
 
 
 def test_the_plan_of_a_ci_tier_runs_its_files_without_required_tests_or_added_environment():
@@ -590,10 +591,8 @@ PR_JOBS = (
 
 
 def test_only_the_pinned_job_declares_the_pinned_stack():
-    """In a workflow, a "matrix" runs the same job several times with different settings; here each setting is a
-    "stack", a Python version and a set of dependency versions. The pinned stack, Python 3.11 with the exact versions
-    of tools/ci/constraints-devenv.txt, is the only supported environment (docs/compatibility.md). "Pinned",
-    "development-environment" (its deps value in the workflows) and "supported" (its label) all name that one stack.
+    """A workflow's "matrix" runs one job once per stack (tests/ci_tiers.toml defines a stack). The pinned stack is the
+    only supported one; "pinned", "development-environment" (its deps value) and "supported" (its label) all name it.
 
     The test checks both workflows that run tests:
     1. HCD_PINNED_STACK is "1" in the development-environment (supported) jobs and empty in the others, and it is set
@@ -734,7 +733,8 @@ def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
 def test_h5_cross_version_check_reads_back_and_catches_a_change_or_a_new_library(tmp_path, capsys):
     """tools/ci/h5_cross_version.py: a synthetic bundle reads back with every digest equal; an edited digest fails, of
     a model leaf or of a normalizer array; and --max-hdf5 fails on a library that is not older than the limit, at the
-    limit too (the running library's own MAJOR.MINOR), so the older-libhdf5 job cannot pass on a new library.
+    limit too (the running library's own MAJOR.MINOR), so the older-libhdf5 job (in tests.yml) cannot pass on a new
+    library.
     """
     import json
     import h5py
@@ -807,11 +807,8 @@ def test_the_pr_level_runs_the_pr_files_and_the_pr_tests_of_nightly_files_and_le
                 for n in e.get("release_tests", [])
                 + (e.get("nightly_tests", []) if e["level"] == "pr" else [])
             ), f"{rel}: at pr, the release_tests (and a pr file's nightly_tests) are left out"
-    # The loop above checks every file against its entry; these lines make sure its branches are not empty, using
-    # files whose entries in tests/ci_tiers.toml carry per-test lists: test_emulator_model.py, a pr file, names 17
-    # nightly_tests (its training-loss tests; it has no release_tests), so the pr level leaves out exactly 17 of its
-    # tests; test_emulator_data.py, a nightly file, names pr_tests; test_emulator_multifidelity.py, a nightly file
-    # without pr_tests, does not run at pr. If you change those entries, change the number here too.
+    # the loop's branches are not empty: a pr file with nightly_tests (17), a nightly file with pr_tests, and a
+    # nightly file without them
     model = RT.tier_plan("wheel", files, "pr")
     left_out = model["deselect"]["tests/test_emulator_model.py"]
     assert len(left_out) == 17, (
@@ -841,9 +838,7 @@ def test_the_nightly_level_runs_every_ci_file_whole_except_its_release_tests():
             assert plan["deselect"][rel] == [
                 f"{rel}::{n}" for n in files[rel].get("release_tests", [])
             ], f"{rel}: at nightly only the release_tests are left out"
-    # test_emulator_multifidelity.py names 19 release_tests in tests/ci_tiers.toml (the tests that need the
-    # multi-fidelity resolution table); the nightly level leaves out exactly those. If you change that entry, change
-    # the number here too.
+    # the 19 release_tests of test_emulator_multifidelity.py (they need the multi-fidelity resolution table)
     multi = RT.tier_plan("wheel", files, "nightly")["deselect"][
         "tests/test_emulator_multifidelity.py"
     ]
@@ -960,7 +955,7 @@ def test_the_nightly_gate_refuses_when_the_runs_cannot_be_read(monkeypatch, caps
     assert NG.main(["--repo", "o/r", "--sha", "abc"]) == 1, "the gate accepted a short commit id"
 
 
-def _steps_without_level(job):
+def _steps_comparable(job):
     """The steps of a test job, made comparable between the pr jobs (tests.yml) and the nightly job (nightly.yml):
     the parts that may differ between the two are set to one neutral value, so that every other difference shows.
     """
@@ -1008,10 +1003,7 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
         "push",
         "workflow_dispatch",
     }, f"nightly.yml must start on a schedule, a push and by hand, not {sorted(on)}"
-    # TEMPORARY: nightly.yml names the release stack's branch, ci/joss-stack-optb, until pull request #23 merges
-    # (the release stack: see this file's docstring and the header of .github/workflows/nightly.yml). The branch is
-    # not part of the design: when #23 merges, remove it from nightly.yml and change the two checks below in the
-    # same commit.
+    # TEMPORARY: the release stack's branch; remove with #23, here and in nightly.yml (see its header)
     assert len(on["schedule"]) == 1 and on["push"] == {
         "branches": ["ci/joss-stack-optb"]
     }, "nightly.yml: one daily schedule, and a push trigger on the release stack's branch only"
@@ -1023,15 +1015,15 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
     ), "nightly.yml: the daily schedule must also check out the release stack's branch"
     # 3. the external step: the one step nightly.yml has beyond the pr jobs. Its tests need an extra package,
     # safetensors (tests/external), which the step installs first.
-    nightly_steps = _steps_without_level(job)
+    nightly_steps = _steps_comparable(job)
     extra = [s for s in nightly_steps if "--tier external" in s.get("run", "")]
     assert (
         len(extra) == 1 and "pip install safetensors" in extra[0]["run"]
     ), "nightly.yml: one external-tier step, which installs the extra package (safetensors) first"
     # 4. the two pr jobs, one per tier: the wheel job holds the fresh install, the wheel tier and the list of what is
     # not run; the source job holds the same preparation (build, checks, scan, install) and the source tier
-    wheel = _steps_without_level(jobs["fixture-tests"])
-    source = _steps_without_level(jobs["fixture-tests-source"])
+    wheel = _steps_comparable(jobs["fixture-tests"])
+    source = _steps_comparable(jobs["fixture-tests-source"])
     i_install = next(i for i, s in enumerate(wheel) if s.get("id") == "install")
     i_wheel = next(i for i, s in enumerate(wheel) if "--tier wheel" in s.get("run", ""))
     src_tier = [s for s in source if "--tier source" in s.get("run", "")]
@@ -1053,8 +1045,7 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
     up_to_wheel_tier, after_wheel_tier = wheel[: i_wheel + 1], wheel[i_wheel + 1 :]
     nightly_without_external = [s for s in nightly_steps if s not in extra]
     assert nightly_without_external == up_to_wheel_tier + src_tier + after_wheel_tier, (
-        "nightly.yml's steps must equal the pr jobs' steps (see the comment above); "
-        "change both files together"
+        "nightly.yml's steps must equal the pr jobs' steps; " "change both files together"
     )
     ntext = open(os.path.join(REPO, ".github", "workflows", "nightly.yml"), encoding="utf-8").read()
     # the four places nightly.yml passes the nightly level: the wheel, source and external tiers and the list

@@ -37,32 +37,23 @@
 #   fake_spectra         the separately installed package that computes spectra from simulation snapshots
 #                        (docs/fake_spectra_integration.md).
 # Other project words in the reasons and file names:
-#   HCD           high-column-density absorbers, the subject of this code (README.md); also the prefix of its
-#                 environment variables (HCD_...);
+#   HCD           high-column-density absorbers (README.md); also the prefix of the environment variables;
 #   P1D           the one-dimensional flux power spectrum of the Lyman-alpha forest, the measured data (README.md);
-#   leg           one P1D measurement used in a fit (DESI, KODIAQ-SQUAD or eBOSS), with its own covariance
-#                 (hcd_analysis/emulator/data_likelihood.py);
+#   leg           one P1D measurement used in a fit (DESI, KODIAQ-SQUAD or eBOSS), with its own covariance;
 #   nightly gate  tools/ci/nightly_gate.py: it refuses a release unless the latest nightly run on its commit passed;
-#   invariant     a scientific check that must run on every pull request; PR_INVARIANTS in tests/test_ci_tiers.py
-#                 lists them;
-#   LF            low fidelity: the low-resolution PRIYA simulations (README.md, "What LF+MF is"); "the LF training
-#                 cache" is the emulator's training data built from them.
+#   invariant     a scientific check that must run on every pull request (PR_INVARIANTS, tests/test_ci_tiers.py);
+#   LF            low fidelity: the low-resolution PRIYA simulations; "the LF training cache" is built from them.
 #
 # Skipped is not passed. tools/ci/run_test_tier.py runs one tier at one level, one pytest process per file. In CI:
 #   a skip of a test not named in asset_tests or skipped_by_design   the file FAILS;
 #   a skip of a test named there                                      allowed: reported as NOT RUN, never as passed;
 #   a test named there that runs instead of skipping                  the file FAILS (the list is stale);
-#   a test named in release_tests                                     not skipped: CI leaves it out (deselects it).
-# Two similar words: the runner's report label NOT RUN marks what one run did not run (a declared skip, a test marked
-# slow, a file of another tier or level), never as passed; the level value "not run" marks a file that never runs in CI.
-# The same rules in full: a file fails on any failure, error, undeclared skip or undeclared expected failure, or when
-# no test passes:
-# - asset_tests and skipped_by_design name the only tests allowed to skip in CI. They are reported as NOT RUN, never as
-#   passed, and they must skip: a declared test that runs instead fails its file, so the lists stay exact.
-# - Expected failures are allowed only as exact deferrals: the deferred_legacy causes of tests/gate_helpers.py (each
-#   recorded in tests/DEFERRED.md), or the full messages a file lists in deferred_xfails.
-# - reason says why, for every test or file that CI does not run or runs at another level.
-# - Tests marked slow are deselected and listed by the runner.
+#   a test named in release_tests                                     not skipped: CI leaves it out (deselects it);
+#   an expected failure that is not an exact deferral                 the file FAILS (deferrals: the deferred_legacy
+#                                                                     causes in tests/DEFERRED.md, or deferred_xfails).
+# A file also fails on any failure or error, and when none of its tests passes. Tests marked slow are deselected and
+# listed. reason says why a file or test is not run in CI or runs at another level. The level "not run" (never run in
+# CI) is not the runner's report label NOT RUN (not run in that run).
 # How the entries were set: the tiers from a run of every file without the real assets, corrected after an
 # AI-assisted review; the levels file by file, then checked by an audit (2026-11-17, written up in pull request #28)
 # of the scientific checks that must run on every pull request, now listed in PR_INVARIANTS in tests/test_ci_tiers.py.
@@ -203,27 +194,27 @@ release = "only with the real assets, before a release (the assets job); listed 
 [files."tests/integration/test_d5_research_export_w1.py"]
 tier = "assets"
 level = "release"
-reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+reason = "needs the D5 integration data (release bundles and trained emulator members kept on the project's storage) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/integration/test_d5_t1_production.py"]
 tier = "assets"
 level = "release"
-reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+reason = "needs the D5 integration data (release bundles and trained emulator members kept on the project's storage) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/integration/test_d5_t1_scripts.py"]
 tier = "assets"
 level = "release"
-reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+reason = "needs the D5 integration data (release bundles and trained emulator members kept on the project's storage) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/integration/test_d5_turbo_bundles.py"]
 tier = "assets"
 level = "release"
-reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+reason = "needs the D5 integration data (release bundles and trained emulator members kept on the project's storage) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/integration/test_d5_w1_members.py"]
 tier = "assets"
 level = "release"
-reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+reason = "needs the D5 integration data (release bundles and trained emulator members kept on the project's storage) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/integration/test_mf_release_real.py"]
 tier = "assets"
@@ -265,7 +256,7 @@ skipped_by_design = [
 deferred_xfails = [
     "deferred lock-generator rework (gate E step 7, PI-authorized lock regeneration): the generator verifies the ensemble against <repo>/checkpoints, which does not hold the schema-2 members",
 ]
-reason = "test_real_leg_build_matches_fixture_schema needs the real production legs (opt-in, HCD_LOCK_REAL_LEGS=1); test_committed_lock_matches_live_AT_FREEZE is skipped until the freeze step; the 9 LOCK_REWORK tests are a strict exact-exception deferral (tests/DEFERRED.md)"
+reason = "test_real_leg_build_matches_fixture_schema needs the real production legs (opt-in, HCD_LOCK_REAL_LEGS=1); test_committed_lock_matches_live_AT_FREEZE is skipped until the freeze step; the 9 LOCK_REWORK tests are a strict exact-exception deferral (tests/DEFERRED.md): they wait for a rework of the lock generator, which checks the ensemble against <repo>/checkpoints, the folder of the older checkpoint layout (schema 1), while the current members use layout 2 (schema 2) and sit in the folder their manifest names; deferred_xfails quotes the tests' message exactly, so it keeps its own wording"
 
 [files."tests/test_analyze_ks_selboost.py"]
 tier = "assets"
@@ -285,12 +276,12 @@ reason = "the declared tests need cluster scratch outputs, raw PRIYA simulation 
 [files."tests/test_cache_raw_header_parity.py"]
 tier = "assets"
 level = "release"
-reason = "needs the real LF training cache and eBOSS DR14 P1D data; row 11 errors rather than skips without them (verbatim from 863df63)"
+reason = "needs the real LF training cache and eBOSS DR14 P1D data; one of its tests (that the data legs lie inside the simulated modes) errors rather than skips without them; its tests were copied unchanged from an earlier test module (commit 863df63)"
 
 [files."tests/test_cache_repair_s4.py"]
 tier = "assets"
 level = "release"
-reason = "needs S4 cache-build shards, the real LF training cache"
+reason = "needs the intermediate files (shards) of a training-cache build, and the real LF training cache"
 
 [files."tests/test_cddf_excess_hypotheses.py"]
 tier = "assets"
@@ -303,7 +294,7 @@ level = "nightly"
 asset_tests = [
     "test_loo_ensemble_residuals_are_member_means_on_the_held_out_rows",
 ]
-reason = "the declared tests need gate C products, absent in CI"
+reason = "the declared test needs the stored leave-one-out evaluation of the trained ensemble (its residual files), absent in CI"
 
 [files."tests/test_closure_sbc.py"]
 tier = "assets"
@@ -449,7 +440,7 @@ asset_tests = [
     "test_e4a_cosmology_response_of_k_and_zero_mf_derivative",
     "test_e4b_one_fixed_grid_for_every_z_changes_the_forward_by_more_than_one_percent",
 ]
-reason = "the declared tests need gate D MF products, trained emulator members, absent in CI"
+reason = "the declared tests need the stored outputs of the validation runs of the multi-fidelity (MF) correction, and trained emulator members, absent in CI"
 
 [files."tests/test_gateE_e2_reconstruction.py"]
 tier = "wheel"
@@ -458,7 +449,7 @@ asset_tests = [
     "test_e2_covariance_equals_independent_reconstruction",
     "test_e2_forward_equals_independent_reconstruction",
 ]
-reason = "the declared tests need gate D MF products, trained emulator members, absent in CI"
+reason = "the declared tests need the stored outputs of the validation runs of the multi-fidelity (MF) correction, and trained emulator members, absent in CI"
 
 [files."tests/test_gateE_invariants.py"]
 tier = "wheel"
@@ -477,7 +468,7 @@ level = "nightly"
 asset_tests = [
     "test_c4_matched_set_is_complete",
 ]
-reason = "the declared tests need KODIAQ-SQUAD P1D data, files of a local lya_emulator_full checkout, gate C products, absent in CI"
+reason = "the declared tests need KODIAQ-SQUAD P1D data, files of a local lya_emulator_full checkout, and the stored outputs of the leave-one-out validation of the trained ensemble, absent in CI"
 
 [files."tests/test_gate_d_review_blocking.py"]
 tier = "wheel"
@@ -488,7 +479,7 @@ asset_tests = [
     "test_gate_d_rd1_report_matches_json",
     "test_mode_mf_prediction_invariant_to_log_rho_and_heldout_rows_real",
 ]
-reason = "the declared tests need gate D MF products, the private notes repository, the real LF training cache, absent in CI"
+reason = "the declared tests need the stored outputs of the validation runs of the multi-fidelity (MF) correction, the private notes repository, and the real LF training cache, absent in CI"
 
 [files."tests/test_hcd_pivot_center.py"]
 tier = "source"
@@ -749,7 +740,7 @@ level = "pr"
 asset_tests = [
     "test_production_product_module_equals_table_application",
 ]
-reason = "the declared tests need gate D MF products, absent in CI"
+reason = "the declared tests need the stored outputs of the validation runs of the multi-fidelity (MF) correction, absent in CI"
 
 [files."tests/test_nhi_recovery.py"]
 tier = "no_tests"
@@ -797,7 +788,7 @@ asset_tests = [
     "test_every_pre_gate_e_product_is_refused[hist_mf_cemu_emucoh]",
     "test_mf_product_identity_is_checked_against_the_lf_ensemble",
 ]
-reason = "the declared tests need emucoh products, emulator error-vector products, gate D MF products, trained emulator members, absent in CI"
+reason = "the declared tests need the stored outputs of the emulator-error coherence study (emucoh), the stored emulator error vectors, the stored outputs of the validation runs of the multi-fidelity (MF) correction, and trained emulator members, absent in CI"
 
 [files."tests/test_r6_pairing.py"]
 tier = "deferred"

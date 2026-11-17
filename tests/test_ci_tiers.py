@@ -1,16 +1,6 @@
 """Checks of tests/ci_tiers.toml, the file that says how and when CI runs each test file.
 
-The words used here are defined in the comment block at the top of tests/ci_tiers.toml. In short:
-- A file's TIER says HOW it runs: "wheel" (against the installed package) or "source" (from the checkout) in CI; the
-  other tiers never run in CI, and their files are reported as not run, with the reason recorded in the toml file.
-- A file's LEVEL says WHEN it runs: "pr" (on every pull request), "nightly" (once a day), "release" (only with the
-  real assets) or "not run". Single tests can differ from their file's level: pr_tests, nightly_tests, release_tests.
-- Skipped is not passed. CI's runner (tools/ci/run_test_tier.py) applies three rules:
-  - A skipped test fails its file, unless the file names it in asset_tests or skipped_by_design.
-  - A test named there must skip. It is reported as NOT RUN. If it runs instead, the file fails, so the lists stay
-    exact.
-  - An expected failure (xfail) fails its file, unless it is a deferred_legacy deferral or its exact message is in
-    the file's deferred_xfails.
+The words used here (tier, level, the skip rules, the per-test keys) are defined at the top of tests/ci_tiers.toml.
 
 These tests check the lists that the runner reads. They fail if a test file is missing from tests/ci_tiers.toml or
 listed twice; if an entry has an unknown key, tier or level, or a level its tier does not allow; if a list names a test
@@ -25,10 +15,8 @@ import os
 import tomllib
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-# the six tiers (each described in the [tiers] table of tests/ci_tiers.toml); only wheel and source run in CI
 TIERS = {"wheel", "source", "assets", "deferred", "external", "no_tests"}
 CI_TIERS = {"wheel", "source"}
-# the four levels (the [levels] table of tests/ci_tiers.toml)
 LEVELS = {"pr", "nightly", "release", "not run"}
 # the levels each tier may take: the CI tiers run at pr or nightly; the assets tier only with its assets (or never);
 # the other tiers never, except an external file whose extra package the nightly workflow installs
@@ -47,8 +35,6 @@ TIER_LEVELS = {
 #   release_tests  sits in a pr or nightly file: CI leaves them out; they run only with the real assets.
 PER_TEST = {"pr_tests": "nightly", "nightly_tests": "pr", "release_tests": None}
 
-# In plain words: an "invariant" here is a test we have decided must never drop out of the fast check that runs on
-# every pull request; PR_INVARIANTS is that list, grouped by what each test protects.
 # PR_INVARIANTS: the tests that must run on every pull request (the pr level), grouped by area. Each checks a
 # scientific result against something independent of the code under test: a closed formula, a second implementation,
 # a known identity, or a stored reference from another code path. The five areas (the likelihood, the covariance,
@@ -386,7 +372,10 @@ def _functions(path):
 def test_tests_at_another_level_than_their_file_are_test_functions_of_it_and_no_prefix_of_another():
     """pr_tests (of a nightly file), nightly_tests (of a pr file) and release_tests (of a pr or nightly file) name
     test functions of their CI-tier file, each once and in one list only. None is the start of another function's
-    name: the runner selects and deselects by pytest node-id prefix."""
+    name: the runner selects and deselects by pytest node-id prefix. (A pytest node id is `path::test_name`, for
+    example `tests/test_x.py::test_a`, or `tests/test_x.py::test_a[case]` for one parameter case; a --deselect of
+    `tests/test_x.py::test_a` also drops `tests/test_x.py::test_a_more`, whose id starts the same way.)
+    """
     for path, entry in _doc()["files"].items():
         named = [(key, n) for key in PER_TEST for n in entry.get(key, [])]
         if not named:
@@ -448,9 +437,8 @@ def test_the_scientific_invariants_of_the_pr_level_run_at_pr():
                 test in defined
             ), f"{area}: {path} has no function {test}; if it was renamed, update PR_INVARIANTS"
             assert _runs_at_pr(path, test), (
-                f"{area}: {path}::{test} does not run at the pr level: its file is not at pr, or names it in "
-                "nightly_tests or release_tests, or is a nightly file without it in pr_tests. Restore it to the pr "
-                "level in tests/ci_tiers.toml, or take it out of PR_INVARIANTS on purpose"
+                f"{area}: {path}::{test} does not run at the pr level; restore it in tests/ci_tiers.toml or take "
+                "it out of PR_INVARIANTS on purpose"
             )
             n += 1
     for path in PR_INVARIANT_FILES:

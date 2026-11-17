@@ -9,7 +9,7 @@ With the environment variable GH_TOKEN set, the request carries it (a workflow's
 Actions); without it, the request is anonymous, which works for a public repository only. Standard library only.
 
 Exit status: 0 when the gate passes (it prints "PASSED: ..."), 1 when it refuses ("REFUSED: ..."). COMMIT is the
-full 40-character id; `git rev-parse HEAD` prints it for the commit checked out.
+full 40-character id.
 """
 
 from __future__ import annotations
@@ -57,7 +57,6 @@ def decide(runs, sha):
 def fetch_runs(repo, workflow, sha, token=None):
     """The runs of `workflow` on `sha`, read from the Actions API (one page of up to 100, newest first)."""
     url = f"{API}/repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&per_page=100"
-    # the media type GitHub recommends, and the REST API version (GitHub names its API versions by date)
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -80,8 +79,7 @@ def main(argv=None):
         return 1
     try:
         runs = fetch_runs(args.repo, args.workflow, args.sha, os.environ.get("GH_TOKEN") or None)
-    except Exception as exc:  # noqa: BLE001
-        # any failure to read the runs is a refusal ("noqa: BLE001" above tells a linter this broad except is meant)
+    except Exception as exc:  # noqa: BLE001  any failure to read the runs is a refusal
         print(
             f"REFUSED: the nightly runs could not be read ({type(exc).__name__}: {exc}); check GH_TOKEN and the "
             "network access, then run the gate again"

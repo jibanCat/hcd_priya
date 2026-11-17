@@ -1,11 +1,7 @@
 """Run one CI test tier of tests/ci_tiers.toml at one level, one pytest process per file, and refuse any undeclared skip.
 
-Terms: a tier says HOW a file runs (wheel: against the installed package; source: from the checkout), a level says
-WHEN it runs (pr: on every pull request; nightly: once a day). Both, and the per-file keys used below (asset_tests,
-skipped_by_design, deferred_xfails, pr_tests, nightly_tests, release_tests), are defined in the header of
-tests/ci_tiers.toml. A junit report is the XML file pytest writes with --junitxml. The header of tests/ci_tiers.toml
-also defines an asset, NOT RUN and the skip rules; a test marked slow is one with @pytest.mark.slow (registered in
-tests/conftest.py); a deferral and HCD_GATE_RUN are described below and in tests/gate_helpers.py.
+Terms (tier, level, asset, NOT RUN, the skip rules, the per-test keys): see the header of tests/ci_tiers.toml. A junit
+report is the XML file pytest writes with --junitxml.
 
 usage:
   python tools/ci/run_test_tier.py --tier wheel  --level LEVEL --workdir NEW_DIR --out NEW_DIR [--wheel WHEEL]
@@ -39,17 +35,12 @@ Run it with the interpreter under test (CI: the fresh venv holding the installed
   with the tests marked slow. There a declared asset test or release test MUST run: if it skips or is not in the
   junit report at all (not collected, or deselected), its file fails.
 
-A file passes only if pytest exits 0 and its junit report has no failure, no error and no undeclared skip, and at least
-one test passed. Besides passes, only these outcomes are allowed; each is counted and listed, never as a pass:
-- an expected failure whose message is exactly that of an explicit deferral. A deferral is a test known to fail,
-  recorded in tests/DEFERRED.md under a deferred_legacy cause of tests/gate_helpers.py DEFERRED_CAUSES (tests/conftest.py
-  marks such a test with its exact cause), or a reason that tests/ci_tiers.toml lists in the file's deferred_xfails (a
-  strict, exact-exception xfail);
-- a skip of a test that tests/ci_tiers.toml names in the file's asset_tests (it needs a real asset that CI does not
-  have) or skipped_by_design (skipped unconditionally until a later step). Such a test must skip here: if it passes
-  or fails instead, the file fails, so the lists stay exact.
-In the wheel and source tiers, tests marked slow are deselected (-m "not slow") and listed as NOT RUN. The exit status
-is 1 if any file did not pass. The summary also lists the files of the tiers that CI does not run, with their reasons.
+A file passes only if pytest exits 0, at least one test passed, and its junit report has nothing else but two allowed
+outcomes, each counted and listed, never as a pass: an expected failure whose message is exactly a declared deferral
+(a deferred_legacy cause of tests/gate_helpers.py, recorded in tests/DEFERRED.md, or a message in the file's
+deferred_xfails); and a skip of a test the file names in asset_tests or skipped_by_design, which must skip. In the
+wheel and source tiers, tests marked slow (@pytest.mark.slow) are deselected and listed as NOT RUN. The exit status is
+1 if any file did not pass. The summary also lists the files of the tiers that CI does not run, with their reasons.
 """
 
 from __future__ import annotations
@@ -70,8 +61,7 @@ import tomllib
 import xml.etree.ElementTree as ET
 import zipfile
 
-# the repository root: this file is tools/ci/run_test_tier.py, two folders below it; the first dirname drops the
-# file name, the next two climb out of ci/ and tools/
+# the repository root (two folders above this file)
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 TIERS_FILE = os.path.join(REPO, "tests", "ci_tiers.toml")
 CI_TIERS = ("wheel", "source")
@@ -80,11 +70,7 @@ EXTERNAL = "external"
 LEVELS = ("pr", "nightly", "release", "not run")
 # the file levels that run at each CI level
 RUN_LEVELS = {"pr": ("pr",), "nightly": ("pr", "nightly")}
-# The keys that name single tests whose level differs from their file's (the header of tests/ci_tiers.toml):
-# pr_tests sits in a nightly file (these tests also run at pr); nightly_tests in a pr file (these run at nightly
-# only); release_tests in either (CI leaves them out; the assets job runs them).
 PER_TEST_KEYS = ("pr_tests", "nightly_tests", "release_tests")
-# a file whose pytest run takes longer than this (30 minutes) fails as a timeout
 FILE_TIMEOUT_S = 1800
 # The outcome counts kept for each file, read from its junit report by junit_counts. Plain pytest outcomes: tests,
 # passed, failures, errors, and skipped (an UNDECLARED skip: the file fails). The others:
@@ -532,10 +518,10 @@ def print_summary(summary):
 
 
 def run_tier(tier, out, workdir=None, wheel=None, level="nightly"):
-    """Run the files of one tier at one level (tier_plan says which tests of which files), one pytest process per
-    file; write each file's log and junit report and the run's summary.json into `out`, a new folder, and print the
-    summary. Returns 1 if any file did not pass or the slow tests could not be listed, else 0."""
-    # 1. What to run.
+    """Run one tier at one level, one pytest process per file; write the logs, junit reports and summary.json into
+    `out`, a new folder. Returns 1 if any file did not pass or the slow tests could not be listed, else 0.
+    """
+    # 1. what to run
     _, files = load_tiers()
     plan = tier_plan(tier, files, level)
     todo = plan["todo"]
@@ -543,28 +529,27 @@ def run_tier(tier, out, workdir=None, wheel=None, level="nightly"):
         sys.exit(
             f"tier {tier!r} has no file at level {level!r}; see the files' levels in tests/ci_tiers.toml"
         )
-    # 2. Where to run it, and a check that the package under test comes from where this tier must take it.
+    # 2. where to run it, and from where the package under test is imported
     cwd = prepare_cwd(tier, workdir)
     os.makedirs(out, exist_ok=False)
     origin = package_origin(sys.executable, cwd)
     check_origin(tier, origin)
     n_checked = check_installed_is(wheel) if wheel else None
-    # 3. How to run it: the allowed deferral messages, a clean environment, the pytest command, and the list of the
-    # selected tests that are marked slow (deselected below, and reported as not run).
+    # 3. how to run it, and which selected tests are marked slow
     deferrals = deferred_legacy_messages()
     env = pytest_env(plan["env"])
     cmd_base = pytest_command(cwd)
     every = [a for rel in todo for a in plan["select"][rel]]
     every += [a for rel in todo for d in plan["deselect"][rel] for a in ("--deselect", d)]
     slow, slow_error = slow_tests(cmd_base, cwd, env, every) if plan["marker"] else ([], "")
-    # 4. Run every file and judge it from its junit report.
+    # 4. run and judge every file
     results = [
         run_file(
             rel, plan, cmd_base, cwd, env, out, deferrals, files[rel].get("deferred_xfails", [])
         )
         for rel in todo
     ]
-    # 5. The summary: written to summary.json, then printed.
+    # 5. the summary, written and printed
     totals = {k: sum(r.get(k, 0) for r in results) for k in COUNT_KEYS}
     failed = [r["file"] for r in results if not r["ok"]]
     summary = dict(
