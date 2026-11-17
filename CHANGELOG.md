@@ -66,8 +66,10 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   as a walk-through in code that a test runs. It says what was checked about the linear interpolation to the data's
   wavenumbers, on the PRIYA simulations' spectra against the published errors of four data sets (with three
   figures), and how to check it for other data. `modes_per_bin`, a function and a method of the likelihood, reports
-  the bin layout against the model's modes (how many modes a bin spans), not whether the interpolation is adequate;
-  it never warns or refuses because of its value.
+  the bin layout against the model's modes. It describes the layout only: neither whether the interpolation is
+  adequate nor how large the bin-average difference is can be read from it. The checks found differences of both
+  kinds at bins many mode spacings apart and at bins about one apart. It never warns or refuses because of its
+  value.
 - **A stored reference of a mock recovery** (`likelihood.P1DReference`, `read_reference`, `write_reference`): the
   truth, the posterior mean and two central intervals of each parameter, and percentiles of the posterior predictive
   on the bins of a data set; a strict file format, read only against its sha256. No reference is shipped.

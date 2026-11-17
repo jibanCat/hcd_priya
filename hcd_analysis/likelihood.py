@@ -443,13 +443,14 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
     between modes, the simulations' sample variance, the measurements' windows, correlated
     errors, the emulator.
 
-    **A separate point: this is the value AT the bin centre, not an average over the bin.** On
-    the same spectra the average over a bin (a top-hat average in k assumed) differs from the
-    value at its centre by up to about 0.7 to 0.95 of the data error on the wide KODIAQ-SQUAD
-    bins at k = 0.05 to 0.063 s/km, and by up to about 0.4 to 0.5 at eBOSS and DESI bins below
-    k = 0.006 s/km. Which of the two is right depends on the window of the measurement, which
-    this package does not model. ``docs/likelihood.md`` ("Bringing the model to the data's
-    wavenumbers") says more, with figures.
+    **A separate point: this is the value AT the bin centre, not an average over the bin.** On the
+    same spectra the average over a bin (a top-hat average in k assumed) differs from the value at
+    its centre by up to about 0.7 to 0.95 of the data error on KODIAQ-SQUAD bins (largest on the
+    widest bins, k = 0.05 to 0.063 s/km; above 0.3 of the error at about a third of the example's
+    bins), and up to about 0.4 to 0.5 at eBOSS and DESI bins below about k = 0.006 s/km, which are
+    about one mode spacing wide. Which of the two is right depends on the window of the
+    measurement, which this package does not model. ``docs/likelihood.md`` ("Bringing the model to
+    the data's wavenumbers") says more, with figures.
 
     Parameters
     ----------
@@ -495,11 +496,11 @@ def modes_per_bin(k_model: ArrayLike, k_data: ArrayLike) -> np.ndarray:
     width: a data set holds centres, not edges.
 
     **How to read it.** A report of the bin layout: a value of 5 means the bin centres are five
-    mode spacings apart, a value near 1 about one. It says how many modes a bin spans, which
-    bears on the bin-average point of ``interp_to_bins``. It is not a test of the straight line:
-    its value does not tell whether the interpolation is adequate (``docs/likelihood.md``,
-    "Bringing the model to the data's wavenumbers", says what was checked and how to check your
-    data).
+    mode spacings apart, a value near 1 about one. It describes the layout only: neither whether
+    the interpolation is adequate nor how large the bin-average difference is can be read from it.
+    The checks found differences of both kinds at bins many mode spacings apart and at bins about
+    one apart (``docs/likelihood.md``, "Bringing the model to the data's wavenumbers", says what
+    was checked and how to check your data).
 
     It only reports. Nothing warns and nothing is refused because of its value, and it uses no
     model value: wavenumbers only.

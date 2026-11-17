@@ -261,10 +261,11 @@ variance, the measurements' windows, correlated errors, and the emulator.
 ![At each bin centre of six data layouts, the largest difference between three other interpolations through the same modes and the straight line, in units of that bin's published error: 95th percentile and largest value over the low-resolution spectra, coloured by redshift](figures/interpolation/spread_among_interpolations.png)
 
 **`modes_per_bin` reports the bin layout.** It gives, for each bin, the spacing of the bin centres there over the
-spacing of the modes there: how many modes a bin spans, which bears on the bin-average point below. It is not a test
-of the straight line: its value does not tell whether the interpolation is adequate. It only reports: nothing warns
-and nothing is refused because of its value. For the made-up data set of the walk-through above, whose bins were put
-one mode spacing apart on purpose (the modes of a simulation box are evenly spaced in k at one redshift):
+spacing of the modes there. It describes the layout only: neither whether the interpolation is adequate nor how
+large the bin-average difference is can be read from it. The checks found differences of both kinds at bins many
+mode spacings apart and at bins about one apart. It only reports: nothing warns and nothing is refused because of
+its value. For the made-up data set of the walk-through above, whose bins were put one mode spacing apart on purpose
+(the modes of a simulation box are evenly spaced in k at one redshift):
 
 ```python
 ratio = like.modes_per_bin(theta)  # one array per redshift of the data
@@ -280,11 +281,12 @@ for its own mock.
 
 **A separate point: the value at the bin centre is not an average over the bin.** The rule gives the model AT the
 bin centre. On the same spectra, the average over a bin (a top-hat average in k was assumed) differs from the value
-at its centre by up to about 0.7 to 0.95 of the data error on the wide KODIAQ-SQUAD bins at k = 0.05 to 0.063 s/km,
-and by up to about 0.4 to 0.5 at eBOSS and DESI bins below k = 0.006 s/km (95th percentiles). Which of the two is
-the right thing to compare with the data depends on the window of the measurement, which this package does not
-model. A window that is a multiplicative factor can be given as `model_factor`; a true bin average is not computed
-here.
+at its centre by up to about 0.7 to 0.95 of the data error on KODIAQ-SQUAD bins (largest on the widest bins, k =
+0.05 to 0.063 s/km; above 0.3 of the error at about a third of the example's bins), and up to about 0.4 to 0.5 at
+eBOSS and DESI bins below about k = 0.006 s/km, which are about one mode spacing wide (95th percentiles). Which of
+the two is the right thing to compare with the data depends on the window of the measurement, which this package
+does not model. A window that is a multiplicative factor can be given as `model_factor`; a true bin average is not
+computed here.
 
 ![At each bin centre of the same six layouts, the difference between the average over the bin and the value at the centre, in units of that bin's published error: 95th percentile and largest value over the low-resolution spectra](figures/interpolation/centre_against_bin_average.png)
 
