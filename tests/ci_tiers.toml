@@ -44,7 +44,9 @@
 #                 (hcd_analysis/emulator/data_likelihood.py);
 #   nightly gate  tools/ci/nightly_gate.py: it refuses a release unless the latest nightly run on its commit passed;
 #   invariant     a scientific check that must run on every pull request; PR_INVARIANTS in tests/test_ci_tiers.py
-#                 lists them.
+#                 lists them;
+#   LF            low fidelity: the low-resolution PRIYA simulations (README.md, "What LF+MF is"); "the LF training
+#                 cache" is the emulator's training data built from them.
 #
 # Skipped is not passed. tools/ci/run_test_tier.py runs one tier at one level, one pytest process per file. In CI:
 #   a skip of a test not named in asset_tests or skipped_by_design   the file FAILS;

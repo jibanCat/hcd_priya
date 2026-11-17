@@ -33,13 +33,16 @@ defaults:
 
 jobs:
   nightly:
+    # GitHub expressions have no if/else: `A && B || C` gives B when A is true, else C. Here the job's name gets
+    # " on <branch>" only on the release stack's branch leg (matrix.ref set); every other job keeps the stack's label.
     name: ${{ matrix.stack.label }}${{ matrix.ref != '' && format(' on {0}', matrix.ref) || '' }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         # The branch: the one that started the run; on the daily schedule (which GitHub runs on the default branch)
-        # also the release stack's branch (pull request #23). TEMPORARY: remove that entry when #23 merges.
+        # also the release stack's branch (pull request #23). TEMPORARY: remove that entry when #23 merges. (The same
+        # `A && B || C` form: two entries on the daily schedule, one otherwise; "" means the branch that started it.)
         ref: ${{ fromJSON(github.event_name == 'schedule' && '["", "ci/joss-stack-optb"]' || '[""]') }}
         # A stack is one Python version with one set of dependency versions; "pinned" (development-environment) means
         # the exact versions of tools/ci/constraints-devenv.txt.
@@ -60,6 +63,7 @@ jobs:
       MPLBACKEND: Agg
       # "1" only in the pinned (supported) job: tests that check bit-level results on the pinned stack then require
       # the running versions to be the pins, so the supported job cannot pass on another stack by mistake.
+      # (`A && B || C`: "1" on the development-environment stack, empty on the others.)
       HCD_PINNED_STACK: ${{ matrix.stack.deps == 'development-environment' && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -137,6 +141,8 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
+          # `A && B || C` again: the suffix "-stack-branch" only on the release stack's branch leg, so the results of
+          # the two legs of one stack do not share a name
           name: results-py${{ matrix.stack.python }}-${{ matrix.stack.deps }}${{ matrix.ref != '' && '-stack-branch' || '' }}
           path: ${{ runner.temp }}/results
           retention-days: 14

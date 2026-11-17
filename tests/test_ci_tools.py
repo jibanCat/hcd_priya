@@ -495,7 +495,8 @@ def test_devenv_pins_sit_in_the_release_series_of_the_lower_bounds():
             name, _, version = line.partition("==")
             pins[name.lower()] = version
     direct = set(pins) & set(bounds)
-    assert direct >= {
+    # the direct dependencies that must be both pinned and bounded
+    must_be_pinned = {
         "jax",
         "equinox",
         "optax",
@@ -506,6 +507,10 @@ def test_devenv_pins_sit_in_the_release_series_of_the_lower_bounds():
         "matplotlib",
         "pytest",
     }
+    assert direct >= must_be_pinned, (
+        f"{sorted(must_be_pinned - direct)}: missing from tools/ci/constraints-devenv.txt or without a lower "
+        "bound in pyproject.toml; add the pin or the bound"
+    )
     for name in direct:
         # the versions as lists of their parts: "0.10.1" -> ["0", "10", "1"]
         bound_parts, pin_parts = bounds[name].split("."), pins[name].split(".")
@@ -587,7 +592,8 @@ PR_JOBS = (
 def test_only_the_pinned_job_declares_the_pinned_stack():
     """In a workflow, a "matrix" runs the same job several times with different settings; here each setting is a
     "stack", a Python version and a set of dependency versions. The pinned stack, Python 3.11 with the exact versions
-    of tools/ci/constraints-devenv.txt, is the only supported environment (docs/compatibility.md).
+    of tools/ci/constraints-devenv.txt, is the only supported environment (docs/compatibility.md). "Pinned",
+    "development-environment" (its deps value in the workflows) and "supported" (its label) all name that one stack.
 
     The test checks both workflows that run tests:
     1. HCD_PINNED_STACK is "1" in the development-environment (supported) jobs and empty in the others, and it is set
@@ -687,18 +693,24 @@ def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
     import yaml
 
     rtd = yaml.safe_load(open(os.path.join(REPO, ".readthedocs.yaml")))
-    assert rtd["sphinx"] == {"configuration": "docs/conf.py", "fail_on_warning": True}
-    assert rtd["python"]["install"] == [{"requirements": "docs/requirements.txt"}]
+    assert rtd["sphinx"] == {
+        "configuration": "docs/conf.py",
+        "fail_on_warning": True,
+    }, ".readthedocs.yaml: Sphinx must use docs/conf.py and fail on any warning (fail_on_warning: true)"
+    assert rtd["python"]["install"] == [
+        {"requirements": "docs/requirements.txt"}
+    ], ".readthedocs.yaml must install exactly docs/requirements.txt, as the CI docs job does"
     job = _workflow()["jobs"]["docs"]
     assert [step.get("uses") for step in job["steps"] if "uses" in step] == [
         "actions/checkout@v4",
         "actions/setup-python@v5",
-    ]
+    ], "tests.yml docs job: only the checkout and setup-python actions"
     runs = [step["run"] for step in job["steps"] if "run" in step]
+    # nothing else installed, and -W turns every Sphinx warning into an error
     assert runs == [
         "python -m pip install -r docs/requirements.txt",
         'python -m sphinx -W --keep-going -b html docs "$RUNNER_TEMP/html"',
-    ]  # nothing else installed
+    ], "tests.yml docs job: install docs/requirements.txt, then build with sphinx -W, and nothing else"
     lines = [ln.strip() for ln in open(os.path.join(REPO, "docs", "requirements.txt"))]
     reqs = [ln for ln in lines if ln and not ln.startswith("#")]
     # every requirement is pinned exactly, "name==version" and nothing else (no range, no extra, no URL)
@@ -707,13 +719,16 @@ def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
         pinned.fullmatch(r) for r in reqs
     ), f"docs/requirements.txt: every line must be name==version: {reqs}"
     names = {r.split("==")[0].lower().replace("_", "-") for r in reqs}
-    assert {
+    needed = {
         "sphinx",
         "myst-parser",
         "sphinx-autoapi",
         "sphinx-rtd-theme",
         "sphinxcontrib-mermaid",
-    } <= names
+    }
+    assert (
+        needed <= names
+    ), f"docs/requirements.txt lacks {sorted(needed - names)}, which the docs build uses"
 
 
 def test_h5_cross_version_check_reads_back_and_catches_a_change_or_a_new_library(tmp_path, capsys):

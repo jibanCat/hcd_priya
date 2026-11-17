@@ -70,7 +70,8 @@ import tomllib
 import xml.etree.ElementTree as ET
 import zipfile
 
-# the repository root: this file is tools/ci/run_test_tier.py, three folders below it
+# the repository root: this file is tools/ci/run_test_tier.py, two folders below it; the first dirname drops the
+# file name, the next two climb out of ci/ and tools/
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 TIERS_FILE = os.path.join(REPO, "tests", "ci_tiers.toml")
 CI_TIERS = ("wheel", "source")
