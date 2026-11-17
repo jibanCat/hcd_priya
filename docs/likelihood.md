@@ -124,8 +124,8 @@ m_{ij} = P_\mathrm{model}(k_n) + \left[ P_\mathrm{model}(k_{n+1}) - P_\mathrm{mo
 \frac{k_{ij} - k_n}{k_{n+1} - k_n}.
 ```
 
-A data wavenumber outside the modes is refused. The next section says when a straight line is enough and when
-that is not established. In the code it is `likelihood.interp_to_bins`:
+A data wavenumber outside the modes is refused. The next section says what was checked about this rule and how to
+check it for your data. In the code it is `likelihood.interp_to_bins`:
 
 ```python
 # made-up bin centres for this walk-through: three per redshift, each halfway between two modes
@@ -229,26 +229,42 @@ prior on each of the eleven parameters (`BOXES` in the script) and the two Gauss
 
 ## Bringing the model to the data's wavenumbers
 
-**Why a straight line between modes, and when that is enough.** The model is known only at the modes of the
-simulation box. `interp_to_bins` (step 4 above) draws a straight line between two neighbouring modes and reads the
-value at the centre of each data bin. Whether that is good enough depends on how far apart the data bins are,
-counted in mode spacings:
+**How it works.** The model is known only at the modes of the simulation box. `interp_to_bins` (step 4 above)
+reads, at each data bin's centre, the straight line between the two modes that bracket it. That value does not
+depend on where the other bins are.
 
-- **Bins several mode spacings apart** (the KODIAQ-SQUAD bins, at about 4 and more): against such bins the model is
-  a smooth curve sampled finely. For the data checked (the KODIAQ-SQUAD bins, on one high-resolution simulation,
-  privately), the straight line and a smoother interpolation through the same modes differ by far less than the
-  data errors.
-- **Bins about one mode spacing apart** (the eBOSS bins, for example): for the data checked (eBOSS-like bins, on the
-  same simulation, privately), the two differ by an amount comparable to that measurement's errors. **For such data this rule is not established by this package.** Check it before you
-  rely on it: compare with a smoother interpolation through the same modes, or bring in the window of the
-  measurement.
-- **Anything else** (between about 1 and 4 mode spacings, the lowest XQ-100 bins for example, or the bins of another
-  data set at any spacing): not classified by this package. Check such bins as you would the second case.
+**What was checked,** on the PRIYA simulations' own spectra at their modes (all low- and high-resolution runs, z 2.2
+to 4.6, every mean-flux level, the total and the four absorber classes), against the published bin centres and
+diagonal errors of KODIAQ-SQUAD, eBOSS DR14, XQ-100 and DESI DR1. No emulator and no measured spectrum were used.
 
-**`modes_per_bin` says which case your data are in.** It gives, for each bin, the spacing of the bin centres there
-over the spacing of the modes there. It only reports: nothing warns and nothing is refused because of its value. For
-the made-up data set of the walk-through above, whose bins were put one mode spacing apart on purpose (the modes
-of a simulation box are evenly spaced in k at one redshift):
+- **The straight line at left-out modes.** Drawn through every second, third or fourth mode and read at the modes
+  left out, its relative error is about 1% at the lowest modes and about 0.1% at the highest (medians over the
+  spectra). It does not grow with the spacing of the modes as a smooth bending would: it is dominated by the scatter
+  of the simulated spectrum from mode to mode. So no error of the line at the full mode spacing can be stated.
+- **The choice of interpolation, against the data errors.** Three other interpolations through the same modes (a
+  cubic spline, a monotone PCHIP interpolation and a straight line, each in log k and log P) change the value at a bin
+  centre by less than 0.1 of the data error at every KODIAQ-SQUAD and XQ-100 bin, and by up to about one half to one
+  data error at eBOSS and DESI bins below about k = 0.006 s/km (95th percentiles over the spectra; largest with the
+  cubic spline at the lowest bins). This measures how much the choice of interpolation matters, not an error against
+  a known truth.
+
+So for KODIAQ-SQUAD and XQ-100 the choice of interpolation is negligible against their errors, as checked. For data
+with errors like those of eBOSS or DESI below about k = 0.006 s/km, the straight line is **not established by this
+package**. To check your data: compare the straight line with other interpolations through the same modes, bin by
+bin, in units of your data's errors; or drop those bins.
+
+**Not tested:** the true spectrum between modes (a box gives the spectrum only at its modes), the simulations' sample
+variance, the measurements' windows, correlated errors, and the emulator.
+
+![The relative error of a straight line drawn through every second, third or fourth mode, read at the modes left out, against k: median and 95th percentile over the low-resolution spectra, in three redshift bands](figures/interpolation/line_error_at_left_out_modes.png)
+
+![At each bin centre of six data layouts, the largest difference between three other interpolations through the same modes and the straight line, in units of that bin's published error: 95th percentile and largest value over the low-resolution spectra, coloured by redshift](figures/interpolation/spread_among_interpolations.png)
+
+**`modes_per_bin` reports the bin layout.** It gives, for each bin, the spacing of the bin centres there over the
+spacing of the modes there: how many modes a bin spans, which bears on the bin-average point below. It is not a test
+of the straight line: its value does not tell whether the interpolation is adequate. It only reports: nothing warns
+and nothing is refused because of its value. For the made-up data set of the walk-through above, whose bins were put
+one mode spacing apart on purpose (the modes of a simulation box are evenly spaced in k at one redshift):
 
 ```python
 ratio = like.modes_per_bin(theta)  # one array per redshift of the data
@@ -259,21 +275,25 @@ print("mode spacings per bin spacing, at the first redshift:", np.round(ratio[0]
 mode spacings per bin spacing, at the first redshift: [1.0, 1.0, 1.0]
 ```
 
-A value near 1, as here, is the second case. The example's part one prints the smallest value for its own mock.
+A value near 1, as here, means bins about one mode spacing apart. The example's part one prints the smallest value
+for its own mock.
 
 **A separate point: the value at the bin centre is not an average over the bin.** The rule gives the model AT the
-bin centre. For a wide bin, the average of the spectrum over the bin can differ from the value at its centre by an
-amount that is not small against the data errors. Which of the two is the right thing to compare with the data
-depends on the window of the measurement, which this package does not model. So wide bins make the straight line
-safe; they do not make the comparison safe in every respect. A window that is a multiplicative factor can be given
-as `model_factor`; a true bin average is not computed here.
+bin centre. On the same spectra, the average over a bin (a top-hat average in k was assumed) differs from the value
+at its centre by up to about 0.7 to 0.95 of the data error on the wide KODIAQ-SQUAD bins at k = 0.05 to 0.063 s/km,
+and by up to about 0.4 to 0.5 at eBOSS and DESI bins below k = 0.006 s/km (95th percentiles). Which of the two is
+the right thing to compare with the data depends on the window of the measurement, which this package does not
+model. A window that is a multiplicative factor can be given as `model_factor`; a true bin average is not computed
+here.
+
+![At each bin centre of the same six layouts, the difference between the average over the bin and the value at the centre, in units of that bin's published error: 95th percentile and largest value over the low-resolution spectra](figures/interpolation/centre_against_bin_average.png)
 
 **The example's mock recovery does not test this rule.** Its mock is the simulation's own spectrum, brought from
 the simulation's modes to the bin centres by this same rule (a straight line between two neighbouring modes, read at
 the centre), and the same resolution table multiplies the mock and the model. At the truth the mock and the model
 are therefore treated alike (away from it the model's modes move with `hub` and `omegamh2`). So the recovery is not
-disturbed by either effect, and it cannot detect an error of the rule either: that needs a comparison with a
-smoother interpolation, as above.
+disturbed by either effect, and it cannot detect an error of the rule either: that needs a comparison with
+other interpolations through the same modes, as above.
 
 **The numbers.** The modes are the box modes of the PRIYA simulations, `k_n = 2 pi n / (120 Mpc/h)`, n = 1 to 172.
 In s/km they depend on z and on `hub` and `omegamh2`; at the midpoint of the parameters their spacing is

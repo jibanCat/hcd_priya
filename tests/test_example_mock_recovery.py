@@ -417,7 +417,7 @@ def test_the_download_gives_the_model_the_mock_and_the_reference_and_part_three_
     smallest = min(float(row.min()) for row in like.modes_per_bin(THETA))
     assert modes.startswith(
         "model mode spacings per bin spacing, the smallest over all bins and redshifts "
-        "(likelihood.modes_per_bin; near 1 the straight line between modes is not established): "
+        "(likelihood.modes_per_bin; a report of the bin layout, not a test of the interpolation): "
     )
     assert (
         modes.rsplit(": ", 1)[1] == f"{smallest:.2f}"
@@ -621,6 +621,26 @@ def test_the_committed_figures_of_the_stored_reference_name_the_items_the_script
     text = open(os.path.join(REPO, "docs", "likelihood.md"), encoding="utf-8").read()
     for n in names:
         assert f"](figures/mock_recovery/{n}.png)" in text, n
+
+
+def test_the_figures_of_the_interpolation_checks_are_committed_with_side_files_and_shown():
+    """docs/figures/interpolation holds the three figures of the checks on bringing the model to the data's
+    wavenumbers, each with a side file in words that says what is drawn and that it holds dimensionless ratios only
+    (no spectrum value); the docs page shows all three."""
+    root = os.path.join(REPO, "docs", "figures", "interpolation")
+    names = (
+        "line_error_at_left_out_modes",
+        "spread_among_interpolations",
+        "centre_against_bin_average",
+    )
+    assert sorted(os.listdir(root)) == sorted(n + end for n in names for end in (".json", ".png"))
+    text = open(os.path.join(REPO, "docs", "likelihood.md"), encoding="utf-8").read()
+    for n in names:
+        with open(os.path.join(root, n + ".json"), encoding="utf-8") as fh:
+            facts = json.load(fh)
+        assert set(facts) == {"data", "figure", "made_by", "not_tested", "quantities", "spectra"}, n
+        assert facts["quantities"].endswith("no spectrum value"), n
+        assert f"](figures/interpolation/{n}.png)" in text, n
 
 
 def test_a_chain_is_drawn_over_the_stored_reference(download, capsys, monkeypatch, tmp_path):

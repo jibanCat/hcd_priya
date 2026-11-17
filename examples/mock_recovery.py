@@ -309,7 +309,7 @@ def part_one(like: L.GaussianP1DLikelihood) -> dict:
         coarseness = f"not defined for this data set ({exc})"
     line(
         "model mode spacings per bin spacing, the smallest over all bins and redshifts "
-        "(likelihood.modes_per_bin; near 1 the straight line between modes is not established)",
+        "(likelihood.modes_per_bin; a report of the bin layout, not a test of the interpolation)",
         coarseness,
     )
     chi2 = like.chi2(theta)

@@ -428,22 +428,28 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
     That is all. Nothing in it is fitted or tuned, and a data wavenumber outside
     [k_model[0], k_model[-1]] is refused, never extrapolated.
 
-    **When a straight line is enough, and when it is not shown to be.** The model is known only
-    at the simulation's modes. Where the data bins are several mode spacings apart (the
-    KODIAQ-SQUAD bins, for example), the model is a smooth curve sampled finely against the
-    bins: for the data checked (the KODIAQ-SQUAD bins, on one high-resolution simulation,
-    privately) the straight line and a smoother interpolation through the same modes differ by
-    far less than the data errors. Where the bins are about one mode spacing apart (eBOSS, for
-    example), for the data checked (eBOSS-like bins, on the same simulation, privately) the two
-    differ by an amount comparable to that measurement's errors: the rule is
-    NOT established for such data, and you should check it before you rely on it.
-    ``modes_per_bin`` tells you which case your data are in.
+    **What was checked, and what was not.** The value at a bin centre is the straight line
+    between the two modes that bracket it; it does not depend on where the other bins are.
+    Checked on the PRIYA simulations' spectra (all low- and high-resolution runs, z 2.2 to 4.6,
+    every mean-flux level): the line's relative error at left-out modes is about 1% at the
+    lowest modes and about 0.1% at the highest (medians), dominated by the scatter of the
+    simulated spectrum from mode to mode rather than by a smooth bending, so no error at the
+    full mode spacing can be stated. Other interpolations through the same modes change the
+    value at the bin centres by less than 0.1 of the data error at every KODIAQ-SQUAD and XQ-100
+    bin, and by up to about one half to one data error at eBOSS and DESI bins below about
+    k = 0.006 s/km (95th percentiles). For such data the rule is NOT established by this
+    package: compare the straight line with other interpolations through the same modes, bin by
+    bin, in units of your data's errors, or drop those bins. Not tested: the true spectrum
+    between modes, the simulations' sample variance, the measurements' windows, correlated
+    errors, the emulator.
 
-    **A separate point: this is the value AT the bin centre, not an average over the bin.** For
-    a wide bin the average of the spectrum over the bin can differ from the value at its centre
-    by an amount that is not small against the data errors. Which of the two is right depends on
-    the window of the measurement, which this package does not model.
-    ``docs/likelihood.md`` ("Bringing the model to the data's wavenumbers") says more.
+    **A separate point: this is the value AT the bin centre, not an average over the bin.** On
+    the same spectra the average over a bin (a top-hat average in k assumed) differs from the
+    value at its centre by up to about 0.7 to 0.95 of the data error on the wide KODIAQ-SQUAD
+    bins at k = 0.05 to 0.063 s/km, and by up to about 0.4 to 0.5 at eBOSS and DESI bins below
+    k = 0.006 s/km. Which of the two is right depends on the window of the measurement, which
+    this package does not model. ``docs/likelihood.md`` ("Bringing the model to the data's
+    wavenumbers") says more, with figures.
 
     Parameters
     ----------
@@ -488,14 +494,12 @@ def modes_per_bin(k_model: ArrayLike, k_data: ArrayLike) -> np.ndarray:
     there (the gap between the two that bracket it). It is a spacing of bin CENTRES, not a bin
     width: a data set holds centres, not edges.
 
-    **How to read it.** A value of 5 means the bins are five mode spacings apart: the model is
-    sampled finely against the data. For the data checked (the KODIAQ-SQUAD bins, at about 4 and
-    more, on one simulation) the straight line of ``interp_to_bins`` and a smoother interpolation
-    differ by far less than the data errors. A value near 1 means the bins are about as fine as
-    the modes: for such data the straight line is NOT established by this package, and you should
-    check it before you rely on it. Values between about 1 and 4, and the bins of any other data
-    set, are not classified: check them as you would a value near 1 (``docs/likelihood.md``,
-    "Bringing the model to the data's wavenumbers").
+    **How to read it.** A report of the bin layout: a value of 5 means the bin centres are five
+    mode spacings apart, a value near 1 about one. It says how many modes a bin spans, which
+    bears on the bin-average point of ``interp_to_bins``. It is not a test of the straight line:
+    its value does not tell whether the interpolation is adequate (``docs/likelihood.md``,
+    "Bringing the model to the data's wavenumbers", says what was checked and how to check your
+    data).
 
     It only reports. Nothing warns and nothing is refused because of its value, and it uses no
     model value: wavenumbers only.
@@ -905,8 +909,9 @@ class GaussianP1DLikelihood:
         The model's wavenumbers in s/km move with ``hub``, ``omegamh2`` and the redshift, so the
         ratio needs a point. It is ``modes_per_bin`` of this module (bin spacing over mode
         spacing) at each redshift of the data. It only reports: no warning, no refusal, and no
-        effect on any number of the likelihood. A value near 1 is the case in which the straight
-        line of ``interp_to_bins`` is not established (``docs/likelihood.md``).
+        effect on any number of the likelihood. It is a report of the bin layout, not a test of
+        the straight line of ``interp_to_bins``: its value does not tell whether the
+        interpolation is adequate (``docs/likelihood.md``).
 
         Parameters
         ----------
