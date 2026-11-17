@@ -7,6 +7,9 @@ recent of them (by its start time) is completed with conclusion "success". A new
 failure, a cancellation, no run at all, or any error reading the API is a refusal: nightly failures block a release.
 With the environment variable GH_TOKEN set, the request carries it (a workflow's own token with read access to
 Actions); without it, the request is anonymous, which works for a public repository only. Standard library only.
+
+Exit status: 0 when the gate passes (it prints "PASSED: ..."), 1 when it refuses ("REFUSED: ..."). COMMIT is the
+full 40-character id; `git rev-parse HEAD` prints it for the commit checked out.
 """
 
 from __future__ import annotations
@@ -34,12 +37,14 @@ def decide(runs, sha):
     if latest.get("status") != "completed":
         return (
             False,
-            f"the latest nightly run on {sha} is not finished ({latest.get('status')}): {where}",
+            f"the latest nightly run on {sha} is not finished ({latest.get('status')}): {where}; wait for it "
+            "to finish and check again",
         )
     if latest.get("conclusion") != "success":
         return (
             False,
-            f"the latest nightly run on {sha} did not pass ({latest.get('conclusion')}): {where}",
+            f"the latest nightly run on {sha} did not pass ({latest.get('conclusion')}): {where}; fix the "
+            "failure, run the nightly workflow on the commit again, then check again",
         )
     return True, f"the latest nightly run on {sha} passed: {where}"
 
@@ -47,6 +52,7 @@ def decide(runs, sha):
 def fetch_runs(repo, workflow, sha, token=None):
     """The runs of `workflow` on `sha`, read from the Actions API (one page of up to 100, newest first)."""
     url = f"{API}/repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&per_page=100"
+    # the media type GitHub recommends, and the REST API version (GitHub names its API versions by date)
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -62,7 +68,10 @@ def main(argv=None):
     args = ap.parse_args(argv)
     # a full commit id, 40 lowercase hexadecimal digits, as the API writes head_sha (decide compares them exactly)
     if not re.fullmatch(r"[0-9a-f]{40}", args.sha):
-        print(f"REFUSED: {args.sha!r} is not a full commit sha")
+        print(
+            f"REFUSED: {args.sha!r} is not a full commit sha; give the 40-character id (git rev-parse HEAD "
+            "prints the one checked out)"
+        )
         return 1
     try:
         runs = fetch_runs(args.repo, args.workflow, args.sha, os.environ.get("GH_TOKEN") or None)

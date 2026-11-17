@@ -3,7 +3,9 @@
 Terms: a tier says HOW a file runs (wheel: against the installed package; source: from the checkout), a level says
 WHEN it runs (pr: on every pull request; nightly: once a day). Both, and the per-file keys used below (asset_tests,
 skipped_by_design, deferred_xfails, pr_tests, nightly_tests, release_tests), are defined in the header of
-tests/ci_tiers.toml. A junit report is the XML file pytest writes with --junitxml.
+tests/ci_tiers.toml. A junit report is the XML file pytest writes with --junitxml. The header of tests/ci_tiers.toml
+also defines an asset, NOT RUN and the skip rules; a test marked slow is one with @pytest.mark.slow (registered in
+tests/conftest.py); a deferral and HCD_GATE_RUN are described below and in tests/gate_helpers.py.
 
 usage:
   python tools/ci/run_test_tier.py --tier wheel  --level LEVEL --workdir NEW_DIR --out NEW_DIR [--wheel WHEEL]
@@ -74,7 +76,9 @@ EXTERNAL = "external"
 LEVELS = ("pr", "nightly", "release", "not run")
 # the file levels that run at each CI level
 RUN_LEVELS = {"pr": ("pr",), "nightly": ("pr", "nightly")}
-# the keys that name single tests whose level differs from their file's (see the header of tests/ci_tiers.toml)
+# The keys that name single tests whose level differs from their file's (the header of tests/ci_tiers.toml):
+# pr_tests sits in a nightly file (these tests also run at pr); nightly_tests in a pr file (these run at nightly
+# only); release_tests in either (CI leaves them out; the assets job runs them).
 PER_TEST_KEYS = ("pr_tests", "nightly_tests", "release_tests")
 # a file whose pytest run takes longer than this (30 minutes) fails as a timeout
 FILE_TIMEOUT_S = 1800
@@ -137,11 +141,15 @@ def check_named_tests(rel, entry):
     for n in names:
         if n not in defined:
             sys.exit(
-                f"{rel}: {n} is named in tests/ci_tiers.toml but is not a function of the file"
+                f"{rel}: {n} is named in tests/ci_tiers.toml but is not a function of the file; correct the "
+                "name or delete it from the file's entry"
             )
         clash = sorted(d for d in defined if d != n and d.startswith(n))
         if clash:
-            sys.exit(f"{rel}: {n} is the start of {clash}: a node-id prefix would select those too")
+            sys.exit(
+                f"{rel}: {n} is the start of {clash}: a node-id prefix would select those too; rename one of "
+                "the functions"
+            )
 
 
 def level_selection(rel, entry, level):
@@ -160,11 +168,16 @@ def level_selection(rel, entry, level):
 
 
 def tier_plan(tier, files, level="nightly"):
-    """What a run of `tier` does, as data: the files it runs (todo), the environment variables it adds (env), the
-    pytest marker expression of each file's run (marker), and per file the declared skips (declared: asset_tests and
-    skipped_by_design), the tests that must run (required: an assets job's asset_tests and release_tests; none in a CI
-    tier), the pytest arguments that select its tests (select) and the node ids left out (deselect). A CI tier runs at
-    `level`; the assets job runs every test of its files.
+    """What a run of `tier` does, as a dict (a CI tier runs at `level`; the assets job runs every test of its files):
+    - todo: the files it runs;
+    - level: the CI level, or None for the assets job;
+    - env: the environment variables it adds (HCD_GATE_RUN=1 in the assets job);
+    - marker: the pytest -m expression of each file's run ("not slow" in a CI tier; None: every test);
+    - declared: per file, the tests allowed to skip (asset_tests and skipped_by_design);
+    - required: per file, the tests that must run (in the assets job, asset_tests and release_tests; none in a CI
+      tier);
+    - select: per file, the pytest arguments that choose its tests (the file, or node ids of its pr_tests);
+    - deselect: per file, the node ids left out.
     """
     assets = tier == ASSET_JOB
     select, deselect = {}, {}
@@ -224,34 +237,36 @@ def junit_counts(xml_path, declared_skips=(), deferrals=(), required=()):
     """Outcome counts of a pytest junit report (see the module docstring). declared_skips are the file's asset_tests
     and skipped_by_design together; a test matches one by its full name (with parameters, e.g. "test_x[a]") or by
     its function name (all parameters). deferrals are the exact expected-failure messages allowed. required (an
-    assets job: the file's asset_tests) are tests that must run here: each one that skips, and each required name
-    that no test of the report matches (not collected, or deselected), counts as asset_missing."""
+    assets job: the file's asset_tests and release_tests) are tests that must run here: each one that skips, and each
+    required name that no test of the report matches (not collected, or deselected), counts as asset_missing.
+    """
     declared, allowed, must = set(declared_skips), set(deferrals), set(required)
     counts = dict.fromkeys(COUNT_KEYS, 0)
     seen = set()
     for case in ET.parse(xml_path).getroot().iter("testcase"):
         counts["tests"] += 1
         name = case.get("name", "")
-        seen |= {name, name.split("[")[0]}
-        is_declared = name in declared or name.split("[")[0] in declared
-        is_required = name in must or name.split("[")[0] in must
-        sk = case.find("skipped")
+        base = name.split("[")[0]  # the function name: "test_x[a]" -> "test_x"
+        seen |= {name, base}
+        is_declared = name in declared or base in declared
+        is_required = name in must or base in must
+        skip_tag = case.find("skipped")  # the report's <skipped> element, or None
         if case.find("failure") is not None:
             counts["failures"] += 1
         elif case.find("error") is not None:
             counts["errors"] += 1
-        elif sk is not None and sk.get("type") == "pytest.xfail":
+        elif skip_tag is not None and skip_tag.get("type") == "pytest.xfail":
             # pytest writes an expected failure as a skip of type pytest.xfail; only an allowed message is a deferral
-            counts["xfailed" if sk.get("message") in allowed else "bad_xfail"] += 1
-        elif sk is not None and is_required:
+            counts["xfailed" if skip_tag.get("message") in allowed else "bad_xfail"] += 1
+        elif skip_tag is not None and is_required:
             # a test that this job must run skipped: its asset is missing
             counts["asset_missing"] += 1
-        elif sk is not None:
+        elif skip_tag is not None:
             # any other skip: declared (reported as NOT RUN) or undeclared (the file fails)
             counts["asset_skipped" if is_declared else "skipped"] += 1
         else:
             counts["passed"] += 1
-        if is_declared and not is_required and sk is None:
+        if is_declared and not is_required and skip_tag is None:
             # a declared skip that ran instead of skipping (outside the tests a job requires): the file fails
             counts["asset_ran"] += 1
     # a required test that is not in the report at all (not collected, or deselected)
@@ -307,16 +322,24 @@ def check_origin(tier, origin):
         site = {os.path.realpath(sysconfig.get_paths()[k]) for k in ("purelib", "platlib")}
         if pkg_parent not in site:
             sys.exit(
-                f"wheel tier: hcd_analysis imports from {origin}, not from this interpreter's site-packages"
+                f"wheel tier: hcd_analysis imports from {origin}, not from this interpreter's site-packages; "
+                "install the wheel into this interpreter (python -m pip install <the wheel>) and run the runner "
+                "with that interpreter"
             )
     elif pkg_parent != REPO:
-        sys.exit(f"{tier} tier: hcd_analysis imports from {origin}, not from the checkout {REPO}")
+        sys.exit(
+            f"{tier} tier: hcd_analysis imports from {origin}, not from the checkout {REPO}; run this checkout's "
+            "runner with an interpreter whose import path does not put another hcd_analysis first (check "
+            "PYTHONPATH and any .pth file in its site-packages)"
+        )
 
 
 def check_installed_is(wheel):
     """Every package file the wheel's RECORD lists is installed with the same sha256 (read back from disk)."""
     with zipfile.ZipFile(wheel) as zf:
+        # a wheel has exactly one RECORD file (the unpacking fails otherwise)
         (rec,) = [n for n in zf.namelist() if n.endswith(".dist-info/RECORD")]
+        # a RECORD line is "path,digest,size": split at the last two commas, so a comma in a path does no harm
         want = {
             line.rsplit(",", 2)[0]: line.rsplit(",", 2)[1]
             for line in zf.read(rec).decode().splitlines()
@@ -334,7 +357,10 @@ def check_installed_is(wheel):
         if got != digest:
             bad.append(path)
     if bad or not want:
-        sys.exit(f"the installed hcd_analysis is not {wheel}: {bad[:10] or 'empty RECORD'}")
+        sys.exit(
+            f"the installed hcd_analysis is not {wheel}: {bad[:10] or 'empty RECORD'}; install that wheel into a "
+            "fresh virtual environment and run again"
+        )
     return len(want)
 
 
@@ -411,7 +437,9 @@ def run_file(rel, plan, cmd_base, cwd, env, out, deferrals, deferred_xfails):
     t0 = time.time()
     try:
         marker = ["-m", plan["marker"]] if plan["marker"] else []
+        # one "--deselect NODE_ID" pair per test left out
         deselect = [a for d in plan["deselect"][rel] for a in ("--deselect", d)]
+        # -q: short output; -rA: a summary line for every outcome, so the log shows each skip and its reason
         proc = subprocess.run(
             cmd_base + marker + deselect + ["-q", "-rA", f"--junitxml={xml}"] + plan["select"][rel],
             cwd=cwd,
@@ -422,6 +450,8 @@ def run_file(rel, plan, cmd_base, cwd, env, out, deferrals, deferred_xfails):
         )
         rc, log = proc.returncode, proc.stdout + proc.stderr
     except subprocess.TimeoutExpired as exc:
+        # the output caught before the timeout: bytes whenever some was captured, even with text=True (as the
+        # subprocess documentation says), or None
         partial = (
             exc.stdout.decode(errors="replace")
             if isinstance(exc.stdout, bytes)
@@ -495,7 +525,9 @@ def run_tier(tier, out, workdir=None, wheel=None, level="nightly"):
     plan = tier_plan(tier, files, level)
     todo = plan["todo"]
     if not todo:
-        sys.exit(f"tier {tier!r} has no file at this level")
+        sys.exit(
+            f"tier {tier!r} has no file at level {level!r}; see the files' levels in tests/ci_tiers.toml"
+        )
     # 2. Where to run it, and a check that the package under test comes from where this tier must take it.
     cwd = prepare_cwd(tier, workdir)
     os.makedirs(out, exist_ok=False)

@@ -53,6 +53,8 @@ jobs:
           tools/ci/install_with_synthetic_models.sh "$RUNNER_TEMP/venv/bin/python" "$(ls dist/*.whl)[test]" \
             "$RUNNER_TEMP/dist_models" -c tools/ci/constraints-devenv.txt
           "$RUNNER_TEMP/venv/bin/python" -m pip check
+      # The installation check is `python -m hcd_analysis.check_release --published` (below): it loads the installed
+      # model package; with the synthetic build it checks the installation, not a model.
       - name: Fresh install of both wheels, then the README's first example and the installation check
         env:
           HCD_PRIYA_ALLOW_SYNTHETIC: "1"

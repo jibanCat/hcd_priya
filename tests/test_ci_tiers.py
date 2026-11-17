@@ -5,10 +5,12 @@ The words used here are defined in the comment block at the top of tests/ci_tier
   other tiers never run in CI, and their files are reported as not run, with the reason recorded in the toml file.
 - A file's LEVEL says WHEN it runs: "pr" (on every pull request), "nightly" (once a day), "release" (only with the
   real assets) or "not run". Single tests can differ from their file's level: pr_tests, nightly_tests, release_tests.
-- Skipped is not passed. CI's runner (tools/ci/run_test_tier.py) fails a file on any skip, except of a test named in
-  the file's asset_tests or skipped_by_design: that one is reported as NOT RUN, and it must skip (if it runs, the file
-  fails, so the list stays exact). An expected failure fails the file too, except a deferred_legacy deferral or one
-  whose exact message is in the file's deferred_xfails.
+- Skipped is not passed. CI's runner (tools/ci/run_test_tier.py) applies three rules:
+  - A skipped test fails its file, unless the file names it in asset_tests or skipped_by_design.
+  - A test named there must skip. It is reported as NOT RUN. If it runs instead, the file fails, so the lists stay
+    exact.
+  - An expected failure (xfail) fails its file, unless it is a deferred_legacy deferral or its exact message is in
+    the file's deferred_xfails.
 
 These tests check the lists that the runner reads. They fail if a test file is missing from tests/ci_tiers.toml or
 listed twice; if an entry has an unknown key, tier or level, or a level its tier does not allow; if a list names a test
@@ -23,8 +25,10 @@ import os
 import tomllib
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+# the six tiers (each described in the [tiers] table of tests/ci_tiers.toml); only wheel and source run in CI
 TIERS = {"wheel", "source", "assets", "deferred", "external", "no_tests"}
 CI_TIERS = {"wheel", "source"}
+# the four levels (the [levels] table of tests/ci_tiers.toml)
 LEVELS = {"pr", "nightly", "release", "not run"}
 # the levels each tier may take: the CI tiers run at pr or nightly; the assets tier only with its assets (or never);
 # the other tiers never, except an external file whose extra package the nightly workflow installs
@@ -275,10 +279,18 @@ def test_level_names_are_the_known_ones_and_every_file_has_one_its_tier_allows()
 
 
 def test_every_test_file_is_classified_exactly_once():
+    """Every test file of the repository has a line in tests/ci_tiers.toml, and every line names a file that
+    exists, so no file can drop out of CI unnoticed. (A TOML table cannot hold one key twice.)"""
     listed = set(_doc()["files"])
     present = _test_files()
-    assert not present - listed, f"unclassified test files: {sorted(present - listed)}"
-    assert not listed - present, f"classified files that do not exist: {sorted(listed - present)}"
+    assert not present - listed, (
+        f"test files not listed in tests/ci_tiers.toml: {sorted(present - listed)}; add a line for each to "
+        "[files], with its tier and level"
+    )
+    assert not listed - present, (
+        f"tests/ci_tiers.toml lists files that do not exist: {sorted(listed - present)}; delete or correct those "
+        "lines"
+    )
 
 
 def test_each_entry_has_a_known_tier_and_out_of_ci_entries_say_why():
@@ -314,7 +326,6 @@ def test_each_entry_has_a_known_tier_and_out_of_ci_entries_say_why():
 def test_declared_skips_are_test_functions_of_their_file():
     """asset_tests and skipped_by_design (allowed only in a CI tier) name test functions of the file, or single
     parameter cases of them ("test_x[a]"), each once, so a rename leaves no stale entry."""
-    root = os.path.dirname(TESTS_DIR)
     for path, entry in _doc()["files"].items():
         names = entry.get("asset_tests", []) + entry.get("skipped_by_design", [])
         if not names:
@@ -327,12 +338,12 @@ def test_declared_skips_are_test_functions_of_their_file():
         assert (
             listed_once
         ), f"{path}: a name is listed twice in asset_tests or skipped_by_design; keep each name once"
-        with open(os.path.join(root, path), encoding="utf-8") as f:
-            defined = {
-                n.name for n in ast.walk(ast.parse(f.read())) if isinstance(n, ast.FunctionDef)
-            }
-        bases = {n.split("[")[0] for n in names}
-        assert bases <= defined, f"{path}: not test functions here: {sorted(bases - defined)}"
+        defined = _functions(path)
+        bases = {n.split("[")[0] for n in names}  # "test_x[a]" -> "test_x"
+        assert bases <= defined, (
+            f"{path}: asset_tests or skipped_by_design name {sorted(bases - defined)}, which are not functions of "
+            "the file (renamed or misspelt?); correct or delete those names in tests/ci_tiers.toml"
+        )
 
 
 def test_declared_deferrals_are_exact_messages_in_a_ci_tier():
@@ -396,9 +407,10 @@ def test_tests_at_another_level_than_their_file_are_test_functions_of_it_and_no_
             named_once
         ), f"{path}: a test is named twice in pr_tests, nightly_tests or release_tests; keep it in one list, once"
         defined = _functions(path)
-        assert (
-            set(names) <= defined
-        ), f"{path}: not test functions here: {sorted(set(names) - defined)}"
+        assert set(names) <= defined, (
+            f"{path}: pr_tests, nightly_tests or release_tests name {sorted(set(names) - defined)}, which are not "
+            "functions of the file (renamed or misspelt?); correct or delete those names in tests/ci_tiers.toml"
+        )
         # no name is the start of another function's name (pytest's node-id prefix would catch both)
         for n in names:
             assert not [d for d in defined if d != n and d.startswith(n)], (
@@ -432,7 +444,11 @@ def test_the_scientific_invariants_of_the_pr_level_run_at_pr():
             assert (
                 test in defined
             ), f"{area}: {path} has no function {test}; if it was renamed, update PR_INVARIANTS"
-            assert _runs_at_pr(path, test), f"{area}: {path}::{test} does not run at the pr level"
+            assert _runs_at_pr(path, test), (
+                f"{area}: {path}::{test} does not run at the pr level: its file is not at pr, or names it in "
+                "nightly_tests or release_tests, or is a nightly file without it in pr_tests. Restore it to the pr "
+                "level in tests/ci_tiers.toml, or take it out of PR_INVARIANTS on purpose"
+            )
             n += 1
     for path in PR_INVARIANT_FILES:
         entry = files[path]

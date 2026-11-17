@@ -12,8 +12,11 @@
 #   nightly  the pr tests and these, once a day and by hand, on the pinned and the two newer-dependency stacks
 #            (.github/workflows/nightly.yml);
 #   release  only where the real assets are: the assets job before a release (tools/ci/run_test_tier.py --tier
-#            assets), recorded privately; the release validation workflow lists them;
+#            assets), whose record is attached to the release (docs/release_checklist.md); the release validation
+#            workflow lists these tests;
 #   not run  never (no test to collect, all deferred, or an optional reference environment).
+# A stack is one Python version with one set of dependency versions; the pinned stack, Python 3.11 with the exact
+# versions of tools/ci/constraints-devenv.txt, is the only supported one.
 # Single tests can differ from their file's level, by name. Each key names where its tests run, which is NOT the
 # level of the file that carries it:
 #   pr_tests       in a nightly file: these tests also run at pr;
@@ -21,11 +24,21 @@
 #   release_tests  in a pr or nightly file: they need an asset and fail rather than skip without it, so CI leaves them
 #                  out and the assets job runs them.
 # An asset is a large or private file that CI does not have: a data cache, trained models, observational data, raw
-# simulation outputs. The D5 and MF integration data that some reasons below name are such assets; an assets job
-# points to them with the environment variable that each of those reasons names.
+# simulation outputs. Three names in the reasons below:
+#   D5 integration data  the real release data that the tests in tests/integration/ read, through the JSON
+#                        configuration named by HCD_D5_INTEGRATION_CONFIG (tests/integration/_config.py; "D5" is the
+#                        project's name for the step that added those tests);
+#   MF integration data  the release's multi-fidelity (MF) correction record and its inputs, through the JSON
+#                        configuration named by HCD_MF_INTEGRATION_CONFIG (tests/integration/test_mf_release_real.py);
+#   fake_spectra         the separately installed package that computes spectra from simulation snapshots
+#                        (docs/fake_spectra_integration.md).
 #
-# Skipped is not passed. tools/ci/run_test_tier.py runs one tier at one level, one pytest process per file, and fails
-# a file on any failure, error, undeclared skip or undeclared expected failure, or when no test passes:
+# Skipped is not passed. tools/ci/run_test_tier.py runs one tier at one level, one pytest process per file. In CI:
+#   a skip of a test not named in asset_tests or skipped_by_design   the file FAILS;
+#   a skip of a test named there                                      allowed: reported as NOT RUN, never as passed;
+#   a test named there that runs instead of skipping                  the file FAILS (the list is stale);
+#   a test named in release_tests                                     not skipped: CI leaves it out (deselects it).
+# In full, a file fails on any failure, error, undeclared skip or undeclared expected failure, or when no test passes:
 # - asset_tests and skipped_by_design name the only tests allowed to skip in CI. They are reported as NOT RUN, never as
 #   passed, and they must skip: a declared test that runs instead fails its file, so the lists stay exact.
 # - Expected failures are allowed only as exact deferrals: the deferred_legacy causes of tests/gate_helpers.py (each

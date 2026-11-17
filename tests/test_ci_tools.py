@@ -14,6 +14,13 @@ What is covered:
 Most inputs are small synthetic archives, junit reports and run lists; the workflow, tier and level tests read the
 real files of this checkout.
 
+Terms. Tier, level, asset, "slow", HCD_GATE_RUN, the assets job and the per-test keys: the header of tests/ci_tiers.toml
+and the docstring of tools/ci/run_test_tier.py. A stack is one Python version with one set of dependency versions; the
+pinned stack is Python 3.11 with the exact versions of tools/ci/constraints-devenv.txt, the only supported one. The
+older-libhdf5 job is the job of tests.yml that reads the HDF5 release format with an older HDF5 library. The release
+stack's branch, ci/joss-stack-optb, is the branch of pull request #23, which collects the release work; nightly.yml
+names it only until #23 merges (TEMPORARY, see the header of .github/workflows/nightly.yml).
+
 Run: pytest tests/test_ci_tools.py (CI runs it at the pr level, in the source tier; the workflow tests need PyYAML).
 """
 
@@ -32,6 +39,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load(name):
+    """A script of tools/ci, loaded from its file path as a module (tools/ci is not an importable package)."""
     spec = importlib.util.spec_from_file_location(
         f"_ci_{name}", os.path.join(REPO, "tools", "ci", f"{name}.py")
     )
@@ -40,9 +48,15 @@ def _load(name):
     return mod
 
 
+# The three CI scripts under test, by short names: CD the distribution check, RT the test-tier runner, NG the
+# nightly gate. (XV, the HDF5 cross-version check, is loaded in the one test that uses it.)
 CD = _load("check_dist")
 RT = _load("run_test_tier")
 NG = _load("nightly_gate")
+# A fake "committed package" for the archive tests: {path: git blob id}. check_dist compares each file of an archive
+# with the git blob id (the hash git gives a file's bytes) of the committed file. Every fake file holds the bytes
+# "x", so every id is X. PACKAGE is what a wheel must hold; TOP the extra top-level files an sdist must hold;
+# DIST_INFO the metadata files of the wheel's .dist-info folder.
 X = CD.git_blob_id(b"x")
 PACKAGE = {
     n: X
@@ -59,6 +73,9 @@ DIST_INFO = ["METADATA", "WHEEL", "RECORD", "entry_points.txt", "licenses/LICENS
 
 
 def _wheel(tmp_path, extra=(), drop=(), top="hcd_analysis\n", content=None):
+    """Write a small fake wheel of PACKAGE and return its path. extra: names added beyond PACKAGE; drop: names left
+    out; top: the text of top_level.txt (the top-level packages the wheel declares); content: {name: text} for files
+    whose bytes are not "x" (an uncommitted edit)."""
     path = tmp_path / "hcd_priya-0.0.0-py3-none-any.whl"
     with zipfile.ZipFile(path, "w") as zf:
         for name in sorted((set(PACKAGE) | set(extra)) - set(drop)):
@@ -70,6 +87,8 @@ def _wheel(tmp_path, extra=(), drop=(), top="hcd_analysis\n", content=None):
 
 
 def _sdist(tmp_path, extra=(), drop=(), link=None, content=None):
+    """Write a small fake sdist of PACKAGE and TOP (plus the files a build adds) and return its path. extra, drop and
+    content as in _wheel; link: a name to add as a symbolic link pointing outside the archive."""
     path = tmp_path / "hcd_priya-0.0.0.tar.gz"
     names = (
         set(PACKAGE)
@@ -86,18 +105,19 @@ def _sdist(tmp_path, extra=(), drop=(), link=None, content=None):
         if link:
             info = tarfile.TarInfo(f"hcd_priya-0.0.0/{link}")
             info.type = tarfile.SYMTYPE
+            # a link to a file outside the archive: check_sdist must refuse any link
             info.linkname = "/etc/passwd"
             tf.addfile(info)
     return str(path)
 
 
-def test_git_blob_id_is_gits():
-    assert (
-        CD.git_blob_id(b"") == "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
-    )  # git hash-object /dev/null
+def test_git_blob_id_is_the_id_git_gives():
+    """check_dist hashes a file as git does: the id of the empty file is the one `git hash-object /dev/null` prints."""
+    assert CD.git_blob_id(b"") == "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
 
 
 def test_check_wheel_accepts_exactly_the_committed_package(tmp_path):
+    """A wheel holding exactly the committed package files (and its metadata) has no problem."""
     assert CD.check_wheel(_wheel(tmp_path), PACKAGE) == []
 
 
@@ -124,6 +144,7 @@ def test_check_wheel_refuses_any_other_file(tmp_path, extra):
     "drop", ["hcd_analysis/cli/run.py", "hcd_analysis/comparison/phase0_v1.json"]
 )
 def test_check_wheel_refuses_a_missing_file(tmp_path, drop):
+    """A committed module or package data file missing from the wheel is reported."""
     assert any(
         f"missing {drop}" in p for p in CD.check_wheel(_wheel(tmp_path, drop=[drop]), PACKAGE)
     )
@@ -144,6 +165,8 @@ def test_check_wheel_refuses_another_top_level_package(tmp_path):
 
 
 def test_check_sdist_accepts_exactly_the_committed_package(tmp_path):
+    """An sdist holding exactly the committed package, the committed top-level files and what a build adds has no
+    problem."""
     assert CD.check_sdist(_sdist(tmp_path), PACKAGE, TOP) == []
 
 
@@ -158,10 +181,12 @@ def test_check_sdist_accepts_exactly_the_committed_package(tmp_path):
     ],
 )
 def test_check_sdist_refuses_any_other_file(tmp_path, extra):
+    """Tests, checkpoints, scripts, data or an uncommitted module in the sdist are reported."""
     assert any(extra in p for p in CD.check_sdist(_sdist(tmp_path, extra=[extra]), PACKAGE, TOP))
 
 
 def test_check_sdist_refuses_links_missing_and_edited_files(tmp_path):
+    """In one sdist, a symbolic link, a missing committed file and an edited committed file are each reported."""
     problems = CD.check_sdist(
         _sdist(
             tmp_path,
@@ -179,6 +204,8 @@ def test_check_sdist_refuses_links_missing_and_edited_files(tmp_path):
 
 
 def test_committed_files_cover_the_packages_and_nothing_else():
+    """The real list check_dist builds from git: the package's modules and package data, and the sdist's committed
+    top-level files; no other kind of file."""
     package, top = CD.committed_files()
     assert {"hcd_analysis/__init__.py", "hcd_analysis/paths.py", "hcd_analysis/cli/run.py"} <= set(
         package
@@ -190,6 +217,14 @@ def test_committed_files_cover_the_packages_and_nothing_else():
     )
 
 
+# A fake pytest junit report (the XML file pytest writes with --junitxml) with one test case of each kind:
+#   a      passes;
+#   b      fails;
+#   c      errors;
+#   d[p1]  skips (a plain skip; "[p1]" is a parameter case of the test d);
+#   e      an expected failure whose message is the declared deferral DEFERRAL below;
+#   f      an expected failure with another message (not a declared deferral).
+# pytest writes an expected failure as a <skipped> element of type pytest.xfail.
 _JUNIT = """<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest">
 <testcase classname="t" name="a"/>
 <testcase classname="t" name="b"><failure message="x"/></testcase>
@@ -200,39 +235,44 @@ _JUNIT = """<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="p
 </testsuite></testsuites>"""
 
 
-def _c(**kw):
+def _counts(**changes):
+    """The outcome counts (RT.COUNT_KEYS) of a clean file of 3 tests that all passed, with `changes` setting single
+    counts."""
     out = dict.fromkeys(RT.COUNT_KEYS, 0)
     out.update(tests=3, passed=3)
-    out.update(kw)
+    out.update(changes)
     return out
 
 
+# the one deferral message the tests below declare: the message of row e of _JUNIT
 DEFERRAL = {"deferred_legacy X: y"}
 
 
 def test_junit_counts_separate_skips_deferrals_and_other_expected_failures(tmp_path):
+    """Each row of _JUNIT lands in its own count; an expected failure counts as a deferral (xfailed) only when its
+    message is exactly a declared one."""
     p = tmp_path / "r.xml"
     p.write_text(_JUNIT)
-    assert RT.junit_counts(str(p), deferrals=DEFERRAL) == _c(
+    assert RT.junit_counts(str(p), deferrals=DEFERRAL) == _counts(
         tests=6, passed=1, failures=1, errors=1, skipped=1, xfailed=1, bad_xfail=1
     )
-    assert (
-        RT.junit_counts(str(p))["bad_xfail"] == 2
-    )  # only exactly declared deferral messages count
+    # no deferral declared: both expected failures, e and f, are undeclared (bad_xfail)
+    assert RT.junit_counts(str(p))["bad_xfail"] == 2
 
 
 def test_junit_counts_declared_skips(tmp_path):
     """A declared skip that skips is NOT RUN, not a skip; a declared test that runs anyway is flagged."""
     p = tmp_path / "r.xml"
     p.write_text(_JUNIT)
+    # each tuple below: (undeclared skips, declared skips that skipped, declared skips that ran); a failure prints all
+    # the counts by name
     c = RT.junit_counts(str(p), declared_skips=["d", "a"])
-    assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 1)
+    assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 1), c
     c = RT.junit_counts(str(p), declared_skips=["d[p1]"])  # one parameter case, named exactly
-    assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0)
-    c = RT.junit_counts(
-        str(p), declared_skips=["d[p2]"]
-    )  # another case: the skip of d[p1] stays undeclared
-    assert (c["skipped"], c["asset_skipped"]) == (1, 0)
+    assert (c["skipped"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0), c
+    # another case: the skip of d[p1] stays undeclared
+    c = RT.junit_counts(str(p), declared_skips=["d[p2]"])
+    assert (c["skipped"], c["asset_skipped"]) == (1, 0), c
 
 
 def test_junit_counts_in_an_assets_job_a_required_test_must_run(tmp_path):
@@ -240,10 +280,11 @@ def test_junit_counts_in_an_assets_job_a_required_test_must_run(tmp_path):
     is what that job is for. A skipped_by_design test (declared, not required) may still skip."""
     p = tmp_path / "r.xml"
     p.write_text(_JUNIT)
+    # (required tests not run, declared skips that skipped, declared skips that ran, undeclared skips)
     c = RT.junit_counts(str(p), declared_skips=["d", "a"], required=["d", "a"])
-    assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"], c["skipped"]) == (1, 0, 0, 0)
+    assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"], c["skipped"]) == (1, 0, 0, 0), c
     c = RT.junit_counts(str(p), declared_skips=["d", "a"], required=["a"])  # d skipped by design
-    assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0)
+    assert (c["asset_missing"], c["asset_skipped"], c["asset_ran"]) == (0, 1, 0), c
 
 
 def test_junit_counts_in_an_assets_job_a_required_test_absent_from_the_report_is_missing(tmp_path):
@@ -252,20 +293,23 @@ def test_junit_counts_in_an_assets_job_a_required_test_absent_from_the_report_is
     """
     p = tmp_path / "r.xml"
     p.write_text(_JUNIT)
+    # zz is not in the report: (required tests not run, passed) = (1, 1)
     c = RT.junit_counts(str(p), declared_skips=["a", "zz"], required=["a", "zz"])
-    assert (c["asset_missing"], c["passed"]) == (1, 1)
+    assert (c["asset_missing"], c["passed"]) == (1, 1), c
     c = RT.junit_counts(
         str(p), declared_skips=["d[p1]", "d[p9]", "a"], required=["d[p1]", "d[p9]", "a"]
     )
-    assert c["asset_missing"] == 2  # d[p1] skipped, d[p9] absent
+    assert c["asset_missing"] == 2, c  # d[p1] skipped, d[p9] absent
     c = RT.junit_counts(str(p), declared_skips=["a"], required=["a"])
-    assert c["asset_missing"] == 0
-    assert (
-        RT.junit_counts(str(p), declared_skips=["zz"])["asset_missing"] == 0
-    )  # not required: not counted
+    assert c["asset_missing"] == 0, c
+    # zz declared but not required: its absence is not counted
+    c = RT.junit_counts(str(p), declared_skips=["zz"])
+    assert c["asset_missing"] == 0, c
 
 
 def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_or_release_tests():
+    """The files the assets job picks: all of the assets tier, plus the wheel and source files that declare asset or
+    release tests, and never a deferred, external or no-tests file."""
     _, files = RT.load_tiers()
     picked = RT.asset_job_files(files)
     assert set(RT.files_of(files, "assets")) <= set(picked)
@@ -275,11 +319,28 @@ def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_or_releas
             or files[path].get("asset_tests")
             or files[path].get("release_tests")
         ), f"{path}: the assets job picked it, but it is not in the assets tier and declares no asset or release tests"
-    assert not {p for p in picked if files[p]["tier"] in ("deferred", "external", "no_tests")}
-    assert not set(RT.not_run(files, ran=("assets",))) & {"assets", *RT.CI_TIERS}
+    never = {p for p in picked if files[p]["tier"] in ("deferred", "external", "no_tests")}
+    assert not never, f"the assets job picked files of tiers it must not run: {sorted(never)}"
+    # once the assets job has run, the list of files not run names neither the assets tier nor a CI tier
+    listed = set(RT.not_run(files, ran=("assets",))) & {"assets", *RT.CI_TIERS}
+    assert not listed, f"the not-run list names tiers that ran: {sorted(listed)}"
+
+
+# The tests below read RT.tier_plan(tier, files, level), the runner's plan of one run, a dict of:
+#   todo      the files to run;
+#   env       environment variables the run adds;
+#   marker    the pytest -m expression of each file's run ("not slow" in CI; None: every test);
+#   declared  per file, the tests allowed to skip (asset_tests and skipped_by_design);
+#   required  per file, the tests that must run (the assets job only);
+#   select    per file, the pytest arguments that choose its tests (the file, or node ids of single tests);
+#   deselect  per file, the node ids left out.
+# (The docstring of tier_plan in tools/ci/run_test_tier.py says the same.)
 
 
 def test_the_plan_of_a_ci_tier_runs_its_files_without_required_tests_or_added_environment():
+    """A CI tier (wheel or source) at the default level, nightly: every file of the tier, no added environment
+    variable, slow tests deselected, the declared skips of each file, and no test required to run (only the assets
+    job requires tests)."""
     _, files = RT.load_tiers()
     for tier in RT.CI_TIERS:
         plan = RT.tier_plan(tier, files)
@@ -289,8 +350,8 @@ def test_the_plan_of_a_ci_tier_runs_its_files_without_required_tests_or_added_en
         for rel in plan["todo"]:
             assert plan["declared"][rel] == files[rel].get("asset_tests", []) + files[rel].get(
                 "skipped_by_design", []
-            )
-            assert plan["required"][rel] == []
+            ), f"{rel}: the declared skips must be the file's asset_tests and skipped_by_design"
+            assert plan["required"][rel] == [], f"{rel}: a CI tier requires no test to run"
 
 
 def test_the_plan_of_the_assets_job_runs_every_qualifying_file_with_the_gate_on_and_requires_its_asset_and_release_tests():
@@ -306,6 +367,7 @@ def test_the_plan_of_the_assets_job_runs_every_qualifying_file_with_the_gate_on_
         if e["tier"] == "assets"
         or (e["tier"] in ("wheel", "source") and (e.get("asset_tests") or e.get("release_tests")))
     )
+    # the assets job runs more than the assets tier: also the CI-tier files that declare asset or release tests
     assert plan["todo"] == want and len(want) > len(RT.files_of(files, "assets"))
     assert plan["env"] == {"HCD_GATE_RUN": "1"}
     assert plan["marker"] is None  # slow tests run too: an asset test may be marked slow
@@ -318,10 +380,14 @@ def test_the_plan_of_the_assets_job_runs_every_qualifying_file_with_the_gate_on_
             f"{rel}: the assets job must run every test of the file, but it selects {plan['select'][rel]} "
             f"and leaves out {plan['deselect'][rel]}"
         )
-        assert not set(plan["required"][rel]) & set(files[rel].get("skipped_by_design", []))
+        both = set(plan["required"][rel]) & set(files[rel].get("skipped_by_design", []))
+        assert not both, f"{rel}: tests both required and skipped by design: {sorted(both)}"
 
 
 def test_deferred_legacy_messages_are_exactly_what_conftest_writes():
+    """The runner reads the deferral messages from the source of tests/gate_helpers.py without importing the tests;
+    they must equal the messages the imported DEFERRED_CAUSES gives (the text tests/conftest.py writes).
+    """
     from tests.gate_helpers import DEFERRED_CAUSES
 
     assert RT.deferred_legacy_messages() == {
@@ -329,37 +395,49 @@ def test_deferred_legacy_messages_are_exactly_what_conftest_writes():
     }
 
 
+# Each row: (pytest's exit status, the file's outcome counts, whether the file passes).
 @pytest.mark.parametrize(
     "rc, counts, ok",
     [
-        (0, _c(), True),
-        (0, _c(tests=5, xfailed=2), True),
-        (0, _c(tests=4, asset_skipped=1), True),
-        (0, _c(skipped=1), False),  # a skip is never a pass
-        (0, _c(bad_xfail=1), False),  # only declared deferrals may be expected failures
-        (0, _c(asset_ran=1), False),  # a declared skip must skip without its asset
-        (0, _c(asset_missing=1), False),  # an assets job: a missing asset fails, never skips
-        (0, _c(tests=0, passed=0), False),  # nothing ran
-        (0, _c(tests=2, passed=0, xfailed=2), False),  # deferrals only: nothing passed
-        (0, _c(tests=2, passed=0, asset_skipped=2), False),
-        (1, _c(), False),  # e.g. the session-end origin check
-        (1, _c(failures=1), False),
+        (0, _counts(), True),
+        (0, _counts(tests=5, xfailed=2), True),  # declared deferrals beside passes
+        (0, _counts(tests=4, asset_skipped=1), True),  # a declared skip beside passes
+        (0, _counts(skipped=1), False),  # a skip is never a pass
+        (0, _counts(bad_xfail=1), False),  # only declared deferrals may be expected failures
+        (0, _counts(asset_ran=1), False),  # a declared skip must skip without its asset
+        (0, _counts(asset_missing=1), False),  # an assets job: a missing asset fails, never skips
+        (0, _counts(tests=0, passed=0), False),  # nothing ran
+        (0, _counts(tests=2, passed=0, xfailed=2), False),  # deferrals only: nothing passed
+        (0, _counts(tests=2, passed=0, asset_skipped=2), False),  # declared skips only
+        # pytest exited 1 although no test failed: for example tests/conftest.py's check at the end of every session,
+        # which fails the session when a project module was imported from another checkout
+        (1, _counts(), False),
+        (1, _counts(failures=1), False),
         (None, None, False),  # timeout
         (4, None, False),  # no readable junit report
     ],
 )
 def test_file_verdict(rc, counts, ok):
-    assert RT.file_verdict(rc, counts)[0] is ok
+    """RT.file_verdict(exit status, counts) says whether one test file passes: only if pytest exited 0, at least one
+    test passed, and nothing failed, errored, skipped without being declared, ran when it was declared to skip,
+    was an undeclared expected failure, or (in the assets job) was required and did not run. An exit status of None
+    is a timeout; counts None is a missing report.
+    """
+    verdict, reason = RT.file_verdict(rc, counts)
+    assert verdict is ok, f"exit {rc}, counts {counts}: the verdict was {verdict} ({reason})"
 
 
 def test_the_runner_reads_the_real_tier_map():
+    """The runner's view of tests/ci_tiers.toml: the files of each CI tier, and a not-run list without CI tiers."""
     tiers, files = RT.load_tiers()
     for tier in RT.CI_TIERS:
         assert RT.files_of(files, tier) == sorted(p for p, e in files.items() if e["tier"] == tier)
     assert not set(RT.not_run(files)) & set(RT.CI_TIERS)
 
 
-def _bounds():
+def _lower_bounds():
+    """{package name: its lower bound} of the dependencies and test dependencies in pyproject.toml, for example
+    {"numpy": "2.0"} from "numpy>=2.0"."""
     with open(os.path.join(REPO, "pyproject.toml"), "rb") as f:
         proj = tomllib.load(f)["project"]
     reqs = proj["dependencies"] + proj["optional-dependencies"]["test"]
@@ -379,8 +457,10 @@ BOUND_BELOW_PIN = {
 def test_devenv_pins_sit_in_the_release_series_of_the_lower_bounds():
     """tools/ci/constraints-devenv.txt pins the development environment; each pinned direct dependency's lower
     bound in pyproject.toml is the pin's release series (CI's development-environment job keeps the bounds tested),
-    except the bounds named in BOUND_BELOW_PIN, which must still lie at or below the pin."""
-    bounds = _bounds()
+    except the bounds named in BOUND_BELOW_PIN, which must still lie at or below the pin. A release series is the
+    leading part of a version: a bound of "0.10" and a pin of "0.10.1" agree; a bound of "0.9" does not.
+    """
+    bounds = _lower_bounds()
     pins = {}
     for line in open(os.path.join(REPO, "tools", "ci", "constraints-devenv.txt")):
         line = line.split("#")[0].strip()
@@ -400,21 +480,24 @@ def test_devenv_pins_sit_in_the_release_series_of_the_lower_bounds():
         "pytest",
     }
     for name in direct:
-        b, p = bounds[name].split("."), pins[name].split(".")
+        # the versions as lists of their parts: "0.10.1" -> ["0", "10", "1"]
+        bound_parts, pin_parts = bounds[name].split("."), pins[name].split(".")
         if name in BOUND_BELOW_PIN:
             assert BOUND_BELOW_PIN[name].startswith(
                 bounds[name] + ":"
             ), f"{name}: the stated bound is not the bound"
-            assert tuple(map(int, b)) <= tuple(
-                map(int, p[: len(b)])
+            assert tuple(map(int, bound_parts)) <= tuple(
+                map(int, pin_parts[: len(bound_parts)])
             ), f"{name}: bound {bounds[name]} above the pin"
             continue
         assert (
-            p[: len(b)] == b
+            pin_parts[: len(bound_parts)] == bound_parts
         ), f"{name}: bound {bounds[name]} is not the series of the pin {pins[name]}"
 
 
 def test_the_workflow_calls_the_ci_helpers_that_exist():
+    """tests.yml names each CI helper it runs, and each of those files exists, so a rename cannot go unnoticed; it
+    also runs both CI tiers and the list of what is not run."""
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml")).read()
     for helper in (
         "tools/ci/check_dist.py",
@@ -422,9 +505,11 @@ def test_the_workflow_calls_the_ci_helpers_that_exist():
         "tools/ci/constraints-devenv.txt",
         "tools/ci/h5_cross_version.py",
     ):
-        assert helper in text and os.path.isfile(os.path.join(REPO, helper))
+        assert helper in text and os.path.isfile(
+            os.path.join(REPO, helper)
+        ), f"{helper}: tests.yml must name it and the file must exist"
     for tier in ("--tier wheel", "--tier source", "--list-not-run"):
-        assert tier in text
+        assert tier in text, f"tests.yml must run the runner with {tier}"
 
 
 # Shell text that hides a failure. The first branch matches "set +e" and "set +o ..." (such as "set +o pipefail"),
@@ -457,7 +542,7 @@ def test_every_run_step_fails_when_a_command_in_a_pipe_fails():
 
 def _workflow(name="tests.yml"):
     """A workflow file of .github/workflows/, parsed from YAML into a dict."""
-    import yaml
+    import yaml  # PyYAML: needed only by the workflow tests, so imported where it is used
 
     return yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", name)))
 
@@ -481,17 +566,27 @@ def test_only_the_pinned_job_declares_the_pinned_stack():
     stack; the nightly workflow holds it and the two newest-dependency stacks.
     """
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
+    # drop the YAML comments (a "#" at the start of a line or after a space), so a mention in a comment is not counted
     code = "\n".join(re.sub(r"(^|\s)#.*", "", line) for line in text.splitlines())
-    assert code.count("HCD_PINNED_STACK") == len(PR_JOBS)
+    n_named = code.count("HCD_PINNED_STACK")
+    assert n_named == len(
+        PR_JOBS
+    ), "tests.yml: HCD_PINNED_STACK may appear only in the env of the pr jobs"
     wf = _workflow()
-    assert "HCD_PINNED_STACK" not in (wf.get("env") or {})
+    assert "HCD_PINNED_STACK" not in (wf.get("env") or {}), "tests.yml: not in the workflow's env"
     for name, job in wf["jobs"].items():
         if name not in PR_JOBS:
-            assert "HCD_PINNED_STACK" not in (job.get("env") or {}), name
+            assert "HCD_PINNED_STACK" not in (
+                job.get("env") or {}
+            ), f"tests.yml job {name}: only the pr jobs may set HCD_PINNED_STACK"
         for step in job["steps"]:
-            assert "HCD_PINNED_STACK" not in (step.get("env") or {}), (name, step.get("name"))
+            assert "HCD_PINNED_STACK" not in (
+                step.get("env") or {}
+            ), f"tests.yml job {name}, step {step.get('name')!r}: no step may set HCD_PINNED_STACK"
     for name in PR_JOBS:
         job = wf["jobs"][name]
+        # GitHub's expression syntax: "1" when the job's stack is development-environment, empty otherwise. The test
+        # pins the exact text, so the variable cannot be set to 1 on another stack.
         assert (
             job["env"]["HCD_PINNED_STACK"]
             == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
@@ -502,15 +597,19 @@ def test_only_the_pinned_job_declares_the_pinned_stack():
         # the PR level runs on the supported stack only; the newer stacks run at the nightly level
         assert [(e["python"], e["deps"], e["label"]) for e in include] == [
             ("3.11", "development-environment", "Python 3.11, pinned (supported)")
-        ], name
+        ], f"tests.yml job {name}: the matrix must hold the one pinned stack, Python 3.11"
     nightly = _workflow("nightly.yml")
     stacks = nightly["jobs"]["nightly"]["strategy"]["matrix"]["stack"]
     assert [(e["python"], e["deps"]) for e in stacks] == [
         ("3.11", "development-environment"),
         ("3.11", "newest"),
         ("3.12", "newest"),
-    ]
-    assert [e["label"].endswith("(supported)") for e in stacks] == [True, False, False]
+    ], "nightly.yml: the stacks must be the pinned one and the two newest-dependency ones"
+    assert [e["label"].endswith("(supported)") for e in stacks] == [
+        True,
+        False,
+        False,
+    ], "nightly.yml: only the pinned stack's label may say (supported)"
     assert (
         nightly["jobs"]["nightly"]["env"]["HCD_PINNED_STACK"]
         == "${{ matrix.stack.deps == 'development-environment' && '1' || '' }}"
@@ -568,7 +667,11 @@ def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
     ]  # nothing else installed
     lines = [ln.strip() for ln in open(os.path.join(REPO, "docs", "requirements.txt"))]
     reqs = [ln for ln in lines if ln and not ln.startswith("#")]
-    assert reqs and all(re.fullmatch(r"[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9.]*", r) for r in reqs), reqs
+    # every requirement is pinned exactly, "name==version" and nothing else (no range, no extra, no URL)
+    pinned = re.compile(r"[A-Za-z0-9_.-]+==[0-9][A-Za-z0-9.]*")
+    assert reqs and all(
+        pinned.fullmatch(r) for r in reqs
+    ), f"docs/requirements.txt: every line must be name==version: {reqs}"
     names = {r.split("==")[0].lower().replace("_", "-") for r in reqs}
     assert {
         "sphinx",
@@ -587,24 +690,40 @@ def test_h5_cross_version_check_reads_back_and_catches_a_change_or_a_new_library
     import json
     import h5py
 
+    # XV: the HDF5 cross-version check; "write" makes a synthetic bundle, "read" reads it back and compares digests
     XV = _load("h5_cross_version")
     out = tmp_path / "x"
-    assert XV.main(["write", str(out)]) == 0
-    assert XV.main(["read", str(out)]) == 0
+    assert XV.main(["write", str(out)]) == 0, "writing the synthetic bundle failed"
+    assert (
+        XV.main(["read", str(out)]) == 0
+    ), "the bundle written here did not read back with every digest equal"
+    # the version of the HDF5 C library that h5py runs on, e.g. "1.14.2": its MAJOR.MINOR
     major, minor = (int(x) for x in h5py.version.hdf5_version.split(".")[:2])
-    assert XV.main(["read", str(out), "--max-hdf5", "1.0"]) == 1
-    assert XV.main(["read", str(out), "--max-hdf5", f"{major}.{minor}"]) == 1
-    assert XV.main(["read", str(out), "--max-hdf5", f"{major}.{minor + 1}"]) == 0
+    # --max-hdf5 L: the read must fail unless the running library is OLDER than L
+    assert (
+        XV.main(["read", str(out), "--max-hdf5", "1.0"]) == 1
+    ), "passed with a limit far below the library"
+    assert (
+        XV.main(["read", str(out), "--max-hdf5", f"{major}.{minor}"]) == 1
+    ), "passed with the running library's own version as the limit"
+    assert (
+        XV.main(["read", str(out), "--max-hdf5", f"{major}.{minor + 1}"]) == 0
+    ), "failed with a limit above the running library"
     capsys.readouterr()
     pristine = (out / "expected.json").read_text()
     exp = json.loads(pristine)
+    # expected.json holds one digest per array of each ensemble member of the bundle: edit one model-leaf digest of
+    # member 1 and one normalizer digest of member 0
     model_key = sorted(k for k in exp["members"][1] if k.startswith("model"))[0]
     norm_key = sorted(k for k in exp["members"][0] if k.startswith("norm/"))[0]
     for member, key in ((1, model_key), (0, norm_key)):
         exp = json.loads(pristine)
+        # a SHA-256 digest is 64 hexadecimal digits; all zeros is a wrong one, which the read must report
         exp["members"][member][key] = "0" * 64
         (out / "expected.json").write_text(json.dumps(exp))
-        assert XV.main(["read", str(out)]) == 1
+        assert (
+            XV.main(["read", str(out)]) == 1
+        ), f"an edited digest of member {member} ({key}) passed"
         assert f"MISMATCH member {member} {key}" in capsys.readouterr().out
 
 
@@ -620,19 +739,25 @@ def test_the_pr_level_runs_the_pr_files_and_the_pr_tests_of_nightly_files_and_le
         for rel, e in files.items():
             if e["tier"] != tier:
                 continue
+            # a file runs at pr if its level is pr, or if it is a nightly file that names pr_tests
             runs = e["level"] == "pr" or (e["level"] == "nightly" and bool(e.get("pr_tests")))
-            assert (rel in plan["todo"]) is runs, rel
+            assert (rel in plan["todo"]) is runs, (
+                f"{rel} (level {e['level']}): expected to {'run' if runs else 'not run'} at pr, "
+                f"but the plan {'leaves it out' if runs else 'runs it'}"
+            )
             if not runs:
                 continue
             if e["level"] == "pr":
-                assert plan["select"][rel] == [rel]
+                assert plan["select"][rel] == [rel], f"{rel}: a pr file runs whole"
             else:
-                assert plan["select"][rel] == [f"{rel}::{n}" for n in e["pr_tests"]]
+                assert plan["select"][rel] == [
+                    f"{rel}::{n}" for n in e["pr_tests"]
+                ], f"{rel}: a nightly file runs only its pr_tests at pr"
             assert sorted(plan["deselect"][rel]) == sorted(
                 f"{rel}::{n}"
                 for n in e.get("release_tests", [])
                 + (e.get("nightly_tests", []) if e["level"] == "pr" else [])
-            )
+            ), f"{rel}: at pr, the release_tests (and a pr file's nightly_tests) are left out"
     # The loop above checks every file against its entry; these lines make sure its branches are not empty, using
     # files whose entries in tests/ci_tiers.toml carry per-test lists: test_emulator_model.py, a pr file, names 17
     # nightly_tests (its training-loss tests; it has no release_tests), so the pr level leaves out exactly 17 of its
@@ -657,10 +782,10 @@ def test_the_nightly_level_runs_every_ci_file_whole_except_its_release_tests():
             p for p, e in files.items() if e["tier"] == tier and e["level"] in ("pr", "nightly")
         )
         for rel in plan["todo"]:
-            assert plan["select"][rel] == [rel]
+            assert plan["select"][rel] == [rel], f"{rel}: the nightly level runs every file whole"
             assert plan["deselect"][rel] == [
                 f"{rel}::{n}" for n in files[rel].get("release_tests", [])
-            ]
+            ], f"{rel}: at nightly only the release_tests are left out"
     # test_emulator_multifidelity.py names 19 release_tests in tests/ci_tiers.toml (the tests that need the
     # multi-fidelity resolution table); the nightly level leaves out exactly those. If you change that entry, change
     # the number here too.
@@ -672,7 +797,9 @@ def test_the_nightly_level_runs_every_ci_file_whole_except_its_release_tests():
     assert ext["todo"] == ["tests/external/test_safetensors_interop.py"]
     # a run lists as not run only what it did not run: the external file, once run, is not among them
     listed = [p for p, _ in RT.not_run(files, ran_files=ext["todo"]).get("external", [])]
-    assert ext["todo"][0] not in listed and listed
+    assert ext["todo"][0] not in listed, "the external file that ran is still listed as not run"
+    assert listed, "the other external files (not run) are missing from the not-run list"
+    # refused: the external tier at pr, and any CI tier at "release" (release tests run only in the assets job)
     with pytest.raises(SystemExit):
         RT.tier_plan("external", files, "pr")
     with pytest.raises(SystemExit):
@@ -752,18 +879,25 @@ SHA = "a" * 40  # a made-up full commit id (40 hexadecimal digits)
     ],
 )
 def test_the_nightly_gate_passes_only_when_the_latest_run_on_the_commit_passed(runs, passed):
+    """NG.decide(runs, commit) on made-up lists of nightly runs: it passes only when the latest run on that commit is
+    finished and passed (each case above says what it shows)."""
     verdict, message = NG.decide(runs, SHA)  # decide returns (passed, the gate's own explanation)
     assert verdict is passed, f"the gate said {message!r}"
 
 
 def test_the_nightly_gate_refuses_when_the_runs_cannot_be_read(monkeypatch, capsys):
+    """The gate fails closed: if the GitHub API cannot be read, or the commit id is not a full 40-digit id, it
+    refuses (exit status 1)."""
+
     def broken(*a, **k):
         raise OSError("no network")
 
+    # fetch_runs replaced by a function that fails as an unreachable API would
     monkeypatch.setattr(NG, "fetch_runs", broken)
-    assert NG.main(["--repo", "o/r", "--sha", SHA]) == 1
+    assert NG.main(["--repo", "o/r", "--sha", SHA]) == 1, "the gate passed without reading the runs"
     assert "REFUSED" in capsys.readouterr().out
-    assert NG.main(["--repo", "o/r", "--sha", "abc"]) == 1  # not a full sha
+    # a short commit id is refused before any request
+    assert NG.main(["--repo", "o/r", "--sha", "abc"]) == 1, "the gate accepted a short commit id"
 
 
 def _steps_without_level(job):
@@ -797,23 +931,35 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
     jobs = _workflow("tests.yml")["jobs"]
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
     # the three places tests.yml passes "--level pr": the wheel tier, the source tier and the list of what is not run
-    assert text.count("--level pr") == 3 and "--level nightly" not in text
+    assert (
+        text.count("--level pr") == 3 and "--level nightly" not in text
+    ), "tests.yml must pass the pr level three times and never the nightly level"
     flow = _workflow("nightly.yml")
     # YAML 1.1 reads the workflow key `on` as the boolean True, so the parsed dict may hold it under either name
     on = flow.get("on", flow.get(True))
-    assert set(on) == {"schedule", "push", "workflow_dispatch"}
-    # TEMPORARY: nightly.yml names the release stack's branch, ci/joss-stack-optb, until pull request #23 merges.
-    # Remove the branch from nightly.yml and from the two checks below together, when #23 merges.
-    assert len(on["schedule"]) == 1 and on["push"] == {"branches": ["ci/joss-stack-optb"]}
-    assert flow["permissions"] == {"contents": "read"}
+    assert set(on) == {
+        "schedule",
+        "push",
+        "workflow_dispatch",
+    }, f"nightly.yml must start on a schedule, a push and by hand, not {sorted(on)}"
+    # TEMPORARY: nightly.yml names the release stack's branch, ci/joss-stack-optb, until pull request #23 merges
+    # (the release stack: see this file's docstring and the header of .github/workflows/nightly.yml). The branch is
+    # not part of the design: when #23 merges, remove it from nightly.yml and change the two checks below in the
+    # same commit.
+    assert len(on["schedule"]) == 1 and on["push"] == {
+        "branches": ["ci/joss-stack-optb"]
+    }, "nightly.yml: one daily schedule, and a push trigger on the release stack's branch only"
+    assert flow["permissions"] == {"contents": "read"}, "nightly.yml may only read the repository"
     job = flow["jobs"]["nightly"]
     assert (
         "ci/joss-stack-optb" in job["strategy"]["matrix"]["ref"]
         and "schedule" in job["strategy"]["matrix"]["ref"]
-    )
+    ), "nightly.yml: the daily schedule must also check out the release stack's branch"
     nightly_steps = _steps_without_level(job)
     extra = [s for s in nightly_steps if "--tier external" in s.get("run", "")]
-    assert len(extra) == 1 and "pip install safetensors" in extra[0]["run"]
+    assert (
+        len(extra) == 1 and "pip install safetensors" in extra[0]["run"]
+    ), "nightly.yml: one external-tier step, which installs the extra package (safetensors) first"
     # the pr level runs as two jobs, one per tier: the wheel job holds the fresh install, the wheel tier and the list
     # of what is not run; the source job holds the same preparation (build, checks, scan, install) and the source tier
     wheel = _steps_without_level(jobs["fixture-tests"])
@@ -821,23 +967,29 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
     i_install = next(i for i, s in enumerate(wheel) if s.get("id") == "install")
     i_wheel = next(i for i, s in enumerate(wheel) if "--tier wheel" in s.get("run", ""))
     src_tier = [s for s in source if "--tier source" in s.get("run", "")]
-    assert len(src_tier) == 1 and not [s for s in wheel if "--tier source" in s.get("run", "")]
+    assert len(src_tier) == 1 and not [
+        s for s in wheel if "--tier source" in s.get("run", "")
+    ], "tests.yml: the source tier runs once, in the source job only"
     # the source job: the wheel job's steps up to and including the install, then the source tier, then the wheel
     # job's last step (the upload of the results)
-    assert source == wheel[: i_install + 1] + src_tier + wheel[-1:]
+    assert (
+        source == wheel[: i_install + 1] + src_tier + wheel[-1:]
+    ), "tests.yml: the source job must repeat the wheel job's preparation step for step, then run the source tier"
     # the README's first example (tools/ci/readme_first_example.py, in the fresh-install step) runs in the wheel job
     # only
-    assert "readme_first_example" not in json.dumps(
-        source
-    ) and "readme_first_example" in json.dumps(wheel)
+    in_wheel = "readme_first_example" in json.dumps(wheel)
+    in_source = "readme_first_example" in json.dumps(source)
+    assert in_wheel and not in_source, "tests.yml: the README's example runs in the wheel job only"
     # the nightly job: the wheel job's steps with the source tier inserted right after the wheel tier, plus the
     # external step
     assert [s for s in nightly_steps if s not in extra] == wheel[: i_wheel + 1] + src_tier + wheel[
         i_wheel + 1 :
-    ]
+    ], "nightly.yml's steps must equal the pr jobs' steps (see the comment above); change both files together"
     ntext = open(os.path.join(REPO, ".github", "workflows", "nightly.yml"), encoding="utf-8").read()
     # the four places nightly.yml passes the nightly level: the wheel, source and external tiers and the list
-    assert ntext.count("--level nightly") == 4 and "--level pr" not in ntext
+    assert (
+        ntext.count("--level nightly") == 4 and "--level pr" not in ntext
+    ), "nightly.yml must pass the nightly level four times and never the pr level"
 
 
 def _gate_steps(job):
@@ -853,21 +1005,35 @@ def test_a_release_is_refused_unless_the_latest_nightly_run_on_its_commit_passed
     flow = _workflow("release-validation.yml")
     # YAML 1.1 reads the workflow key `on` as the boolean True, so the parsed dict may hold it under either name
     on = flow.get("on", flow.get(True))
-    assert list(on) == ["workflow_dispatch"]
-    assert flow["permissions"] == {"contents": "read", "actions": "read"}
+    assert list(on) == ["workflow_dispatch"], "release-validation.yml must start only by hand"
+    assert flow["permissions"] == {
+        "contents": "read",
+        "actions": "read",
+    }, "release-validation.yml may only read the repository and the Actions runs"
     # the release validation workflow has one job; its first step with a run command must be the gate
     (job,) = flow["jobs"].values()
     first_run = next(s for s in job["steps"] if "run" in s)
-    assert _gate_steps(job) == [first_run]
-    assert first_run["env"] == {"GH_TOKEN": "${{ github.token }}"}
-    assert '--sha "$GITHUB_SHA"' in first_run["run"]
+    assert _gate_steps(job) == [
+        first_run
+    ], "release-validation.yml: the gate must be the first step that runs a command, and the only gate step"
+    # GitHub's expression for the workflow's own token, with the read access above
+    assert first_run["env"] == {
+        "GH_TOKEN": "${{ github.token }}"
+    }, "release-validation.yml: the gate reads the runs with the workflow's own token, and nothing else"
+    assert (
+        '--sha "$GITHUB_SHA"' in first_run["run"]
+    ), "release-validation.yml: the gate must check the commit the workflow runs on ($GITHUB_SHA)"
     text = open(
         os.path.join(REPO, ".github", "workflows", "release-validation.yml"), encoding="utf-8"
     ).read()
     assert (
         "check_dist_content.py dist --release" in text and "--list-not-run --level nightly" in text
-    )
+    ), "release-validation.yml must run the release scan and list what CI does not run"
     publish = _workflow("publish.yml")["jobs"]["build"]
     gate = _gate_steps(publish)
-    assert len(gate) == 1 and next(s for s in publish["steps"] if "run" in s) == gate[0]
-    assert "env" not in gate[0]
+    assert (
+        len(gate) == 1 and next(s for s in publish["steps"] if "run" in s) == gate[0]
+    ), "publish.yml: the gate must be the first step of the build job that runs a command"
+    assert (
+        "env" not in gate[0]
+    ), "publish.yml: the gate step takes no token (its permissions stay unchanged)"

@@ -514,7 +514,7 @@ def test_the_committed_known_list_only_shrinks_and_holds_no_private_text():
 
 def _tests_yml_steps(job):
     """The steps of one job of .github/workflows/tests.yml, parsed from YAML."""
-    import yaml
+    import yaml  # PyYAML: needed only here, so imported where it is used
 
     wf = yaml.safe_load(
         open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8")
@@ -526,21 +526,31 @@ def _tests_yml_steps(job):
 SCAN = "python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt"
 
 
-# the pr level's two jobs, one per tier
+# the pr level's two jobs of tests.yml, one per tier (levels and tiers: the header of tests/ci_tiers.toml)
 @pytest.mark.parametrize("job", ["fixture-tests", "fixture-tests-source"])
 def test_the_workflow_runs_the_scan_right_after_the_contents_check_and_nothing_can_skip_it(job):
     """In each pr job of tests.yml, the content scan runs straight after the distribution check and straight before
-    the install, and no condition (if) or continue-on-error lets anything skip or ignore it."""
+    the install, and no condition (if) or continue-on-error lets anything skip or ignore it, so that private content
+    cannot reach the install and the test steps unscanned."""
     steps = _tests_yml_steps(job)
     runs = [s.get("run", "") for s in steps]
-    assert SCAN in runs, f"tests.yml job {job}: no step runs {SCAN!r}"
+    assert SCAN in runs, (
+        f"tests.yml job {job}: no step runs {SCAN!r}; add the scan step, or, if its command changed, change SCAN "
+        "here to match"
+    )
     i = runs.index(SCAN)
     assert (
-        runs[i - 1] == "python tools/ci/check_dist.py dist" and steps[i + 1].get("id") == "install"
-    ), f"tests.yml job {job}: the scan must come right after check_dist.py and right before the install step"
+        runs[i - 1] == "python tools/ci/check_dist.py dist"
+    ), f"tests.yml job {job}: the scan must come right after the step that runs check_dist.py"
     assert (
-        not {"if", "continue-on-error"} & set(steps[i]) and "continue-on-error" not in steps[i + 1]
-    ), f"tests.yml job {job}: the scan may not carry if or continue-on-error, nor the install continue-on-error"
+        steps[i + 1].get("id") == "install"
+    ), f"tests.yml job {job}: the scan must come right before the install step (id: install)"
+    assert not {"if", "continue-on-error"} & set(
+        steps[i]
+    ), f"tests.yml job {job}: the scan step may not carry if or continue-on-error"
+    assert (
+        "continue-on-error" not in steps[i + 1]
+    ), f"tests.yml job {job}: the install step may not carry continue-on-error"
     # the install, and with it the test tier of the job, waits for a clean scan
     assert "if" not in steps[i + 1], f"tests.yml job {job}: the install step may not carry an if"
 

@@ -32,6 +32,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # A stack is one Python version with one set of dependency versions; "pinned" (development-environment) means
+        # the exact versions of tools/ci/constraints-devenv.txt.
         # Only the pinned job is a supported environment (docs/compatibility.md). The newer-dependency stacks run in
         # the nightly workflow, where their failures stay visible (no continue-on-error) and do not make them supported.
         include:

@@ -39,6 +39,8 @@ jobs:
         # The branch: the one that started the run; on the daily schedule (which GitHub runs on the default branch)
         # also the release stack's branch (pull request #23). TEMPORARY: remove that entry when #23 merges.
         ref: ${{ fromJSON(github.event_name == 'schedule' && '["", "ci/joss-stack-optb"]' || '[""]') }}
+        # A stack is one Python version with one set of dependency versions; "pinned" (development-environment) means
+        # the exact versions of tools/ci/constraints-devenv.txt.
         # Only the pinned stack is a supported environment (docs/compatibility.md). The others show how newer
         # versions behave; their failures stay visible (no continue-on-error) and do not make them supported.
         stack:
