@@ -1,5 +1,21 @@
-"""The CI helpers in tools/ci: the distribution-content check, the tier runner's verdict, and the pinned
-development-environment versions against pyproject.toml's lower bounds. Synthetic inputs only."""
+"""Tests of the CI machinery itself: the scripts in tools/ci/ and the GitHub Actions workflows in .github/workflows/.
+
+What is covered:
+1. tools/ci/check_dist.py, which checks that a built wheel or sdist holds exactly the committed package;
+2. tools/ci/run_test_tier.py, the runner CI uses for the tests: its outcome counts and verdicts, and which files and
+   tests it runs at each level (tests/ci_tiers.toml defines tiers and levels in its header). Note: in CI a skip is
+   not a pass; a skip fails its file unless the test is declared there, and a declared test that runs fails it too;
+3. tools/ci/nightly_gate.py, which refuses a release unless the latest nightly run on its commit passed;
+4. the pinned development-environment versions against pyproject.toml's lower bounds;
+5. the workflow files themselves. Many tests here read the text or the parsed YAML of a workflow and check a rule of
+   it, such as "no step may hide a failure" or "the nightly job runs the same steps as the pull-request jobs". They
+   test configuration, not Python behaviour, so that nobody can weaken CI by accident.
+
+Most inputs are small synthetic archives, junit reports and run lists; the workflow, tier and level tests read the
+real files of this checkout.
+
+Run: pytest tests/test_ci_tools.py (CI runs it at the pr level, in the source tier; the workflow tests need PyYAML).
+"""
 
 import importlib.util
 import io
@@ -249,7 +265,7 @@ def test_junit_counts_in_an_assets_job_a_required_test_absent_from_the_report_is
     )  # not required: not counted
 
 
-def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_tests():
+def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_or_release_tests():
     _, files = RT.load_tiers()
     picked = RT.asset_job_files(files)
     assert set(RT.files_of(files, "assets")) <= set(picked)
@@ -258,7 +274,7 @@ def test_the_assets_job_runs_the_assets_tier_and_every_file_with_asset_tests():
             files[path]["tier"] == "assets"
             or files[path].get("asset_tests")
             or files[path].get("release_tests")
-        )
+        ), f"{path}: the assets job picked it, but it is not in the assets tier and declares no asset or release tests"
     assert not {p for p in picked if files[p]["tier"] in ("deferred", "external", "no_tests")}
     assert not set(RT.not_run(files, ran=("assets",))) & {"assets", *RT.CI_TIERS}
 
@@ -277,9 +293,10 @@ def test_the_plan_of_a_ci_tier_runs_its_files_without_required_tests_or_added_en
             assert plan["required"][rel] == []
 
 
-def test_the_plan_of_the_assets_job_runs_every_qualifying_file_with_the_gate_on_and_requires_its_asset_tests():
-    """Every file of the assets tier and every CI-tier file with asset_tests, and nothing else; HCD_GATE_RUN=1 (a
-    missing real cache fails instead of skipping); each file's asset_tests are required, skipped_by_design is not.
+def test_the_plan_of_the_assets_job_runs_every_qualifying_file_with_the_gate_on_and_requires_its_asset_and_release_tests():
+    """Every file of the assets tier and every CI-tier file with asset_tests or release_tests, and nothing else;
+    HCD_GATE_RUN=1 (a missing real cache fails instead of skipping); each file's asset_tests and release_tests are
+    required to run, skipped_by_design is not.
     """
     _, files = RT.load_tiers()
     plan = RT.tier_plan("assets", files)
@@ -295,10 +312,12 @@ def test_the_plan_of_the_assets_job_runs_every_qualifying_file_with_the_gate_on_
     for rel in want:
         assert plan["required"][rel] == files[rel].get("asset_tests", []) + files[rel].get(
             "release_tests", []
+        ), f"{rel}: the assets job must require exactly the file's asset_tests and release_tests"
+        # every test of the file: nothing selected by name, nothing left out
+        assert plan["select"][rel] == [rel] and plan["deselect"][rel] == [], (
+            f"{rel}: the assets job must run every test of the file, but it selects {plan['select'][rel]} "
+            f"and leaves out {plan['deselect'][rel]}"
         )
-        assert (
-            plan["select"][rel] == [rel] and plan["deselect"][rel] == []
-        )  # every test of the file
         assert not set(plan["required"][rel]) & set(files[rel].get("skipped_by_design", []))
 
 
@@ -408,6 +427,9 @@ def test_the_workflow_calls_the_ci_helpers_that_exist():
         assert tier in text
 
 
+# Shell text that hides a failure. The first branch matches "set +e" and "set +o ..." (such as "set +o pipefail"),
+# which turn off stopping on an error; the second matches "|| true", "|| :" and "|| exit 0", which make a failing
+# command count as a success. (?![\w-]) stops the second branch matching the start of a longer word ("|| true-x").
 UNDO_FAILURE = re.compile(r"set\s+\+[a-zA-Z]*[eo]|\|\|\s*(true|:|exit\s+0)(?![\w-])")
 
 
@@ -419,33 +441,44 @@ def test_every_run_step_fails_when_a_command_in_a_pipe_fails():
     """
     for flow in ("tests.yml", "nightly.yml", "release-validation.yml", "publish.yml"):
         wf = _workflow(flow)
-        assert wf["defaults"] == {"run": {"shell": "bash"}}, flow
+        bash_everywhere = wf["defaults"] == {"run": {"shell": "bash"}}
+        assert bash_everywhere, f"{flow}: the workflow must start with defaults: run: shell: bash"
         for name, job in wf["jobs"].items():
-            assert "defaults" not in job, (flow, name)
+            assert "defaults" not in job, f"{flow} job {name}: a job may not set its own defaults"
             for step in job["steps"]:
-                assert "shell" not in step, (flow, name, step.get("name"))
+                where = f"{flow} job {name}, step {step.get('name')!r}"
+                assert "shell" not in step, f"{where}: a step may not set its own shell"
                 # nor may a step undo -e or pipefail, or swallow a failing command
-                assert not UNDO_FAILURE.search(step.get("run", "")), (flow, name, step.get("name"))
+                assert not UNDO_FAILURE.search(step.get("run", "")), (
+                    f"{where}: the run command hides a failure "
+                    f"({UNDO_FAILURE.search(step.get('run', '')).group(0)!r}); let the step fail instead"
+                )
 
 
 def _workflow(name="tests.yml"):
+    """A workflow file of .github/workflows/, parsed from YAML into a dict."""
     import yaml
 
     return yaml.safe_load(open(os.path.join(REPO, ".github", "workflows", name)))
 
 
+# the pr level runs as two jobs of tests.yml: the wheel tier's job and the source tier's
 PR_JOBS = (
     "fixture-tests",
     "fixture-tests-source",
-)  # the pr level: the wheel tier's job and the source tier's
+)
 
 
 def test_only_the_pinned_job_declares_the_pinned_stack():
-    """HCD_PINNED_STACK is "1" in the development-environment (supported) jobs and empty in the others, and it is set
+    """In a workflow, a "matrix" runs the same job several times with different settings; here each setting is a
+    "stack", a Python version and a set of dependency versions. The pinned stack, Python 3.11 with the exact versions
+    of tools/ci/constraints-devenv.txt, is the only supported environment (docs/compatibility.md).
+
+    HCD_PINNED_STACK is "1" in the development-environment (supported) jobs and empty in the others, and it is set
     nowhere else: in tests.yml the name occurs exactly twice outside comments (the env of the two pr jobs, one per
-    tier), so no other env, run command or $GITHUB_ENV write can set it. Each pr job's matrix is exactly its include
-    list (no other axis) and holds the one supported stack (Python 3.11 with the pinned versions); the nightly
-    workflow holds it and the two newest-dependency stacks.
+    tier), so no other env, run command or write to $GITHUB_ENV (the file a step writes to set a variable for later
+    steps) can set it. Each pr job's matrix is exactly its include list (no other axis) and holds the one supported
+    stack; the nightly workflow holds it and the two newest-dependency stacks.
     """
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
     code = "\n".join(re.sub(r"(^|\s)#.*", "", line) for line in text.splitlines())
@@ -462,8 +495,9 @@ def test_only_the_pinned_job_declares_the_pinned_stack():
         assert (
             job["env"]["HCD_PINNED_STACK"]
             == "${{ matrix.deps == 'development-environment' && '1' || '' }}"
-        )
-        assert set(job["strategy"]["matrix"]) == {"include"}
+        ), f"tests.yml job {name}: HCD_PINNED_STACK must be 1 exactly in the development-environment stack"
+        axes = set(job["strategy"]["matrix"])
+        assert axes == {"include"}, f"tests.yml job {name}: a matrix axis other than include"
         include = job["strategy"]["matrix"]["include"]
         # the PR level runs on the supported stack only; the newer stacks run at the nightly level
         assert [(e["python"], e["deps"], e["label"]) for e in include] == [
@@ -480,7 +514,7 @@ def test_only_the_pinned_job_declares_the_pinned_stack():
     assert (
         nightly["jobs"]["nightly"]["env"]["HCD_PINNED_STACK"]
         == "${{ matrix.stack.deps == 'development-environment' && '1' || '' }}"
-    )
+    ), "nightly.yml: HCD_PINNED_STACK must be 1 exactly in the development-environment stack"
 
 
 # The `with` inputs each action may take: an input such as setup-python's pip-install would install packages
@@ -493,18 +527,26 @@ ACTION_INPUTS = {
 
 
 def test_every_action_takes_only_its_known_inputs():
+    """Each action a workflow uses (a `uses:` step) is one of ACTION_INPUTS and takes only the inputs listed there."""
     for flow in ("tests.yml", "nightly.yml", "release-validation.yml"):
         for name, job in _workflow(flow)["jobs"].items():
             for step in job["steps"]:
                 if "uses" in step:
-                    assert step["uses"] in ACTION_INPUTS, (flow, name, step["uses"])
-                    assert set(step.get("with") or {}) <= ACTION_INPUTS[step["uses"]], (
-                        flow,
-                        name,
-                        step["uses"],
+                    assert step["uses"] in ACTION_INPUTS, (
+                        f"{flow} job {name}: {step['uses']} is not a known action (ACTION_INPUTS); add it "
+                        "there, with the inputs it may take, only after review"
                     )
+                    given = set(step.get("with") or {})
+                    assert given <= ACTION_INPUTS[step["uses"]], (
+                        f"{flow} job {name}: {step['uses']} is given the inputs "
+                        f"{sorted(given - ACTION_INPUTS[step['uses']])}, which ACTION_INPUTS does not allow"
+                    )
+                    # only nightly.yml checks out a branch by name ("ref": the release stack's branch on the daily
+                    # schedule); the other workflows test the commit that started them
                     if flow != "nightly.yml":
-                        assert "ref" not in (step.get("with") or {}), (flow, name)
+                        assert (
+                            "ref" not in given
+                        ), f"{flow} job {name}: only nightly.yml may check out another branch (ref)"
 
 
 def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
@@ -570,6 +612,8 @@ def test_h5_cross_version_check_reads_back_and_catches_a_change_or_a_new_library
 
 
 def test_the_pr_level_runs_the_pr_files_and_the_pr_tests_of_nightly_files_and_leaves_out_their_exceptions():
+    """The pr level's plan, file by file: it runs every pr file whole except its nightly_tests and release_tests,
+    only the pr_tests of a nightly file, and no other file."""
     _, files = RT.load_tiers()
     for tier in RT.CI_TIERS:
         plan = RT.tier_plan(tier, files, "pr")
@@ -589,7 +633,11 @@ def test_the_pr_level_runs_the_pr_files_and_the_pr_tests_of_nightly_files_and_le
                 for n in e.get("release_tests", [])
                 + (e.get("nightly_tests", []) if e["level"] == "pr" else [])
             )
-    # the files that carry such lists are exercised, so the branches above are not empty
+    # The loop above checks every file against its entry; these lines make sure its branches are not empty, using
+    # files whose entries in tests/ci_tiers.toml carry per-test lists: test_emulator_model.py, a pr file, names 17
+    # nightly_tests (its training-loss tests; it has no release_tests), so the pr level leaves out exactly 17 of its
+    # tests; test_emulator_data.py, a nightly file, names pr_tests; test_emulator_multifidelity.py, a nightly file
+    # without pr_tests, does not run at pr. If you change those entries, change the number here too.
     model = RT.tier_plan("wheel", files, "pr")
     assert len(model["deselect"]["tests/test_emulator_model.py"]) == 17
     assert model["select"]["tests/test_emulator_data.py"][0].startswith(
@@ -599,6 +647,9 @@ def test_the_pr_level_runs_the_pr_files_and_the_pr_tests_of_nightly_files_and_le
 
 
 def test_the_nightly_level_runs_every_ci_file_whole_except_its_release_tests():
+    """The nightly level runs every pr and nightly file of the wheel and source tiers whole, except the release_tests
+    (they need an asset); the external tier runs at nightly only; there is no "release" level for a CI tier.
+    """
     _, files = RT.load_tiers()
     for tier in RT.CI_TIERS:
         plan = RT.tier_plan(tier, files, "nightly")
@@ -610,6 +661,9 @@ def test_the_nightly_level_runs_every_ci_file_whole_except_its_release_tests():
             assert plan["deselect"][rel] == [
                 f"{rel}::{n}" for n in files[rel].get("release_tests", [])
             ]
+    # test_emulator_multifidelity.py names 19 release_tests in tests/ci_tiers.toml (the tests that need the
+    # multi-fidelity resolution table); the nightly level leaves out exactly those. If you change that entry, change
+    # the number here too.
     multi = RT.tier_plan("wheel", files, "nightly")["deselect"][
         "tests/test_emulator_multifidelity.py"
     ]
@@ -643,6 +697,8 @@ def test_a_named_test_that_is_the_start_of_another_name_is_refused(tmp_path, mon
 
 
 def _run(sha, status="completed", conclusion="success", started="2026-11-17T06:00:00Z", rid=1):
+    """A made-up entry of the GitHub Actions list of workflow runs, with the keys nightly_gate.decide reads; by
+    default a finished, passed run."""
     return dict(
         id=rid,
         head_sha=sha,
@@ -653,7 +709,7 @@ def _run(sha, status="completed", conclusion="success", started="2026-11-17T06:0
     )
 
 
-SHA = "a" * 40
+SHA = "a" * 40  # a made-up full commit id (40 hexadecimal digits)
 
 
 @pytest.mark.parametrize(
@@ -680,11 +736,24 @@ SHA = "a" * 40
             True,
         ),
         # a newer run still going is a refusal until it has passed
-        ([_run(SHA, rid=1), _run(SHA, "in_progress", None, "2026-11-17T07:00:00Z", 2)], False),
+        (
+            [
+                _run(SHA, rid=1),
+                _run(
+                    SHA,
+                    status="in_progress",
+                    conclusion=None,
+                    started="2026-11-17T07:00:00Z",
+                    rid=2,
+                ),
+            ],
+            False,
+        ),
     ],
 )
 def test_the_nightly_gate_passes_only_when_the_latest_run_on_the_commit_passed(runs, passed):
-    assert NG.decide(runs, SHA)[0] is passed
+    verdict, message = NG.decide(runs, SHA)  # decide returns (passed, the gate's own explanation)
+    assert verdict is passed, f"the gate said {message!r}"
 
 
 def test_the_nightly_gate_refuses_when_the_runs_cannot_be_read(monkeypatch, capsys):
@@ -698,20 +767,23 @@ def test_the_nightly_gate_refuses_when_the_runs_cannot_be_read(monkeypatch, caps
 
 
 def _steps_without_level(job):
-    """The steps of a test job with the level, the stack fields and the checked-out branch made neutral, so that the
-    PR job and the nightly job can be compared step by step."""
-    import json as _json
-
-    text = _json.dumps(job["steps"])
+    """The steps of a test job, made comparable between the pr jobs (tests.yml) and the nightly job (nightly.yml):
+    the parts that may differ between the two are set to one neutral value, so that every other difference shows.
+    """
+    text = json.dumps(job["steps"])
     for a, b in (
+        # the level a step runs at (pr in tests.yml, nightly in nightly.yml)
         ("--level nightly", "--level L"),
         ("--level pr", "--level L"),
+        # nightly.yml's matrix entries sit under "stack" (matrix.stack.python); tests.yml's at the top (matrix.python)
         ("matrix.stack.", "matrix."),
     ):
         text = text.replace(a, b)
-    steps = _json.loads(text)
+    steps = json.loads(text)
     for step in steps:
+        # the branch to check out: only nightly.yml names one
         (step.get("with") or {}).pop("ref", None)
+        # the name of the uploaded results differs by workflow and job; it is not compared
         if step.get("uses") == "actions/upload-artifact@v4":
             step["with"]["name"] = "NAME"
     return steps
@@ -720,13 +792,18 @@ def _steps_without_level(job):
 def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_steps_at_the_nightly_level():
     """tests.yml (pull requests, pushes to main) runs the pr level on the pinned stack; nightly.yml runs the same
     steps at the nightly level on the three stacks, plus the external tests of that level, once a day (and on the
-    release stack's branch while it is open), on each push to that branch and by hand."""
+    release stack's branch while it is open), on each push to that branch and by hand. Why the same steps: if the two
+    workflows drifted apart, a green pull request would no longer predict a green nightly run."""
     jobs = _workflow("tests.yml")["jobs"]
     text = open(os.path.join(REPO, ".github", "workflows", "tests.yml"), encoding="utf-8").read()
+    # the three places tests.yml passes "--level pr": the wheel tier, the source tier and the list of what is not run
     assert text.count("--level pr") == 3 and "--level nightly" not in text
     flow = _workflow("nightly.yml")
+    # YAML 1.1 reads the workflow key `on` as the boolean True, so the parsed dict may hold it under either name
     on = flow.get("on", flow.get(True))
     assert set(on) == {"schedule", "push", "workflow_dispatch"}
+    # TEMPORARY: nightly.yml names the release stack's branch, ci/joss-stack-optb, until pull request #23 merges.
+    # Remove the branch from nightly.yml and from the two checks below together, when #23 merges.
     assert len(on["schedule"]) == 1 and on["push"] == {"branches": ["ci/joss-stack-optb"]}
     assert flow["permissions"] == {"contents": "read"}
     job = flow["jobs"]["nightly"]
@@ -745,30 +822,40 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
     i_wheel = next(i for i, s in enumerate(wheel) if "--tier wheel" in s.get("run", ""))
     src_tier = [s for s in source if "--tier source" in s.get("run", "")]
     assert len(src_tier) == 1 and not [s for s in wheel if "--tier source" in s.get("run", "")]
+    # the source job: the wheel job's steps up to and including the install, then the source tier, then the wheel
+    # job's last step (the upload of the results)
     assert source == wheel[: i_install + 1] + src_tier + wheel[-1:]
+    # the README's first example (tools/ci/readme_first_example.py, in the fresh-install step) runs in the wheel job
+    # only
     assert "readme_first_example" not in json.dumps(
         source
     ) and "readme_first_example" in json.dumps(wheel)
-    # the nightly job is the wheel job with the source tier after the wheel tier, and the external step
+    # the nightly job: the wheel job's steps with the source tier inserted right after the wheel tier, plus the
+    # external step
     assert [s for s in nightly_steps if s not in extra] == wheel[: i_wheel + 1] + src_tier + wheel[
         i_wheel + 1 :
     ]
     ntext = open(os.path.join(REPO, ".github", "workflows", "nightly.yml"), encoding="utf-8").read()
+    # the four places nightly.yml passes the nightly level: the wheel, source and external tiers and the list
     assert ntext.count("--level nightly") == 4 and "--level pr" not in ntext
 
 
 def _gate_steps(job):
+    """The steps of a job that run the nightly gate (tools/ci/nightly_gate.py)."""
     return [s for s in job["steps"] if "tools/ci/nightly_gate.py" in s.get("run", "")]
 
 
 def test_a_release_is_refused_unless_the_latest_nightly_run_on_its_commit_passed():
     """The release validation workflow starts only by hand, reads Actions with its own token (read access only),
-    and checks the gate before anything else; the disabled publishing workflow checks the same gate first in its build
-    job, without a token (the repository is public), so its permissions stay as they are."""
+    and checks the gate before anything else. The publishing workflow (publish.yml), disabled until the maintainer
+    approves a release, checks the same gate first in its build job, without a token (the repository is public), so its
+    permissions stay as they are."""
     flow = _workflow("release-validation.yml")
+    # YAML 1.1 reads the workflow key `on` as the boolean True, so the parsed dict may hold it under either name
     on = flow.get("on", flow.get(True))
     assert list(on) == ["workflow_dispatch"]
     assert flow["permissions"] == {"contents": "read", "actions": "read"}
+    # the release validation workflow has one job; its first step with a run command must be the gate
     (job,) = flow["jobs"].values()
     first_run = next(s for s in job["steps"] if "run" in s)
     assert _gate_steps(job) == [first_run]

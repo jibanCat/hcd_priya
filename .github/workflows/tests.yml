@@ -51,6 +51,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      # SOURCE_DATE_EPOCH is the standard variable that build tools read for the time stamped into archives: set to
+      # the commit time, one commit always builds the same archives.
       - name: Build the sdist and the wheel (SOURCE_DATE_EPOCH set to the commit time)
         run: |
           python -m pip install build
@@ -81,7 +83,8 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" -m pip freeze | tee "$RUNNER_TEMP/results/pip-freeze.txt"
       # What a user gets: a clean environment with only the two wheels (no test extra, no clone on the import
       # path). The first example of the README runs as written, and the release check loads the model of the model
-      # package. The model package is the synthetic build, so the test switch is set.
+      # package. The model package is the synthetic build, which loads only with HCD_PRIYA_ALLOW_SYNTHETIC=1 (set in
+      # the step's env).
       - name: Fresh install of both wheels, then the README's first example
         env:
           HCD_PRIYA_ALLOW_SYNTHETIC: "1"
@@ -103,6 +106,7 @@ jobs:
       - name: List the tests this workflow does not run (other levels and tiers)
         if: ${{ !cancelled() }}
         run: python tools/ci/run_test_tier.py --list-not-run --level pr
+      # junit reports: the XML test reports pytest writes (--junitxml), one per file
       - name: Keep the results (junit reports, tier summaries and the pip freeze)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -179,9 +183,9 @@ jobs:
           retention-days: 14
 
   older-libhdf5:
-    # D4: the HDF5 release format must stay readable by an older libhdf5. A bundle written with the pinned stack is
-    # read, bit for bit, with h5py built from source against Ubuntu's system libhdf5 1.10; the loader's own tests also
-    # run against that library. Synthetic bundles only.
+    # The HDF5 release format must stay readable by an older libhdf5 (docs/compatibility.md). A bundle written with
+    # the pinned stack is read, bit for bit, with h5py built from source against Ubuntu's system libhdf5 1.10; the
+    # loader's own tests also run against that library. Synthetic bundles only.
     name: HDF5 release format with an older libhdf5 (Ubuntu's 1.10)
     runs-on: ubuntu-24.04
     env:

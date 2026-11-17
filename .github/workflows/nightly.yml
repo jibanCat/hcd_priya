@@ -1,21 +1,24 @@
-# The nightly level (tests/ci_tiers.toml): the pr tests and the nightly tests of the wheel and source tiers, and the
-# external tests of the nightly level, on the supported pinned stack and on two newer-dependency stacks, with the
-# build, the content scans, a fresh install and the README's first example, as in tests.yml. It runs once a day on
-# the default branch and on the release stack's branch (#23's) while that is open, on every push to that branch, and
-# by hand on any branch. A failure fails the run, visibly (no issue is opened: that would need a write permission).
-# A release is refused unless the latest run of this workflow on the release commit passed (tools/ci/nightly_gate.py,
-# in .github/workflows/release-validation.yml and publish.yml). A schedule runs only from the default branch: until
-# this file is on the default branch, the release stack's branch is tested here on each push to it and by hand. A
-# scheduled run is recorded under the default branch's commit, legs on the stack branch included: a failure of
-# either blocks a release of that commit. A commit of the stack branch passes the gate only through a run on it, by a
-# push or by hand, and a push starts this workflow only once this file is on that branch.
+# The nightly level (tests/ci_tiers.toml defines the tiers and levels).
+# - What runs: the pr tests and the nightly tests of the wheel and source tiers, and the external tests of the
+#   nightly level, with the build, the content scans, a fresh install and the README's first example, as in
+#   tests.yml; on the supported pinned stack and on two newer-dependency stacks.
+# - When: once a day on the default branch; on every push to the release stack's branch; by hand on any branch. The
+#   release stack's branch is ci/joss-stack-optb, the branch of pull request #23 (the release stack). TEMPORARY: its
+#   two entries below (the push trigger and the daily matrix entry) are removed when #23 merges.
+# - A failure fails the run, visibly (no issue is opened: that would need a write permission).
+# - A release is refused unless the latest run of this workflow on the release commit passed (tools/ci/nightly_gate.py,
+#   run first in .github/workflows/release-validation.yml and publish.yml).
+# - GitHub runs a schedule only from the default branch. So the daily run also checks out the release stack's branch
+#   as extra jobs, and GitHub records the whole run under the default branch's commit: a failure of any of its jobs
+#   blocks a release of that commit. A commit of the release stack's branch passes the gate only through a run on that
+#   commit, started by a push or by hand; a push starts this workflow only once this file is on that branch.
 name: nightly
 
 on:
   schedule:
     - cron: "23 6 * * *"  # once a day, 06:23 UTC
   push:
-    branches: [ci/joss-stack-optb]  # the release stack while it is open (#23's branch); remove when #23 merges
+    branches: [ci/joss-stack-optb]  # TEMPORARY: the release stack's branch (pull request #23); remove when #23 merges
   workflow_dispatch:
 
 permissions:
@@ -34,7 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         # The branch: the one that started the run; on the daily schedule (which GitHub runs on the default branch)
-        # also the branch of the release stack while it is open (#23's branch). Remove that entry when #23 merges.
+        # also the release stack's branch (pull request #23). TEMPORARY: remove that entry when #23 merges.
         ref: ${{ fromJSON(github.event_name == 'schedule' && '["", "ci/joss-stack-optb"]' || '[""]') }}
         # Only the pinned stack is a supported environment (docs/compatibility.md). The others show how newer
         # versions behave; their failures stay visible (no continue-on-error) and do not make them supported.
@@ -92,7 +95,8 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" -m pip freeze | tee "$RUNNER_TEMP/results/pip-freeze.txt"
       # What a user gets: a clean environment with only the two wheels (no test extra, no clone on the import
       # path). The first example of the README runs as written, and the release check loads the model of the model
-      # package. The model package is the synthetic build, so the test switch is set.
+      # package. The model package is the synthetic build, which loads only with HCD_PRIYA_ALLOW_SYNTHETIC=1 (set in
+      # the step's env).
       - name: Fresh install of both wheels, then the README's first example
         env:
           HCD_PRIYA_ALLOW_SYNTHETIC: "1"

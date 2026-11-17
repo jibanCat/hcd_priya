@@ -1,26 +1,40 @@
-# Test tiers and levels. Every tests/test_*.py, tests/regression/test_*.py, tests/integration/test_*.py and
-# tests/external/test_*.py file appears here exactly once (tests/test_ci_tiers.py checks this).
+# Test tiers and levels: how and when CI runs each test file. Every tests/test_*.py, tests/regression/test_*.py,
+# tests/integration/test_*.py and tests/external/test_*.py file appears in [files] below exactly once
+# (tests/test_ci_tiers.py checks this), one line per file:
+#   "path" = { tier = "...", level = "...", and optional keys }
 #
-# The tier says HOW a file runs: the wheel tier from a directory holding only tests/ (the installed package), the
-# source tier from the checkout, and the other tiers not in CI. The level says WHEN it runs:
-#   pr       every pull request and every push to main (.github/workflows/tests.yml, the supported pinned job);
+# Two words that sound alike; every file has both:
+# - The TIER says HOW a file runs: the wheel tier from a directory holding only tests/, so the code under test is the
+#   installed package; the source tier from the checkout (the file also needs scripts/, docs/ or git); the other
+#   tiers ([tiers] below) never run in CI.
+# - The LEVEL says WHEN it runs:
+#   pr       every pull request and every push to main (.github/workflows/tests.yml, the supported pinned stack);
 #   nightly  the pr tests and these, once a day and by hand, on the pinned and the two newer-dependency stacks
 #            (.github/workflows/nightly.yml);
 #   release  only where the real assets are: the assets job before a release (tools/ci/run_test_tier.py --tier
 #            assets), recorded privately; the release validation workflow lists them;
 #   not run  never (no test to collect, all deferred, or an optional reference environment).
-# Inside a file, tests can differ from the file's level, by name: pr_tests (of a nightly file, also run at pr),
-# nightly_tests (of a pr file, run at nightly only) and release_tests (of a pr or nightly file: they need an asset and
-# fail rather than skip without it, so CI deselects them and the assets job runs them).
+# Single tests can differ from their file's level, by name. Each key names where its tests run, which is NOT the
+# level of the file that carries it:
+#   pr_tests       in a nightly file: these tests also run at pr;
+#   nightly_tests  in a pr file: these tests run at nightly only;
+#   release_tests  in a pr or nightly file: they need an asset and fail rather than skip without it, so CI leaves them
+#                  out and the assets job runs them.
+# An asset is a large or private file that CI does not have: a data cache, trained models, observational data, raw
+# simulation outputs. The D5 and MF integration data that some reasons below name are such assets; an assets job
+# points to them with the environment variable that each of those reasons names.
 #
-# tools/ci/run_test_tier.py runs one tier at one level, one pytest process per file, and fails a file on any failure,
-# error, undeclared skip or undeclared expected failure, or when no test passes. asset_tests and skipped_by_design
-# name the only tests allowed to skip in CI; they are reported as NOT RUN, never as passed, and must skip (a declared
-# test that runs fails its file). Expected failures are allowed only as exact deferrals: the deferred_legacy causes of
-# tests/gate_helpers.py, or the messages a file lists in deferred_xfails. reason says why, for every test or file that
-# CI does not run or runs at another level; tests marked slow are deselected and listed by the runner. The tiers were
-# classified from a run with no data links and the private trees hidden, and corrected after an AI-assisted review;
-# the levels follow a file-by-file proposal and an audit of the scientific invariants that the pr level checks.
+# Skipped is not passed. tools/ci/run_test_tier.py runs one tier at one level, one pytest process per file, and fails
+# a file on any failure, error, undeclared skip or undeclared expected failure, or when no test passes:
+# - asset_tests and skipped_by_design name the only tests allowed to skip in CI. They are reported as NOT RUN, never as
+#   passed, and they must skip: a declared test that runs instead fails its file, so the lists stay exact.
+# - Expected failures are allowed only as exact deferrals: the deferred_legacy causes of tests/gate_helpers.py (each
+#   recorded in tests/DEFERRED.md), or the full messages a file lists in deferred_xfails.
+# - reason says why, for every test or file that CI does not run or runs at another level.
+# - Tests marked slow are deselected and listed by the runner.
+# How the entries were set: the tiers from a run of every file without the real assets, corrected after an
+# AI-assisted review; the levels file by file, then checked by an audit (2026-11-17, written up in pull request #28)
+# of the scientific checks that must run on every pull request, now listed in PR_INVARIANTS in tests/test_ci_tiers.py.
 
 [tiers]
 wheel = "fixture and synthetic tests of the installed package; CI runs them from a directory holding only tests/"

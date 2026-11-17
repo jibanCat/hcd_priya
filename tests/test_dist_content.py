@@ -512,7 +512,8 @@ def test_the_committed_known_list_only_shrinks_and_holds_no_private_text():
     assert CC.scan_text(open(KNOWN_FILE, encoding="utf-8").read()) == []
 
 
-def _steps(job):
+def _tests_yml_steps(job):
+    """The steps of one job of .github/workflows/tests.yml, parsed from YAML."""
     import yaml
 
     wf = yaml.safe_load(
@@ -521,24 +522,27 @@ def _steps(job):
     return wf["jobs"][job]["steps"]
 
 
-@pytest.mark.parametrize(
-    "job", ["fixture-tests", "fixture-tests-source"]
-)  # the pr level's two jobs, one per tier
+# the scan step's command in tests.yml; if it changes there, change it here too
+SCAN = "python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt"
+
+
+# the pr level's two jobs, one per tier
+@pytest.mark.parametrize("job", ["fixture-tests", "fixture-tests-source"])
 def test_the_workflow_runs_the_scan_right_after_the_contents_check_and_nothing_can_skip_it(job):
-    steps = _steps(job)
+    """In each pr job of tests.yml, the content scan runs straight after the distribution check and straight before
+    the install, and no condition (if) or continue-on-error lets anything skip or ignore it."""
+    steps = _tests_yml_steps(job)
     runs = [s.get("run", "") for s in steps]
-    i = runs.index(
-        "python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt"
-    )
+    assert SCAN in runs, f"tests.yml job {job}: no step runs {SCAN!r}"
+    i = runs.index(SCAN)
     assert (
         runs[i - 1] == "python tools/ci/check_dist.py dist" and steps[i + 1].get("id") == "install"
-    )
+    ), f"tests.yml job {job}: the scan must come right after check_dist.py and right before the install step"
     assert (
         not {"if", "continue-on-error"} & set(steps[i]) and "continue-on-error" not in steps[i + 1]
-    )
-    assert (
-        "if" not in steps[i + 1]
-    )  # the install, and with it both test tiers, waits for a clean scan
+    ), f"tests.yml job {job}: the scan may not carry if or continue-on-error, nor the install continue-on-error"
+    # the install, and with it the test tier of the job, waits for a clean scan
+    assert "if" not in steps[i + 1], f"tests.yml job {job}: the install step may not carry an if"
 
 
 def test_the_release_checklist_makes_the_release_gate_blocking():

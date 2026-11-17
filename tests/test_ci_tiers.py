@@ -1,11 +1,21 @@
-"""tests/ci_tiers.toml classifies every test file exactly once, with a tier (how it runs) and a level (when it runs:
-pr, nightly, release or not run), so no file can drop out of CI unnoticed, and the scientific invariants of the pr
-level cannot leave it without this test failing.
+"""Checks of tests/ci_tiers.toml, the file that says how and when CI runs each test file.
 
-CI (.github/workflows/tests.yml, tools/ci/run_test_tier.py) runs the "wheel" and "source" tiers and refuses any skip
-there except of a test named in its file's asset_tests or skipped_by_design, which is reported as not run, and any
-expected failure except a deferred_legacy deferral or one whose exact message is in the file's deferred_xfails; every
-other tier is reported as not run too, with the reason recorded here."""
+The words used here are defined in the comment block at the top of tests/ci_tiers.toml. In short:
+- A file's TIER says HOW it runs: "wheel" (against the installed package) or "source" (from the checkout) in CI; the
+  other tiers never run in CI, and their files are reported as not run, with the reason recorded in the toml file.
+- A file's LEVEL says WHEN it runs: "pr" (on every pull request), "nightly" (once a day), "release" (only with the
+  real assets) or "not run". Single tests can differ from their file's level: pr_tests, nightly_tests, release_tests.
+- Skipped is not passed. CI's runner (tools/ci/run_test_tier.py) fails a file on any skip, except of a test named in
+  the file's asset_tests or skipped_by_design: that one is reported as NOT RUN, and it must skip (if it runs, the file
+  fails, so the list stays exact). An expected failure fails the file too, except a deferred_legacy deferral or one
+  whose exact message is in the file's deferred_xfails.
+
+These tests check the lists that the runner reads. They fail if a test file is missing from tests/ci_tiers.toml or
+listed twice; if an entry has an unknown key, tier or level, or a level its tier does not allow; if a list names a test
+its file does not define; or if one of the scientific checks that must run on every pull request (PR_INVARIANTS
+below) leaves the pr level.
+
+Run: pytest tests/test_ci_tiers.py (CI runs it at the pr level, in the wheel tier)."""
 
 import ast
 import glob
@@ -26,14 +36,24 @@ TIER_LEVELS = {
     "no_tests": {"not run"},
     "external": {"nightly", "not run"},
 }
+# Each per-test key, and the only file level that may carry it (None: a pr or a nightly file). A key names where its
+# tests run, which is NOT the level of the file that carries it:
+#   pr_tests       sits in a nightly file: these tests also run at pr;
+#   nightly_tests  sits in a pr file: these tests run at nightly only;
+#   release_tests  sits in a pr or nightly file: CI leaves them out; they run only with the real assets.
 PER_TEST = {"pr_tests": "nightly", "nightly_tests": "pr", "release_tests": None}
 
-# The tests that check an independent scientific invariant at the pr level (a result against a closed form, an
-# independent implementation, a known identity or a stored reference from another code path) in five areas (the
-# likelihood, the covariance, normalisation, the predictor's reconstruction and the incidence model), from an audit
-# of the pr level (2026-11-17), and two that the audit kept at pr (the exact inverse of the training encoding; the
-# truth-recovery tests of the multi-fidelity correction, the whole file). A test listed here must run at the pr
-# level: its file is at pr and does not move it to nightly_tests, or its file is at nightly and names it in pr_tests.
+# PR_INVARIANTS: the tests that must run on every pull request (the pr level), grouped by area. Each checks a
+# scientific result against something independent of the code under test: a closed formula, a second implementation,
+# a known identity, or a stored reference from another code path. The five areas (the likelihood, the covariance,
+# normalisation, the predictor's reconstruction and the incidence model) come from an audit of the pr level
+# (2026-11-17; written up in the pull request that added the levels, #28). The last group is one test the audit kept
+# at pr for another reason (the exact inverse of the training encoding); PR_INVARIANT_FILES is a whole file it kept
+# (the truth-recovery tests of the multi-fidelity correction).
+# The list is written by hand on purpose: renaming one of these tests, or moving it to nightly, release or out of CI,
+# makes test_the_scientific_invariants_of_the_pr_level_run_at_pr fail until someone updates the list deliberately. A
+# test runs at pr when its file is at pr and does not name it in nightly_tests, or its file is at nightly and names it
+# in pr_tests.
 PR_INVARIANTS = {
     "the likelihood": [
         (
@@ -213,7 +233,10 @@ PR_INVARIANTS = {
         ("tests/test_emulator_data.py", "test_reconstruction_roundtrip"),
     ],
 }
-PR_INVARIANT_FILES = {"tests/test_mf_modes.py"}  # kept at pr by the audit, the whole file
+# kept at pr by the audit, the whole file
+PR_INVARIANT_FILES = {"tests/test_mf_modes.py"}
+# the number of tests PR_INVARIANTS lists (the files of PR_INVARIANT_FILES not counted)
+N_PR_INVARIANTS = 72
 
 
 def _doc():
@@ -222,23 +245,32 @@ def _doc():
 
 
 def _test_files():
+    """Every test file of the repository, as a path relative to the repository root."""
     root = os.path.dirname(TESTS_DIR)
+    # the four places a test file can live (the header of tests/ci_tiers.toml names them)
     pats = ("test_*.py", "regression/test_*.py", "integration/test_*.py", "external/test_*.py")
     found = (p for pat in pats for p in glob.glob(os.path.join(TESTS_DIR, pat)))
     return {os.path.relpath(p, root).replace(os.sep, "/") for p in found}
 
 
 def test_tier_names_are_the_known_ones():
-    assert set(_doc()["tiers"]) == TIERS
+    """The [tiers] table of tests/ci_tiers.toml holds exactly the tiers the runner knows."""
+    assert set(_doc()["tiers"]) == TIERS, (
+        f"tests/ci_tiers.toml [tiers] is {sorted(_doc()['tiers'])}, not {sorted(TIERS)}: "
+        "a new tier must also be added to TIERS here and handled by tools/ci/run_test_tier.py"
+    )
 
 
 def test_level_names_are_the_known_ones_and_every_file_has_one_its_tier_allows():
-    assert set(_doc()["levels"]) == LEVELS
+    """The [levels] table holds exactly the four levels, and each file's level is one that its tier allows
+    (TIER_LEVELS): for example a wheel file runs at pr or nightly, never "release"."""
+    assert (
+        set(_doc()["levels"]) == LEVELS
+    ), f"tests/ci_tiers.toml [levels] is {sorted(_doc()['levels'])}, not {sorted(LEVELS)}"
     for path, entry in _doc()["files"].items():
         assert entry.get("level") in TIER_LEVELS[entry["tier"]], (
-            path,
-            entry["tier"],
-            entry.get("level"),
+            f"{path}: tier {entry['tier']!r} allows the levels {sorted(TIER_LEVELS[entry['tier']])}, but the "
+            f"file has level {entry.get('level')!r}; change the level (or the tier) in tests/ci_tiers.toml"
         )
 
 
@@ -250,8 +282,10 @@ def test_every_test_file_is_classified_exactly_once():
 
 
 def test_each_entry_has_a_known_tier_and_out_of_ci_entries_say_why():
+    """Every entry has only known keys and a known tier, and gives a reason when the file, or any test of it, is not
+    run in CI or runs at another level than the file."""
     for path, entry in _doc()["files"].items():
-        assert set(entry) <= {
+        known = {
             "tier",
             "level",
             "reason",
@@ -259,8 +293,14 @@ def test_each_entry_has_a_known_tier_and_out_of_ci_entries_say_why():
             "skipped_by_design",
             "deferred_xfails",
             *PER_TEST,
-        }, path
-        assert entry["tier"] in TIERS, path
+        }
+        assert set(entry) <= known, (
+            f"{path}: unknown keys {sorted(set(entry) - known)} in tests/ci_tiers.toml "
+            "(the header of that file lists the keys)"
+        )
+        assert (
+            entry["tier"] in TIERS
+        ), f"{path}: unknown tier {entry['tier']!r}; the tiers are {sorted(TIERS)}"
         if entry["tier"] not in CI_TIERS or set(entry) & {
             "asset_tests",
             "skipped_by_design",
@@ -279,8 +319,14 @@ def test_declared_skips_are_test_functions_of_their_file():
         names = entry.get("asset_tests", []) + entry.get("skipped_by_design", [])
         if not names:
             continue
-        assert entry["tier"] in CI_TIERS, path
-        assert len(set(names)) == len(names), path
+        assert entry["tier"] in CI_TIERS, (
+            f"{path}: asset_tests and skipped_by_design are allowed only in the wheel and source tiers, "
+            f"not in {entry['tier']!r}"
+        )
+        listed_once = len(set(names)) == len(names)
+        assert (
+            listed_once
+        ), f"{path}: a name is listed twice in asset_tests or skipped_by_design; keep each name once"
         with open(os.path.join(root, path), encoding="utf-8") as f:
             defined = {
                 n.name for n in ast.walk(ast.parse(f.read())) if isinstance(n, ast.FunctionDef)
@@ -293,17 +339,31 @@ def test_declared_deferrals_are_exact_messages_in_a_ci_tier():
     """deferred_xfails lists full expected-failure messages (exact matches, never prefixes) of a CI-tier file."""
     for path, entry in _doc()["files"].items():
         if "deferred_xfails" in entry:
-            assert entry["tier"] in CI_TIERS and entry.get("reason", "").strip(), path
+            assert (
+                entry["tier"] in CI_TIERS and entry.get("reason", "").strip()
+            ), f"{path}: deferred_xfails is allowed only in the wheel and source tiers, and needs a reason"
             msgs = entry["deferred_xfails"]
-            assert msgs and all(isinstance(m, str) and len(m) > 40 for m in msgs), path
+            # a declared message is the whole message of the expected failure, a sentence: the 40-character floor
+            # refuses a short fragment, which would read as a prefix
+            full_messages = msgs and all(isinstance(m, str) and len(m) > 40 for m in msgs)
+            assert (
+                full_messages
+            ), f"{path}: each deferred_xfails entry must be the full expected-failure message (over 40 characters)"
 
 
 def test_external_tier_is_exactly_tests_external():
+    """A file is in the "external" tier if and only if it lives in tests/external/ (those tests need an extra
+    package of their own)."""
     for path, entry in _doc()["files"].items():
-        assert (entry["tier"] == "external") == path.startswith("tests/external/"), path
+        in_folder = path.startswith("tests/external/")
+        assert (entry["tier"] == "external") == in_folder, (
+            f"{path}: tier {entry['tier']!r}, but the file is {'' if in_folder else 'not '}in tests/external/; "
+            "the external tier is exactly that folder: fix the entry in tests/ci_tiers.toml"
+        )
 
 
 def _functions(path):
+    """The names of the functions defined in a test file (path relative to the repository root)."""
     root = os.path.dirname(TESTS_DIR)
     with open(os.path.join(root, path), encoding="utf-8") as f:
         return {n.name for n in ast.walk(ast.parse(f.read())) if isinstance(n, ast.FunctionDef)}
@@ -317,22 +377,39 @@ def test_tests_at_another_level_than_their_file_are_test_functions_of_it_and_no_
         named = [(key, n) for key in PER_TEST for n in entry.get(key, [])]
         if not named:
             continue
-        assert entry["tier"] in CI_TIERS, path
+        assert (
+            entry["tier"] in CI_TIERS
+        ), f"{path}: pr_tests, nightly_tests and release_tests are allowed only in the wheel and source tiers"
         for key in PER_TEST:
             if key in entry:
-                assert entry[key], (path, key)
-                assert PER_TEST[key] in (None, entry["level"]), (path, key, entry["level"])
+                # a list that is present is not empty
+                assert entry[key], f"{path}: {key} is empty; remove the key or name its tests"
+                # the list sits in a file of the right level (PER_TEST above)
+                assert PER_TEST[key] in (None, entry["level"]), (
+                    f"{path}: {key} belongs in a {PER_TEST[key]} file, but this file's level is "
+                    f"{entry['level']!r}"
+                )
         names = [n for _, n in named]
-        assert len(set(names)) == len(names), path
+        # each name once, in one list only
+        named_once = len(set(names)) == len(names)
+        assert (
+            named_once
+        ), f"{path}: a test is named twice in pr_tests, nightly_tests or release_tests; keep it in one list, once"
         defined = _functions(path)
         assert (
             set(names) <= defined
         ), f"{path}: not test functions here: {sorted(set(names) - defined)}"
+        # no name is the start of another function's name (pytest's node-id prefix would catch both)
         for n in names:
-            assert not [d for d in defined if d != n and d.startswith(n)], (path, n)
+            assert not [d for d in defined if d != n and d.startswith(n)], (
+                f"{path}: {n} is the start of another function's name, so selecting it would select that one "
+                "too; rename one of them"
+            )
 
 
 def _runs_at_pr(path, test):
+    """Whether one test runs at the pr level: never a release test; in a pr file every test except its
+    nightly_tests; in a nightly file only its pr_tests."""
     entry = _doc()["files"][path]
     if test in entry.get("release_tests", []):
         return False
@@ -348,12 +425,24 @@ def test_the_scientific_invariants_of_the_pr_level_run_at_pr():
     n = 0
     for area, rows in PR_INVARIANTS.items():
         for path, test in rows:
-            assert files[path]["tier"] in CI_TIERS, (area, path)
-            assert test in _functions(path), (area, path, test)
+            assert (
+                files[path]["tier"] in CI_TIERS
+            ), f"{area}: {path} is in tier {files[path]['tier']!r}, which CI does not run"
+            defined = _functions(path)
+            assert (
+                test in defined
+            ), f"{area}: {path} has no function {test}; if it was renamed, update PR_INVARIANTS"
             assert _runs_at_pr(path, test), f"{area}: {path}::{test} does not run at the pr level"
             n += 1
     for path in PR_INVARIANT_FILES:
         entry = files[path]
-        assert entry["tier"] in CI_TIERS and entry["level"] == "pr", path
-        assert not entry.get("nightly_tests") and not entry.get("release_tests"), path
-    assert n >= 72
+        assert (
+            entry["tier"] in CI_TIERS and entry["level"] == "pr"
+        ), f"{path} must run whole at the pr level, in the wheel or source tier"
+        whole = not entry.get("nightly_tests") and not entry.get("release_tests")
+        assert whole, f"{path} must run whole at the pr level: no nightly_tests or release_tests"
+    # a floor, so that rows cannot be deleted from PR_INVARIANTS without a deliberate change here as well
+    assert n >= N_PR_INVARIANTS, (
+        f"PR_INVARIANTS lists {n} tests, fewer than {N_PR_INVARIANTS}: restore the rows, or lower "
+        "N_PR_INVARIANTS on purpose"
+    )

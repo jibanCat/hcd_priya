@@ -26,6 +26,7 @@ def decide(runs, sha):
     mine = [r for r in runs if r.get("head_sha") == sha]
     if not mine:
         return False, f"no nightly run on {sha}: start the nightly workflow on this commit first"
+    # the latest run: the latest start time (the creation time if a run has not started); the run id breaks a tie
     latest = max(
         mine, key=lambda r: (r.get("run_started_at") or r.get("created_at") or "", r.get("id", 0))
     )
@@ -59,6 +60,7 @@ def main(argv=None):
     ap.add_argument("--sha", required=True)
     ap.add_argument("--workflow", default="nightly.yml")
     args = ap.parse_args(argv)
+    # a full commit id, 40 lowercase hexadecimal digits, as the API writes head_sha (decide compares them exactly)
     if not re.fullmatch(r"[0-9a-f]{40}", args.sha):
         print(f"REFUSED: {args.sha!r} is not a full commit sha")
         return 1
