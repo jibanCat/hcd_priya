@@ -1,13 +1,62 @@
-# Test tiers (B.2). Every tests/test_*.py, tests/regression/test_*.py, tests/integration/test_*.py and
-# tests/external/test_*.py file appears here exactly once (tests/test_ci_tiers.py checks this). CI
-# (.github/workflows/tests.yml) runs the wheel and source tiers with tools/ci/run_test_tier.py, which fails a file
-# on any failure, error, undeclared skip or
-# undeclared expected failure, or when no test passes. asset_tests and skipped_by_design name the only tests
-# allowed to skip there; they are reported as NOT RUN, never as passed, and must skip (a declared test that runs
-# fails its file). Expected failures are allowed only as exact deferrals: the deferred_legacy causes of
-# tests/gate_helpers.py, or the messages a file lists in deferred_xfails. reason says why, for every test or file
-# that CI does not run; tests marked slow are deselected and listed by the runner. Classified from a run with no
-# data links and the private trees hidden, and corrected after an AI-assisted review.
+# Test tiers and levels: how and when CI runs each test file. Every tests/test_*.py, tests/regression/test_*.py,
+# tests/integration/test_*.py and tests/external/test_*.py file appears in [files] below exactly once
+# (tests/test_ci_tiers.py checks this), in one of two TOML forms that mean the same:
+#   "path" = { tier = "...", level = "...", reason = "..." }     one line, for an entry with a few keys;
+#   [files."path"]                                                a table, for an entry with long lists, one key
+#   tier = "..."                                                  per line (the table ends where the next one
+#   level = "..."                                                 starts)
+#   asset_tests = ["test_a", "test_b"]
+#
+# Two words that sound alike; every file has both:
+# - The TIER says HOW a file runs: the wheel tier from a directory holding only tests/, so the code under test is the
+#   installed package; the source tier from the checkout (the file also needs scripts/, docs/ or git); the other
+#   tiers ([tiers] below) never run in CI.
+# - The LEVEL says WHEN it runs:
+#   pr       every pull request and every push to main (.github/workflows/tests.yml, the supported pinned stack);
+#   nightly  the pr tests and these, once a day and by hand, on the pinned and the two newer-dependency stacks
+#            (.github/workflows/nightly.yml);
+#   release  only where the real assets are: the assets job before a release (tools/ci/run_test_tier.py --tier
+#            assets), whose record is attached to the release (docs/release_checklist.md); the release validation
+#            workflow lists these tests;
+#   not run  never (no test to collect, all deferred, or an optional reference environment).
+# A stack is one Python version with one set of dependency versions; the pinned stack, Python 3.11 with the exact
+# versions of tools/ci/constraints-devenv.txt, is the only supported one.
+# Single tests can differ from their file's level, by name. Each key names where its tests run, which is NOT the
+# level of the file that carries it:
+#   pr_tests       in a nightly file: these tests also run at pr;
+#   nightly_tests  in a pr file: these tests run at nightly only;
+#   release_tests  in a pr or nightly file: they need an asset and fail rather than skip without it, so CI leaves them
+#                  out and the assets job runs them.
+# An asset is a large or private file that CI does not have: a data cache, trained models, observational data, raw
+# simulation outputs. Three names in the reasons below:
+#   D5 integration data  the real release data that the tests in tests/integration/ read, through the JSON
+#                        configuration named by HCD_D5_INTEGRATION_CONFIG (tests/integration/_config.py; "D5" is the
+#                        project's name for the step that added those tests);
+#   MF integration data  the release's multi-fidelity (MF) correction record and its inputs, through the JSON
+#                        configuration named by HCD_MF_INTEGRATION_CONFIG (tests/integration/test_mf_release_real.py);
+#   fake_spectra         the separately installed package that computes spectra from simulation snapshots
+#                        (docs/fake_spectra_integration.md).
+# Other project words in the reasons and file names:
+#   HCD           high-column-density absorbers (README.md); also the prefix of the environment variables;
+#   P1D           the one-dimensional flux power spectrum of the Lyman-alpha forest, the measured data (README.md);
+#   leg           one P1D measurement used in a fit (DESI, KODIAQ-SQUAD or eBOSS), with its own covariance;
+#   nightly gate  tools/ci/nightly_gate.py: it refuses a release unless the latest nightly run on its commit passed;
+#   invariant     a scientific check that must run on every pull request (PR_INVARIANTS, tests/test_ci_tiers.py);
+#   LF            low fidelity: the low-resolution PRIYA simulations; "the LF training cache" is built from them.
+#
+# Skipped is not passed. tools/ci/run_test_tier.py runs one tier at one level, one pytest process per file. In CI:
+#   a skip of a test not named in asset_tests or skipped_by_design   the file FAILS;
+#   a skip of a test named there                                      allowed: reported as NOT RUN, never as passed;
+#   a test named there that runs instead of skipping                  the file FAILS (the list is stale);
+#   a test named in release_tests                                     not skipped: CI leaves it out (deselects it);
+#   an expected failure that is not an exact deferral                 the file FAILS (deferrals: the deferred_legacy
+#                                                                     causes in tests/DEFERRED.md, or deferred_xfails).
+# A file also fails on any failure or error, and when none of its tests passes. Tests marked slow are deselected and
+# listed. reason says why a file or test is not run in CI or runs at another level. The level "not run" (never run in
+# CI) is not the runner's report label NOT RUN (not run in that run).
+# How the entries were set: the tiers from a run of every file without the real assets, corrected after an
+# AI-assisted review; the levels file by file, then checked by an audit (2026-11-17, written up in pull request #28)
+# of the scientific checks that must run on every pull request, now listed in PR_INVARIANTS in tests/test_ci_tiers.py.
 
 [tiers]
 wheel = "fixture and synthetic tests of the installed package; CI runs them from a directory holding only tests/"
@@ -17,165 +66,179 @@ deferred = "no test of the file passes in CI: each is an explicit deferral (test
 external = "tests/external: optional tests in a reference environment of their own; not run in CI"
 no_tests = "a file named test_*.py from which pytest collects no test; not run in CI"
 
+[levels]
+pr = "every pull request and push to main: the supported pinned job"
+nightly = "once a day and by hand: the pr level and these files, on the pinned and the two newer-dependency stacks"
+release = "only with the real assets, before a release (the assets job); listed by the release validation workflow"
+"not run" = "never: no test to collect, all deferred, or an optional reference environment"
+
 [files]
-"tests/test_absorption_path.py" = { tier = "wheel" }
-"tests/test_accept_rebuilt_catalogues.py" = { tier = "source" }
-"tests/test_analyze_dla_selfdraw.py" = { tier = "source" }
-"tests/test_analyze_dnuis_overall_summary.py" = { tier = "source" }
-"tests/test_analyze_dnuis_pooling.py" = { tier = "source" }
-"tests/test_analyze_dnuis_resolution_oos.py" = { tier = "source" }
-"tests/test_analyze_lls_dispcenter.py" = { tier = "source" }
-"tests/test_blinding.py" = { tier = "wheel" }
-"tests/test_build_incidence_mf.py" = { tier = "source" }
-"tests/test_build_mf_release.py" = { tier = "source" }
-"tests/test_bundle_lineage.py" = { tier = "wheel" }
-"tests/test_cache_builder_catalogue_guard.py" = { tier = "source" }
-"tests/test_carry_validated_cache.py" = { tier = "source" }
-"tests/test_catalog_systems.py" = { tier = "source" }
-"tests/test_cddf_dx_patch.py" = { tier = "source" }
-"tests/test_cemu_t3.py" = { tier = "wheel" }
-"tests/test_cert_prereqs.py" = { tier = "source" }
-"tests/test_check_release.py" = { tier = "wheel" }
-"tests/test_ci_tiers.py" = { tier = "wheel" }
-"tests/test_ci_tools.py" = { tier = "source" }
-"tests/test_cli_config.py" = { tier = "wheel" }
-"tests/test_closure_diagnostics.py" = { tier = "wheel" }
-"tests/test_compare_emulators_runner.py" = { tier = "source" }
-"tests/test_comparison_harness.py" = { tier = "source" }
-"tests/test_convergence_z_match.py" = { tier = "wheel" }
-"tests/test_data_weights.py" = { tier = "wheel" }
-"tests/test_derive_dndx_historical.py" = { tier = "source" }
-"tests/test_derive_provenance.py" = { tier = "source" }
-"tests/test_dist_content.py" = { tier = "source" }
-"tests/test_docstring_examples.py" = { tier = "wheel" }
-"tests/test_dla_completeness_forward_parity.py" = { tier = "source" }
-"tests/test_dla_selfdraw_arm.py" = { tier = "source" }
-"tests/test_dla_truth.py" = { tier = "wheel" }
-"tests/test_dndx_display_guard.py" = { tier = "wheel" }
-"tests/test_dndx_exact_inverse.py" = { tier = "wheel" }
-"tests/test_dnuis_arm_inject_spec.py" = { tier = "source" }
-"tests/test_dnuis_inject.py" = { tier = "wheel" }
-"tests/test_emulator_dndx_wc.py" = { tier = "wheel" }
-"tests/test_emulator_likelihood.py" = { tier = "wheel" }
-"tests/test_emulator_model.py" = { tier = "wheel" }
-"tests/test_emulator_train.py" = { tier = "wheel" }
-"tests/test_entry_points_show_loads.py" = { tier = "source" }
-"tests/test_error_vector_io.py" = { tier = "wheel" }
-"tests/test_exact_digest_args.py" = { tier = "wheel" }
-"tests/test_example_mock_recovery.py" = { tier = "source" }
-"tests/test_export_deployed_centre.py" = { tier = "source" }
-"tests/test_export_release_bundle.py" = { tier = "source" }
-"tests/test_export_research_bundle.py" = { tier = "source" }
-"tests/test_figure_scripts.py" = { tier = "source" }
-"tests/test_fisher_kit.py" = { tier = "wheel" }
-"tests/test_forward_ctx_v2.py" = { tier = "source" }
-"tests/test_forward_v2.py" = { tier = "wheel" }
-"tests/test_gateA_blocking.py" = { tier = "wheel" }
-"tests/test_gate_c_validation.py" = { tier = "wheel" }
-"tests/test_gate_helpers.py" = { tier = "wheel" }
-"tests/test_grad_fidelity.py" = { tier = "wheel" }
-"tests/test_hcd_template.py" = { tier = "wheel" }
-"tests/test_incidence_mf.py" = { tier = "wheel" }
-"tests/test_interface_markers.py" = { tier = "source" }
-"tests/test_kcoord_binding.py" = { tier = "wheel" }
-"tests/test_ks_selboost_hooks.py" = { tier = "wheel" }
-"tests/test_ks_selboost_runner.py" = { tier = "source" }
-"tests/test_l6_acceptance_tools.py" = { tier = "source" }
-"tests/test_legb_ctx_cache.py" = { tier = "wheel" }
-"tests/test_legb_tau0_priya.py" = { tier = "wheel" }
-"tests/test_likelihood.py" = { tier = "wheel" }
-"tests/test_likelihood_driver.py" = { tier = "wheel" }
-"tests/test_load_published.py" = { tier = "wheel" }
-"tests/test_lineage.py" = { tier = "wheel" }
-"tests/test_lit_dndx.py" = { tier = "source" }
-"tests/test_lit_dndx_fits.py" = { tier = "source" }
-"tests/test_lls_dispcenter_arm.py" = { tier = "source" }
-"tests/test_lls_width_study_override.py" = { tier = "source" }
-"tests/test_loader_isolation.py" = { tier = "wheel" }
-"tests/test_loo_matched.py" = { tier = "source" }
-"tests/test_loo_readout.py" = { tier = "source" }
-"tests/test_loso_sweep_error_vector.py" = { tier = "source" }
-"tests/test_lyaemu_loo_refit.py" = { tier = "source" }
-"tests/test_metal_inject.py" = { tier = "wheel" }
-"tests/test_mf_modes.py" = { tier = "wheel" }
-"tests/test_mf_release.py" = { tier = "wheel" }
-"tests/test_model_package_prepare.py" = { tier = "source" }
-"tests/test_norc_single_authority.py" = { tier = "source" }
-"tests/test_omega_hi.py" = { tier = "source" }
-"tests/test_packaging.py" = { tier = "wheel" }
-"tests/test_predict_physical_grid.py" = { tier = "wheel" }
-"tests/test_predictor.py" = { tier = "wheel" }
-"tests/test_predictor_mf.py" = { tier = "wheel" }
-"tests/test_publish_workflow_is_disabled.py" = { tier = "source" }
-"tests/test_prod_forward_wiring.py" = { tier = "source" }
-"tests/test_prod_sbc_checkpoint.py" = { tier = "source" }
-"tests/test_product_manifest.py" = { tier = "wheel" }
-"tests/test_products_mf_loader.py" = { tier = "wheel" }
-"tests/test_rcinj_oos_spec.py" = { tier = "source" }
-"tests/test_readme_first_example.py" = { tier = "source" }
-"tests/test_real_fit_export.py" = { tier = "source" }
-"tests/test_registry.py" = { tier = "wheel" }
-"tests/test_res_corr_injection_gate.py" = { tier = "source" }
-"tests/test_research_bundle.py" = { tier = "wheel" }
-"tests/test_resinj_instr.py" = { tier = "wheel" }
-"tests/test_resinj_oos_spec.py" = { tier = "source" }
-"tests/test_run_gate_d_write_once.py" = { tier = "source" }
-"tests/test_run_settings.py" = { tier = "wheel" }
-"tests/test_runtime_data.py" = { tier = "wheel" }
-"tests/test_safe_h5.py" = { tier = "wheel" }
-"tests/test_safe_io.py" = { tier = "wheel" }
-"tests/test_seed_determinism.py" = { tier = "source" }
-"tests/test_splice_tau0_cache.py" = { tier = "source" }
-"tests/test_tau0_bands.py" = { tier = "wheel" }
-"tests/test_tau0_cache_lineage.py" = { tier = "source" }
-"tests/test_tau0_powerlaw.py" = { tier = "wheel" }
-"tests/test_tau0_rescale.py" = { tier = "wheel" }
-"tests/test_tau_threshold_sensitivity.py" = { tier = "source" }
-"tests/test_train_release_meta.py" = { tier = "source" }
-"tests/test_tutorial_production_research.py" = { tier = "source" }
-"tests/test_xclass_cemu.py" = { tier = "wheel" }
-"tests/test_zflat_alpha_guard.py" = { tier = "wheel" }
-"tests/test_zslope_center.py" = { tier = "wheel" }
-"tests/test_zzz_checkout_integrity.py" = { tier = "source" }
+"tests/test_absorption_path.py" = { tier = "wheel", level = "nightly" }
+"tests/test_accept_rebuilt_catalogues.py" = { tier = "source", level = "nightly" }
+"tests/test_analyze_dla_selfdraw.py" = { tier = "source", level = "nightly" }
+"tests/test_analyze_dnuis_overall_summary.py" = { tier = "source", level = "nightly" }
+"tests/test_analyze_dnuis_pooling.py" = { tier = "source", level = "nightly" }
+"tests/test_analyze_dnuis_resolution_oos.py" = { tier = "source", level = "nightly" }
+"tests/test_analyze_lls_dispcenter.py" = { tier = "source", level = "nightly" }
+"tests/test_blinding.py" = { tier = "wheel", level = "nightly" }
+"tests/test_build_incidence_mf.py" = { tier = "source", level = "pr" }
+"tests/test_build_mf_release.py" = { tier = "source", level = "pr" }
+"tests/test_bundle_lineage.py" = { tier = "wheel", level = "pr" }
+"tests/test_cache_builder_catalogue_guard.py" = { tier = "source", level = "nightly" }
+"tests/test_carry_validated_cache.py" = { tier = "source", level = "nightly" }
+"tests/test_catalog_systems.py" = { tier = "source", level = "nightly" }
+"tests/test_cddf_dx_patch.py" = { tier = "source", level = "nightly" }
+"tests/test_cemu_t3.py" = { tier = "wheel", level = "nightly" }
+"tests/test_cert_prereqs.py" = { tier = "source", level = "nightly" }
+"tests/test_check_release.py" = { tier = "wheel", level = "pr" }
+"tests/test_ci_tiers.py" = { tier = "wheel", level = "pr" }
+"tests/test_ci_tools.py" = { tier = "source", level = "pr" }
+"tests/test_cli_config.py" = { tier = "wheel", level = "pr" }
+"tests/test_closure_diagnostics.py" = { tier = "wheel", level = "nightly" }
+"tests/test_compare_emulators_runner.py" = { tier = "source", level = "nightly" }
+"tests/test_comparison_harness.py" = { tier = "source", level = "nightly" }
+"tests/test_convergence_z_match.py" = { tier = "wheel", level = "nightly" }
+"tests/test_data_weights.py" = { tier = "wheel", level = "nightly" }
+"tests/test_derive_dndx_historical.py" = { tier = "source", level = "nightly" }
+"tests/test_derive_provenance.py" = { tier = "source", level = "nightly" }
+"tests/test_dist_content.py" = { tier = "source", level = "pr" }
+"tests/test_docstring_examples.py" = { tier = "wheel", level = "pr" }
+"tests/test_dla_completeness_forward_parity.py" = { tier = "source", level = "nightly" }
+"tests/test_dla_selfdraw_arm.py" = { tier = "source", level = "nightly" }
+"tests/test_dla_truth.py" = { tier = "wheel", level = "nightly" }
+"tests/test_dndx_display_guard.py" = { tier = "wheel", level = "nightly" }
+"tests/test_dndx_exact_inverse.py" = { tier = "wheel", level = "nightly" }
+"tests/test_dnuis_arm_inject_spec.py" = { tier = "source", level = "nightly" }
+"tests/test_dnuis_inject.py" = { tier = "wheel", level = "nightly" }
+"tests/test_emulator_dndx_wc.py" = { tier = "wheel", level = "pr" }
+"tests/test_emulator_likelihood.py" = { tier = "wheel", level = "nightly" }
+"tests/test_emulator_train.py" = { tier = "wheel", level = "nightly" }
+"tests/test_entry_points_show_loads.py" = { tier = "source", level = "nightly" }
+"tests/test_error_vector_io.py" = { tier = "wheel", level = "nightly" }
+"tests/test_exact_digest_args.py" = { tier = "wheel", level = "pr" }
+"tests/test_example_mock_recovery.py" = { tier = "source", level = "pr" }
+"tests/test_export_deployed_centre.py" = { tier = "source", level = "nightly" }
+"tests/test_export_release_bundle.py" = { tier = "source", level = "pr" }
+"tests/test_export_research_bundle.py" = { tier = "source", level = "pr" }
+"tests/test_figure_scripts.py" = { tier = "source", level = "pr" }
+"tests/test_fisher_kit.py" = { tier = "wheel", level = "nightly" }
+"tests/test_forward_ctx_v2.py" = { tier = "source", level = "nightly" }
+"tests/test_forward_v2.py" = { tier = "wheel", level = "nightly" }
+"tests/test_gateA_blocking.py" = { tier = "wheel", level = "nightly" }
+"tests/test_gate_c_validation.py" = { tier = "wheel", level = "nightly" }
+"tests/test_gate_helpers.py" = { tier = "wheel", level = "pr" }
+"tests/test_hcd_template.py" = { tier = "wheel", level = "pr" }
+"tests/test_incidence_mf.py" = { tier = "wheel", level = "pr" }
+"tests/test_interface_markers.py" = { tier = "source", level = "nightly" }
+"tests/test_kcoord_binding.py" = { tier = "wheel", level = "pr" }
+"tests/test_ks_selboost_hooks.py" = { tier = "wheel", level = "nightly" }
+"tests/test_ks_selboost_runner.py" = { tier = "source", level = "nightly" }
+"tests/test_l6_acceptance_tools.py" = { tier = "source", level = "nightly" }
+"tests/test_legb_ctx_cache.py" = { tier = "wheel", level = "nightly" }
+"tests/test_legb_tau0_priya.py" = { tier = "wheel", level = "nightly" }
+"tests/test_likelihood.py" = { tier = "wheel", level = "pr" }
+"tests/test_likelihood_driver.py" = { tier = "wheel", level = "nightly" }
+"tests/test_load_published.py" = { tier = "wheel", level = "pr" }
+"tests/test_lineage.py" = { tier = "wheel", level = "pr" }
+"tests/test_lit_dndx.py" = { tier = "source", level = "nightly" }
+"tests/test_lit_dndx_fits.py" = { tier = "source", level = "nightly" }
+"tests/test_lls_dispcenter_arm.py" = { tier = "source", level = "nightly" }
+"tests/test_lls_width_study_override.py" = { tier = "source", level = "nightly" }
+"tests/test_loader_isolation.py" = { tier = "wheel", level = "pr" }
+"tests/test_loo_matched.py" = { tier = "source", level = "nightly" }
+"tests/test_loo_readout.py" = { tier = "source", level = "nightly" }
+"tests/test_loso_sweep_error_vector.py" = { tier = "source", level = "nightly" }
+"tests/test_lyaemu_loo_refit.py" = { tier = "source", level = "nightly" }
+"tests/test_metal_inject.py" = { tier = "wheel", level = "nightly" }
+"tests/test_mf_modes.py" = { tier = "wheel", level = "pr" }
+"tests/test_mf_release.py" = { tier = "wheel", level = "pr" }
+"tests/test_model_package_prepare.py" = { tier = "source", level = "pr" }
+"tests/test_norc_single_authority.py" = { tier = "source", level = "nightly" }
+"tests/test_omega_hi.py" = { tier = "source", level = "nightly" }
+"tests/test_packaging.py" = { tier = "wheel", level = "pr" }
+"tests/test_predict_physical_grid.py" = { tier = "wheel", level = "nightly" }
+"tests/test_predictor.py" = { tier = "wheel", level = "pr" }
+"tests/test_predictor_mf.py" = { tier = "wheel", level = "pr" }
+"tests/test_publish_workflow_is_disabled.py" = { tier = "source", level = "pr" }
+"tests/test_prod_forward_wiring.py" = { tier = "source", level = "nightly" }
+"tests/test_prod_sbc_checkpoint.py" = { tier = "source", level = "nightly" }
+"tests/test_product_manifest.py" = { tier = "wheel", level = "nightly" }
+"tests/test_products_mf_loader.py" = { tier = "wheel", level = "nightly" }
+"tests/test_rcinj_oos_spec.py" = { tier = "source", level = "nightly" }
+"tests/test_readme_first_example.py" = { tier = "source", level = "pr" }
+"tests/test_real_fit_export.py" = { tier = "source", level = "nightly" }
+"tests/test_registry.py" = { tier = "wheel", level = "pr" }
+"tests/test_res_corr_injection_gate.py" = { tier = "source", level = "nightly" }
+"tests/test_research_bundle.py" = { tier = "wheel", level = "pr" }
+"tests/test_resinj_instr.py" = { tier = "wheel", level = "nightly" }
+"tests/test_resinj_oos_spec.py" = { tier = "source", level = "nightly" }
+"tests/test_run_gate_d_write_once.py" = { tier = "source", level = "nightly" }
+"tests/test_run_settings.py" = { tier = "wheel", level = "pr" }
+"tests/test_runtime_data.py" = { tier = "wheel", level = "pr" }
+"tests/test_safe_h5.py" = { tier = "wheel", level = "pr" }
+"tests/test_safe_io.py" = { tier = "wheel", level = "pr" }
+"tests/test_seed_determinism.py" = { tier = "source", level = "nightly" }
+"tests/test_splice_tau0_cache.py" = { tier = "source", level = "nightly" }
+"tests/test_tau0_bands.py" = { tier = "wheel", level = "nightly" }
+"tests/test_tau0_cache_lineage.py" = { tier = "source", level = "nightly" }
+"tests/test_tau0_powerlaw.py" = { tier = "wheel", level = "nightly" }
+"tests/test_tau0_rescale.py" = { tier = "wheel", level = "nightly" }
+"tests/test_tau_threshold_sensitivity.py" = { tier = "source", level = "nightly" }
+"tests/test_train_release_meta.py" = { tier = "source", level = "nightly" }
+"tests/test_tutorial_production_research.py" = { tier = "source", level = "pr" }
+"tests/test_xclass_cemu.py" = { tier = "wheel", level = "nightly" }
+"tests/test_zflat_alpha_guard.py" = { tier = "wheel", level = "nightly" }
+"tests/test_zslope_center.py" = { tier = "wheel", level = "nightly" }
+"tests/test_zzz_checkout_integrity.py" = { tier = "source", level = "pr" }
 
 [files."tests/integration/test_d5_research_export_w1.py"]
 tier = "assets"
-reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+level = "release"
+reason = "needs the D5 integration data (release bundles and trained emulator members kept on the project's storage) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/integration/test_d5_t1_production.py"]
 tier = "assets"
-reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+level = "release"
+reason = "needs the D5 integration data (release bundles and trained emulator members kept on the project's storage) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/integration/test_d5_t1_scripts.py"]
 tier = "assets"
-reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+level = "release"
+reason = "needs the D5 integration data (release bundles and trained emulator members kept on the project's storage) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/integration/test_d5_turbo_bundles.py"]
 tier = "assets"
-reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+level = "release"
+reason = "needs the D5 integration data (release bundles and trained emulator members kept on the project's storage) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/integration/test_d5_w1_members.py"]
 tier = "assets"
-reason = "needs the D5 integration data (Turbo bundles and members) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
+level = "release"
+reason = "needs the D5 integration data (release bundles and trained emulator members kept on the project's storage) named by HCD_D5_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/integration/test_mf_release_real.py"]
 tier = "assets"
+level = "release"
 reason = "needs the MF integration data (the release MF record and its inputs) named by HCD_MF_INTEGRATION_CONFIG; every test skips without it, so an assets job must set that variable"
 
 [files."tests/external/test_lyaemu_adapter_guards.py"]
 tier = "external"
+level = "not run"
 reason = "optional reference-environment test (its own venv), never collected by CI"
 
 [files."tests/external/test_lyaemu_loo_refit_external.py"]
 tier = "external"
+level = "not run"
 reason = "optional reference-environment test (its own venv), never collected by CI"
 
 [files."tests/external/test_safetensors_interop.py"]
 tier = "external"
-reason = "optional reference-environment test (its own venv), never collected by CI"
+level = "nightly"
+reason = "an interop test that needs one public package (safetensors) beside the core environment; the nightly workflow installs it and runs this file at the nightly level (run_test_tier.py --tier external); the pr level never runs it"
 
 [files."tests/regression/test_incident_2026_kgrid.py"]
 tier = "wheel"
+level = "pr"
 asset_tests = [
     "test_anti_row_zero_on_the_real_cache",
 ]
@@ -183,6 +246,7 @@ reason = "the declared tests need the real LF training cache, absent in CI"
 
 [files."tests/test_analysis_lock_generator.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_real_leg_build_matches_fixture_schema",
 ]
@@ -192,14 +256,16 @@ skipped_by_design = [
 deferred_xfails = [
     "deferred lock-generator rework (gate E step 7, PI-authorized lock regeneration): the generator verifies the ensemble against <repo>/checkpoints, which does not hold the schema-2 members",
 ]
-reason = "test_real_leg_build_matches_fixture_schema needs the real production legs (opt-in, HCD_LOCK_REAL_LEGS=1); test_committed_lock_matches_live_AT_FREEZE is skipped until the freeze step; the 9 LOCK_REWORK tests are a strict exact-exception deferral (tests/DEFERRED.md)"
+reason = "test_real_leg_build_matches_fixture_schema needs the real production legs (opt-in, HCD_LOCK_REAL_LEGS=1); test_committed_lock_matches_live_AT_FREEZE is skipped until the freeze step; the 9 LOCK_REWORK tests are a strict exact-exception deferral (tests/DEFERRED.md): they wait for a rework of the lock generator, which checks the ensemble against <repo>/checkpoints, the folder of the older checkpoint layout (schema 1), while the current members use layout 2 (schema 2) and sit in the folder their manifest names; deferred_xfails quotes the tests' message exactly, so it keeps its own wording"
 
 [files."tests/test_analyze_ks_selboost.py"]
 tier = "assets"
+level = "release"
 reason = "collection reads a table from the private notes repository (scripts/ks_selboost_arms.py); a public-exposure item"
 
 [files."tests/test_cache_pairing_invariants.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_every_discovered_pair_satisfies_the_build_invariants",
     "test_lf_discovery_pairs_ns0907_by_identity",
@@ -209,29 +275,35 @@ reason = "the declared tests need cluster scratch outputs, raw PRIYA simulation 
 
 [files."tests/test_cache_raw_header_parity.py"]
 tier = "assets"
-reason = "needs the real LF training cache and eBOSS DR14 P1D data; row 11 errors rather than skips without them (verbatim from 863df63)"
+level = "release"
+reason = "needs the real LF training cache and eBOSS DR14 P1D data; one of its tests (that the data legs lie inside the simulated modes) errors rather than skips without them; its tests were copied unchanged from an earlier test module (commit 863df63)"
 
 [files."tests/test_cache_repair_s4.py"]
 tier = "assets"
-reason = "needs S4 cache-build shards, the real LF training cache"
+level = "release"
+reason = "needs the intermediate files (shards) of a training-cache build, and the real LF training cache"
 
 [files."tests/test_cddf_excess_hypotheses.py"]
 tier = "assets"
+level = "release"
 reason = "needs raw PRIYA simulation outputs; without these, tests fail rather than skip"
 
 [files."tests/test_cemu_build.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_loo_ensemble_residuals_are_member_means_on_the_held_out_rows",
 ]
-reason = "the declared tests need gate C products, absent in CI"
+reason = "the declared test needs the stored leave-one-out evaluation of the trained ensemble (its residual files), absent in CI"
 
 [files."tests/test_closure_sbc.py"]
 tier = "assets"
+level = "release"
 reason = "needs emulator error-vector products, trained emulator members"
 
 [files."tests/test_clustering.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_load_real",
     "test_real_data_smoke",
@@ -240,6 +312,7 @@ reason = "the declared tests need PRIYA production spectra, absent in CI"
 
 [files."tests/test_cov_lowk_fixes.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_desi_cv_floor_widens_lowk_only",
     "test_desi_env_unset_byte_identical",
@@ -250,18 +323,22 @@ reason = "the declared tests need DESI DR1 P1D data, eBOSS DR14 P1D data, absent
 
 [files."tests/test_dX_bug_fix.py"]
 tier = "assets"
+level = "not run"
 reason = "collection needs cluster scratch outputs; it fails rather than skips"
 
 [files."tests/test_dX_formula.py"]
 tier = "no_tests"
+level = "not run"
 reason = "a diagnostic script named test_*.py with no test function; pytest collects nothing from it"
 
 [files."tests/test_data_likelihood.py"]
 tier = "assets"
+level = "release"
 reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, files of a local lya_emulator_full checkout, trained emulator members; without these, tests fail rather than skip"
 
 [files."tests/test_dla_cov_reduce.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_default_load_is_reduced_and_stamped",
     "test_dla_only_removal_is_exact_per_z_block",
@@ -274,33 +351,66 @@ reason = "the declared tests need DESI DR1 P1D data, absent in CI"
 
 [files."tests/test_eboss_leg.py"]
 tier = "assets"
+level = "release"
 reason = "needs eBOSS DR14 P1D data, the real LF training cache; without these, tests fail rather than skip"
 
 [files."tests/test_emucoh_arms.py"]
 tier = "assets"
+level = "release"
 reason = "needs the real LF training cache; without these, tests fail rather than skip"
 
 [files."tests/test_emulator_cache.py"]
 tier = "assets"
+level = "release"
 reason = "needs cluster scratch outputs; without these, tests fail rather than skip"
 
 [files."tests/test_emulator_cache_tau0.py"]
 tier = "assets"
+level = "release"
 reason = "needs fake_spectra (installed separately); the module skips at collection without it"
 
 [files."tests/test_emulator_data.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_make_splits_disjoint_on_real_lf_cache",
 ]
-reason = "the declared tests need the real LF training cache, absent in CI"
+reason = "the declared tests need the real LF training cache, absent in CI. The file is mostly training data handling and runs at nightly; pr_tests run at pr too: the parameter box and its unit-cube map that the predictor imports, and the exact inverse of the training encoding"
+pr_tests = [
+    "test_normalize_params_maps_to_unit_cube",
+    "test_param_limits_cover_nine_params_in_cache_order",
+    "test_reconstruction_roundtrip",
+]
 
 [files."tests/test_emulator_multifidelity.py"]
-tier = "assets"
-reason = "needs KODIAQ-SQUAD P1D data, files of a local lya_emulator_full checkout; without these, tests fail rather than skip"
+tier = "wheel"
+level = "nightly"
+release_tests = [
+    "test_build_default_head_builds_fixed_mean",
+    "test_fixed_mean_head_g_equals_gbar",
+    "test_fixed_mean_head_is_theta_independent",
+    "test_interp_res_corr_anchored_to_one_below_5kbox",
+    "test_interp_res_corr_default_is_5x",
+    "test_interp_res_corr_differentiable_and_jit",
+    "test_interp_res_corr_high_k_suppression_and_clamp",
+    "test_interp_res_corr_matches_table_on_grid",
+    "test_load_res_corr_shapes_and_range",
+    "test_mf_forward_shapes_positive_jit_vmap",
+    "test_mf_hmc_differentiable_in_theta",
+    "test_mf_invalid_delta_mode_raises",
+    "test_mf_jit_patterns",
+    "test_mf_lf_backbone_is_frozen",
+    "test_mf_logratio_additive_identity",
+    "test_mf_mode_forward_positive_and_hmc_differentiable",
+    "test_mf_res_corr_on_off",
+    "test_mf_second_order_grad_for_nuts",
+    "test_pooled_fixed_mean_head_still_tau0_invariant",
+]
+reason = "the synthetic tests run at nightly; the tests in release_tests need the multi-fidelity resolution table (a data product absent in CI) and fail rather than skip without it, so they run only where the assets are"
 
 [files."tests/test_ensemble_emulator.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_load_ensemble_refuses_pre_2026_10_production_checkpoints",
 ]
@@ -308,6 +418,7 @@ reason = "the declared tests need trained emulator members, absent in CI"
 
 [files."tests/test_env_data_flags.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_desi_default_stamps_all_false",
     "test_desi_env_cv_floor_is_stamped",
@@ -321,6 +432,7 @@ reason = "the declared tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, eBOS
 
 [files."tests/test_gateE_e1_e4.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_e1a_one_binding_per_leg_z_feeds_every_consumer_and_equals_first_principles",
     "test_e1b_box_modes_identical_across_checkpoints_cache_and_mf",
@@ -328,18 +440,20 @@ asset_tests = [
     "test_e4a_cosmology_response_of_k_and_zero_mf_derivative",
     "test_e4b_one_fixed_grid_for_every_z_changes_the_forward_by_more_than_one_percent",
 ]
-reason = "the declared tests need gate D MF products, trained emulator members, absent in CI"
+reason = "the declared tests need the stored outputs of the validation runs of the multi-fidelity (MF) correction, and trained emulator members, absent in CI"
 
 [files."tests/test_gateE_e2_reconstruction.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_e2_covariance_equals_independent_reconstruction",
     "test_e2_forward_equals_independent_reconstruction",
 ]
-reason = "the declared tests need gate D MF products, trained emulator members, absent in CI"
+reason = "the declared tests need the stored outputs of the validation runs of the multi-fidelity (MF) correction, and trained emulator members, absent in CI"
 
 [files."tests/test_gateE_invariants.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_production_leg_loaders_unchanged",
 ]
@@ -350,23 +464,26 @@ reason = "the asset tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, eBOSS D
 
 [files."tests/test_gate_c_matched_set.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_c4_matched_set_is_complete",
 ]
-reason = "the declared tests need KODIAQ-SQUAD P1D data, files of a local lya_emulator_full checkout, gate C products, absent in CI"
+reason = "the declared tests need KODIAQ-SQUAD P1D data, files of a local lya_emulator_full checkout, and the stored outputs of the leave-one-out validation of the trained ensemble, absent in CI"
 
 [files."tests/test_gate_d_review_blocking.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_d3_on_the_frozen_product_is_reported_per_simulation",
     "test_gate_d_d1_failure_pinned_to_parameter_precision",
     "test_gate_d_rd1_report_matches_json",
     "test_mode_mf_prediction_invariant_to_log_rho_and_heldout_rows_real",
 ]
-reason = "the declared tests need gate D MF products, the private notes repository, the real LF training cache, absent in CI"
+reason = "the declared tests need the stored outputs of the validation runs of the multi-fidelity (MF) correction, the private notes repository, and the real LF training cache, absent in CI"
 
 [files."tests/test_hcd_pivot_center.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_build_legb_ctx_real_fit_alpha_hcd_mu_is_lit_consistent",
     "test_hier_ratios_rederived_at_pivot_z",
@@ -378,6 +495,7 @@ reason = "the declared tests need the real LF training cache, absent in CI"
 
 [files."tests/test_hcd_survey_pin.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_lls_truth_boost_propagates_to_mock_and_truth",
 ]
@@ -385,6 +503,7 @@ reason = "the declared tests need the real LF training cache, absent in CI"
 
 [files."tests/test_kcoord.py"]
 tier = "wheel"
+level = "pr"
 asset_tests = [
     "test_real_rows_reproduced_from_theta_within_tolerance",
 ]
@@ -392,6 +511,7 @@ reason = "the declared tests need the real LF training cache, absent in CI"
 
 [files."tests/test_ks_dndx_reparam.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_forbidden_combinations_raise",
     "test_induced_geometry_vs_deployed_prior",
@@ -410,14 +530,17 @@ reason = "the declared tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, the 
 
 [files."tests/test_ks_selboost_arms.py"]
 tier = "assets"
+level = "release"
 reason = "needs a table from the private notes repository (scripts/ks_selboost_arms.py); without it tests fail rather than skip; a public-exposure item"
 
 [files."tests/test_legb_2d_tilt.py"]
 tier = "assets"
+level = "release"
 reason = "every test needs the real LF training cache, trained emulator members and DESI DR1 or KODIAQ-SQUAD P1D data, except one deferred_legacy CTX_SIGNATURE deferral and one slow test; no test passes without them"
 
 [files."tests/test_legb_convergence.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_convergence_mode_disperses_and_returns_finite_battery",
 ]
@@ -425,6 +548,7 @@ reason = "the declared tests need DESI DR1 P1D data, absent in CI"
 
 [files."tests/test_legb_dla_masking.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_make_legb_mock_applies_per_leg_truth_frac",
     "test_make_truth_stores_masked_baseline_and_full_dla_excess",
@@ -435,10 +559,12 @@ reason = "the declared tests need observational P1D data, the real LF training c
 
 [files."tests/test_legb_golden.py"]
 tier = "assets"
+level = "release"
 reason = "needs DESI DR1 P1D data"
 
 [files."tests/test_legb_hier_hcd.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_fast_postprocess_on_branch_yields_alpha_columns",
     "test_loglik_grad_in_A_r_finite",
@@ -454,14 +580,17 @@ reason = "the declared tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, the 
 
 [files."tests/test_legb_ks_resolution.py"]
 tier = "assets"
+level = "release"
 reason = "needs KODIAQ-SQUAD P1D data"
 
 [files."tests/test_legb_leg_a.py"]
 tier = "deferred"
+level = "not run"
 reason = "4 tests are deferred_legacy CTX_SIGNATURE deferrals and the other needs trained emulator members"
 
 [files."tests/test_legb_metal_flatlog.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_a_siII_threaded_into_rescore_loglik",
     "test_amplitude_map_and_Fref_provenance",
@@ -473,6 +602,7 @@ reason = "the declared tests need DESI DR1 P1D data, the real LF training cache,
 
 [files."tests/test_legb_metal_modelcplus.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_arm4_out_of_class_decreasing_gauss",
     "test_arm_desi_in_class_carries_cross",
@@ -486,6 +616,7 @@ reason = "the declared tests need DESI DR1 P1D data, eBOSS DR14 P1D data, the re
 
 [files."tests/test_legb_metal_zevo.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_arm3_ma2025_injection_finite_and_siII_off",
     "test_arm_injection_de_double_count_and_desi_siII",
@@ -502,6 +633,7 @@ reason = "the declared tests need DESI DR1 P1D data, eBOSS DR14 P1D data, the re
 
 [files."tests/test_legb_per_leg_alpha.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_dict_loglik_equals_per_leg_sum",
     "test_guard_per_leg_zslope_requires_per_leg_alpha",
@@ -522,10 +654,12 @@ reason = "the declared tests need DESI DR1 P1D data, KODIAQ-SQUAD P1D data, eBOS
 
 [files."tests/test_legb_postprocess_golden.py"]
 tier = "assets"
+level = "release"
 reason = "needs DESI DR1 P1D data"
 
 [files."tests/test_legb_resolution.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_bres_vec_forward_response_per_z_indexed",
     "test_cov_arm_d_desi_coherent_and_amplitude",
@@ -542,10 +676,12 @@ reason = "the declared tests need DESI DR1 P1D data, an MF golden file, eBOSS DR
 
 [files."tests/test_legb_truth_anchor.py"]
 tier = "assets"
+level = "release"
 reason = "needs the real LF training cache; without these, tests fail rather than skip"
 
 [files."tests/test_lit_dndx_corrected.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_case5_kernel_r3_reproducible_from_cache",
 ]
@@ -553,6 +689,7 @@ reason = "the declared tests need the real LF training cache, absent in CI"
 
 [files."tests/test_lit_dndx_kernel.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_adjudication_table_attributions",
     "test_cache_provenance",
@@ -569,6 +706,7 @@ reason = "the declared tests need the real LF training cache, absent in CI"
 
 [files."tests/test_lya_bias.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_load_real_camb_file",
 ]
@@ -576,10 +714,12 @@ reason = "the declared tests need a PRIYA CAMB file, absent in CI"
 
 [files."tests/test_mf_emucoh_floor.py"]
 tier = "assets"
+level = "release"
 reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, emucoh products, the MF shape-floor product"
 
 [files."tests/test_mf_shape_floor.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_load_mf_shape_symmetric_psd",
     "test_loglik_finite_and_differentiable_through_shape",
@@ -591,29 +731,35 @@ reason = "the declared tests need DESI DR1 P1D data, the MF shape-floor product,
 
 [files."tests/test_mf_true_loo.py"]
 tier = "assets"
+level = "release"
 reason = "needs the real LF training cache; without these, tests fail rather than skip"
 
 [files."tests/test_mode_mf_module.py"]
 tier = "wheel"
+level = "pr"
 asset_tests = [
     "test_production_product_module_equals_table_application",
 ]
-reason = "the declared tests need gate D MF products, absent in CI"
+reason = "the declared tests need the stored outputs of the validation runs of the multi-fidelity (MF) correction, absent in CI"
 
 [files."tests/test_nhi_recovery.py"]
 tier = "no_tests"
+level = "not run"
 reason = "a diagnostic script named test_*.py with no test function; pytest collects nothing from it"
 
 [files."tests/test_norc_forward.py"]
 tier = "assets"
+level = "release"
 reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, an MF golden file, the real LF training cache, trained emulator members"
 
 [files."tests/test_priya_p1d.py"]
 tier = "assets"
+level = "release"
 reason = "needs fake_spectra (installed separately); the module skips at collection without it"
 
 [files."tests/test_prod_ensemble_manifest.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_gen_check_green_on_real_dir",
     "test_real_checkpoints_verify_against_committed_manifest",
@@ -623,6 +769,7 @@ reason = "the declared tests need trained emulator members, absent in CI"
 
 [files."tests/test_prod_sbc.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_build_ctx_ensemble_uses_ensemble_model",
     "test_build_ctx_single_model_path_unchanged",
@@ -633,6 +780,7 @@ reason = "the declared tests need emulator error-vector products, trained emulat
 
 [files."tests/test_products_io_v2.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_every_pre_gate_e_product_is_refused[gatec_error_vector_not_for_use]",
     "test_every_pre_gate_e_product_is_refused[hist_error_vector]",
@@ -640,26 +788,31 @@ asset_tests = [
     "test_every_pre_gate_e_product_is_refused[hist_mf_cemu_emucoh]",
     "test_mf_product_identity_is_checked_against_the_lf_ensemble",
 ]
-reason = "the declared tests need emucoh products, emulator error-vector products, gate D MF products, trained emulator members, absent in CI"
+reason = "the declared tests need the stored outputs of the emulator-error coherence study (emucoh), the stored emulator error vectors, the stored outputs of the validation runs of the multi-fidelity (MF) correction, and trained emulator members, absent in CI"
 
 [files."tests/test_r6_pairing.py"]
 tier = "deferred"
+level = "not run"
 reason = "all 3 tests are deferred_legacy REAL_FIT_CKPT_DIR deferrals"
 
 [files."tests/test_res_corr_alpha.py"]
 tier = "assets"
+level = "release"
 reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, an MF golden file, the real LF training cache, trained emulator members"
 
 [files."tests/test_res_corr_inject.py"]
 tier = "deferred"
+level = "not run"
 reason = "all 4 tests are deferred_legacy CTX_SIGNATURE deferrals"
 
 [files."tests/test_res_corr_norc_injection.py"]
 tier = "assets"
+level = "release"
 reason = "needs DESI DR1 P1D data, KODIAQ-SQUAD P1D data, the real LF training cache, trained emulator members"
 
 [files."tests/test_res_instr_basis.py"]
 tier = "source"
+level = "nightly"
 asset_tests = [
     "test_artifact_bstar_at_least_as_ns_aligned_as_dict",
     "test_artifact_bstar_shape",
@@ -673,6 +826,7 @@ reason = "the declared tests need a resolution-injection basis product, absent i
 
 [files."tests/test_resolution_cup1d_consistency.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_cov_b_equals_cup1d_additive_build_without_resolution",
     "test_forward_factor_exp_vs_linear_inband_gap_leq_1pct",
@@ -682,6 +836,7 @@ reason = "the declared tests need DESI DR1 P1D data, absent in CI"
 
 [files."tests/test_sampling_box_restriction.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_prior_predictive_inside_original_priya_box",
 ]
@@ -689,6 +844,7 @@ reason = "the declared tests need DESI DR1 P1D data, absent in CI"
 
 [files."tests/test_schema.py"]
 tier = "wheel"
+level = "pr"
 asset_tests = [
     "test_load_cache_exposes_k_com_and_report",
     "test_real_caches_satisfy_schema",
@@ -697,6 +853,7 @@ reason = "the declared tests need the real LF training cache, absent in CI"
 
 [files."tests/test_tau0_informative_prior.py"]
 tier = "wheel"
+level = "nightly"
 asset_tests = [
     "test_priors_only_site_order_identical_uniform_vs_gauss",
     "test_priors_only_site_order_unchanged_default",
@@ -705,10 +862,12 @@ reason = "the declared tests need DESI DR1 P1D data, the real LF training cache,
 
 [files."tests/test_tau_sum_rule.py"]
 tier = "no_tests"
+level = "not run"
 reason = "a diagnostic script named test_*.py with no test function; pytest collects nothing from it"
 
 [files."tests/test_eligibility.py"]
 tier = "wheel"
+level = "pr"
 skipped_by_design = [
     "test_the_normaliser_fingerprint_is_bitwise_in_an_exact_replay",
 ]
@@ -716,7 +875,40 @@ reason = "the bit-level digest test needs a same-machine exact replay (HCD_EXACT
 
 [files."tests/test_wc_map.py"]
 tier = "source"
+level = "pr"
 skipped_by_design = [
     "test_golden_digests_of_the_map_rules_in_an_exact_replay",
 ]
 reason = "the bit-level digest test needs a same-machine exact replay (HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 and the pinned stack), which a GitHub runner never is; the per-field tolerance tests of the file run instead"
+
+[files."tests/test_emulator_model.py"]
+tier = "wheel"
+level = "pr"
+nightly_tests = [
+    "test_coherent_debias_padded_rows_are_inert",
+    "test_coherent_debias_term_reduces_percell_coherent",
+    "test_datarange_weight_softens_out_of_range_bins",
+    "test_joint_loss_independent_of_meanF_and_grads_finite",
+    "test_joint_loss_k_weight_emphasizes_residual_band",
+    "test_joint_loss_scalar_finite_and_grads_finite",
+    "test_joint_loss_w_coh_increases_and_zero_is_noop",
+    "test_k_weight_only_touches_p_resid_term",
+    "test_masked_mse_batched_broadcast_jit_and_double_grad",
+    "test_masked_mse_fully_masked_no_div_zero",
+    "test_masked_mse_inf_target_at_masked_position",
+    "test_masked_mse_inf_weight_at_masked_position",
+    "test_masked_mse_nan_safe_gradients",
+    "test_masked_mse_zero_weight_empty_class",
+    "test_p_resid_loss_is_residual_term_only",
+    "test_svd_warmstart_beats_random",
+    "test_uniform_term_w_terms_comparable",
+]
+reason = "the network that every prediction runs is tested at pr; the 17 tests of the training losses (nightly_tests) test the training objective, not a prediction, and run at nightly"
+
+[files."tests/test_grad_fidelity.py"]
+tier = "wheel"
+level = "nightly"
+pr_tests = [
+    "test_predict_P_filt_matches_numpy_reconstruct",
+]
+reason = "the research forward runs at nightly; the one test in pr_tests is the only independent check of the reconstruction the predictor runs"

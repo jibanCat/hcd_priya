@@ -5,9 +5,9 @@ stage only one environment is supported; wider support will be considered before
 
 | Environment | Status |
 |---|---|
-| Linux x86-64, CPython 3.11, the versions pinned in `tools/ci/constraints-devenv.txt` | **Supported.** The CI job "Python 3.11, pinned (supported)" installs these versions; the packages the file does not pin (click, joblib, pandas, pyyaml and some of their dependencies) take the newest allowed version. |
-| Linux x86-64, CPython 3.11, the newest versions the dependency bounds allow | Tested in CI, **not supported**. |
-| Linux x86-64, CPython 3.12, the newest versions the dependency bounds allow | Tested in CI, **not supported**. |
+| Linux x86-64, CPython 3.11, the versions pinned in `tools/ci/constraints-devenv.txt` | **Supported.** The CI jobs "Python 3.11, pinned (supported), wheel tier" and "Python 3.11, pinned (supported), source tier" install these versions; the packages the file does not pin (click, joblib, pandas, pyyaml and some of their dependencies) take the newest allowed version. |
+| Linux x86-64, CPython 3.11, the newest versions the dependency bounds allow | Tested in the nightly CI, **not supported**. |
+| Linux x86-64, CPython 3.12, the newest versions the dependency bounds allow | Tested in the nightly CI, **not supported**. |
 | CPython 3.13 or later | Not tested. `requires-python` does not exclude it. |
 | macOS, Windows, other CPU architectures, GPUs | Not tested. |
 | The HDF5 release format read with an older libhdf5 | Tested in CI: a bundle written with the pinned stack is read bit for bit with h5py built against Ubuntu's system libhdf5 1.10, and the loader's tests pass there (job "HDF5 release format with an older libhdf5"). |
@@ -28,6 +28,27 @@ the wheel into a fresh virtual environment and runs two tiers of tests (`tests/c
 
 Tests that need real assets (the training cache, trained emulator members, observational data, raw simulation
 outputs) are not run in CI. They are listed with their reasons in `tests/ci_tiers.toml` and reported as not run.
+
+### Three levels: pull request, nightly, release
+
+Every test file also has a level in `tests/ci_tiers.toml`, which says when it runs:
+
+- **pr:** every pull request and every push to `main` (`.github/workflows/tests.yml`), on the supported pinned stack
+  only, as two jobs in parallel, one per tier (each builds, checks and installs on its own). It holds the tests of what a user runs (loading, prediction, the likelihood, the release formats and their
+  writers) and the tests that check a scientific result against an independent computation in five areas: the
+  likelihood, the covariance, normalisation, the predictor's reconstruction and the incidence model.
+  `tests/test_ci_tiers.py` lists those tests and fails if one of them leaves this level.
+- **nightly:** the pr level and the remaining CI tests, once a day and by hand (`.github/workflows/nightly.yml`), on
+  the pinned stack and on the two newer-dependency stacks above. A failure fails the run, visibly.
+- **release:** the tests that need the real assets. They run only where the assets are, before a release (`python
+  tools/ci/run_test_tier.py --tier assets`), and the record of that run is attached to the release.
+
+Within a file, single tests can differ from the file's level; `tests/ci_tiers.toml` names them. Nightly failures
+block a release: the release validation workflow (`.github/workflows/release-validation.yml`, started by hand) and
+the publishing workflow refuse to go on unless the latest nightly run on the commit to be released passed. A daily
+run is recorded under the commit of `main` it started from, together with its leg on the release stack's branch
+while that branch is open, so a failure of either leg blocks a release of that commit; a commit that no daily run
+tested passes only after a nightly run started on it by hand (or by a push to the release stack's branch).
 
 Floating-point results are compared with stored reference arrays at stated tolerances, so a verdict does not
 depend on the last bits of the runner CPU's arithmetic: the tolerances are larger than the differences measured

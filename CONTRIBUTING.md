@@ -50,11 +50,13 @@ Questions about installing or using the package are welcome as issues too; say i
    JAX_PLATFORMS=cpu python -m pytest -q tests/test_<name>.py
    ```
 
-   A new test file must also be listed in [`tests/ci_tiers.toml`](tests/ci_tiers.toml), with a reason if it cannot
-   run in continuous integration. To run what CI runs from a clone:
+   A new test file must also be listed in [`tests/ci_tiers.toml`](tests/ci_tiers.toml), with its tier, its level
+   (pr for what a user runs and for a check of a scientific result against an independent computation; nightly for
+   the rest of what CI can run; release for a test that needs the real assets) and a reason if it cannot run in
+   continuous integration. To run what a pull request's CI runs from a clone (`--level nightly` for the nightly level):
 
    ```bash
-   JAX_PLATFORMS=cpu python tools/ci/run_test_tier.py --tier source --out <new_results_dir>
+   JAX_PLATFORMS=cpu python tools/ci/run_test_tier.py --tier source --level pr --out <new_results_dir>
    ```
 
 5. **Open a pull request** against `main`. Describe what changed and why, and which tests cover it. The CI job for the
