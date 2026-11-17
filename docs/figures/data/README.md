@@ -3,6 +3,38 @@
 The data files that the figure scripts in `scripts/figures/` read, each with its origin. `SHA256SUMS` lists every
 data file; a script refuses a file whose digest differs.
 
+## Where the measurements are
+
+Every published measurement the figures draw is a plain text file under `docs/figures/data/`, readable with numpy
+alone. Each folder has a `PROVENANCE.md` that names the paper, the table and lines the values come from, and how the
+file was made. The values are as published: f(N_HI, X) and dN/dX are per unit absorption distance X in each paper's
+own cosmology, and l(z) per unit redshift; the figure scripts convert them to the cosmology of the model line.
+
+```text
+docs/figures/data/
+├── README.md                          this page
+├── SHA256SUMS                         the sha256 of every data file below
+├── ho21/                              DLAs in SDSS DR16Q, Ho, Bird and Garnett (2021); ho21/PROVENANCE.md
+│   ├── cddf_z225.txt                  CDDF at 2 < z < 2.5  ┐ 6 rows of 30 bins: log10 N_HI, f(N_HI, X),
+│   ├── cddf_z253.txt                  CDDF at 2.5 < z < 3  │ the 68 per cent lower and upper limits,
+│   ├── cddf_z34.txt                   CDDF at 3 < z < 4    ┘ the 95 per cent lower and upper limits
+│   └── dndx_all.txt                   dN/dX of DLAs: 6 rows of 18 bins: z, dN/dX, 68 and 95 per cent limits
+├── lls_subdla/                        the CDDF below the DLA threshold; lls_subdla/PROVENANCE.md
+│   ├── zafar_2013.txt                 subDLAs, Zafar et al. (2013): one row per bin: log10 N_HI, half width,
+│   │                                  log10 f, upper and lower error (dex)
+│   ├── omeara2007_fn_all19p0.dat      O'Meara et al. (2007), log10 N_HI 19 to 20.3: one row per bin: centre,
+│   │                                  log10 f, bin edges, log10 f at the lower and the upper error
+│   └── prochaska2010_lls_region.dat   Prochaska, O'Meara and Worseck (2010): the six corners (log10 N_HI,
+│                                      log10 f) of the region allowed for LLS at z 3.7
+├── lls_incidence/                     LLS with tau_912 >= 2; lls_incidence/PROVENANCE.md
+│   └── lls_lz_literature.dat          l(z) of six papers, one row per published redshift bin: z_lo, z_hi,
+│                                      l(z), lower and upper error, quantity, Omega_m, source key
+├── priya_lf_design_60.csv             not a measurement: the 60 design points of the bands
+└── class_ratio_ranges_z3p0_lf60.csv   not a measurement: class power ratios of the training simulations
+```
+
+Lines starting with `#` are comments (`np.loadtxt` skips them). The table below gives each file's origin.
+
 | File | What | Origin |
 |---|---|---|
 | `ho21/cddf_z225.txt`, `ho21/cddf_z253.txt`, `ho21/cddf_z34.txt` | The CDDF of DLAs measured by Ho, Bird and Garnett (2021), in three redshift bins | The tables of https://github.com/sbird/DLA_data, fetched from its fork https://github.com/jibanCat/DLA_data: [`ho21/PROVENANCE.md`](ho21/PROVENANCE.md) |
