@@ -362,6 +362,33 @@ reference reports. Adding an emulator term to C would widen the posterior and ma
 fit to a measurement you may want an emulator term. This module does not add one; a covariance is used as it is
 given, so you can add such a term to the covariance of your data set before you make the likelihood.
 
+**An emulator covariance, for comparison.** This module adds none. To show what one looks like on the example's 121
+bins, the first figure below draws three 121 x 121 matrices. The first is the data covariance as a correlation. The
+other two are emulator error terms in units of the data errors, $C_{\mathrm{emu},ij} / (\sigma_i \sigma_j)$ with
+$\sigma_i = \sqrt{C_{\mathrm{obs},ii}}$:
+
+- hcd_priya's own held-out term, built from the held-out residuals of 59 low-resolution simulations and of four
+  multi-fidelity folds. Each residual is a fractional held-out error times the mock's spectrum:
+
+```math
+C_\mathrm{emu} = \frac{1}{59} \sum_{i=1}^{59} d_i^\mathrm{LF} \left(d_i^\mathrm{LF}\right)^T
++ \frac{1}{4} \sum_{f=1}^{4} d_f^\mathrm{MF} \left(d_f^\mathrm{MF}\right)^T
+```
+
+- the leave-one-out term of the Gaussian-process emulator of Ho et al. (2026): one error vector $\ell_z$ per
+  redshift, $C_\mathrm{emu} = \mathrm{diag}_z\left(\ell_z \ell_z^T\right)$.
+
+Both are positive semi-definite and largest at the highest wavenumber of each redshift. hcd_priya's term has rank 63
+and couples the redshifts. The Gaussian-process term is block-diagonal, with rank one per redshift. Against the data
+error at each bin they are a median 0.10 and 0.08, and at most 0.62 and 0.43 (second figure). In a sensitivity check
+of the project, adding either term to the example's fit moved no posterior mean by more than 0.1 of a posterior
+standard deviation and widened no posterior by more than 5%. The figures come from that check, outside this package,
+and cannot be redrawn from this repository.
+
+![The data covariance as a correlation, and two emulator error terms in units of the data errors, each a 121 x 121 matrix on the example's bins](figures/emulator_covariance/emulator_covariance_matrices.png)
+
+![The size of each emulator term at each bin, against the data error](figures/emulator_covariance/emulator_covariance_size_per_bin.png)
+
 ## When a sampler gets minus infinity
 
 `sampler_logp(theta)` returns `logp(theta)` or minus infinity, and counts every minus infinity in `refusals` by kind,

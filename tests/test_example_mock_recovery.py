@@ -643,6 +643,23 @@ def test_the_figures_of_the_interpolation_checks_are_committed_with_side_files_a
         assert f"](figures/interpolation/{n}.png)" in text, n
 
 
+def test_the_figures_of_an_emulator_covariance_are_committed_with_side_files_and_shown():
+    """docs/figures/emulator_covariance holds the two figures of the emulator terms of a sensitivity check (the
+    module adds no emulator covariance), each with a side file in words that says what is drawn, that it holds
+    dimensionless ratios only, and that no fit of this package uses it; the docs page shows both."""
+    root = os.path.join(REPO, "docs", "figures", "emulator_covariance")
+    names = ("emulator_covariance_matrices", "emulator_covariance_size_per_bin")
+    assert sorted(os.listdir(root)) == sorted(n + end for n in names for end in (".json", ".png"))
+    text = open(os.path.join(REPO, "docs", "likelihood.md"), encoding="utf-8").read()
+    for n in names:
+        with open(os.path.join(root, n + ".json"), encoding="utf-8") as fh:
+            facts = json.load(fh)
+        assert set(facts) == {"figure", "made_by", "quantities", "used_by"}, n
+        assert facts["quantities"].startswith("dimensionless ratios; no spectrum value"), n
+        assert facts["used_by"].startswith("no fit of this package"), n
+        assert f"](figures/emulator_covariance/{n}.png)" in text, n
+
+
 def test_a_chain_is_drawn_over_the_stored_reference(download, capsys, monkeypatch, tmp_path):
     """Parts two and three on the synthetic download with a stand-in for Cobaya: both figures are written, the
     demonstration chain is labelled, and the library's record of the corrections appears once, not once per call.
