@@ -1,0 +1,66 @@
+# Incidence of Lyman limit systems with tau_912 >= 2 (N_HI >= 10^17.5 cm^-2, counted cumulatively: every absorber
+# above the threshold, so subDLAs and DLAs are included) per unit redshift, l(z) = dN/dz, from published tables and
+# stated values, redshift bins from 1.947 to 5.40. One row per published redshift bin. Values copied as printed, not
+# converted, not rescaled. Read 2026-11-17.
+# Columns:
+#   z_lo, z_hi     = the redshift bin as printed
+#   value          = the published quantity as printed (l(z) in every row of this file)
+#   err_lo, err_hi = the published lower and upper 1 sigma errors as printed: for "v^{+a}_{-b}" (or "v +a -b")
+#                    err_lo = b and err_hi = a; for "v +- c" err_lo = err_hi = c; for separate "-1 sigma" and
+#                    "+1 sigma" columns, those two. Copied as printed even where the printed + error is the smaller
+#                    one (rows prochaska10_t4 and omeara13_t5_*; see PROVENANCE.md).
+#   quantity       = lz (number per unit redshift; needs no cosmology) or lX (number per unit absorption distance X)
+#   omega_m        = the paper's flat Omega_m for an lX row; nan for an lz row
+#   source         = the key below
+# Conversion, done by the figure script and not in this file: l(X) = l(z) * Delta z / Delta X over [z_lo, z_hi] in
+#   the model's cosmology, Delta X = integral of (1+z)^2 / sqrt(Omega_m (1+z)^3 + 1 - Omega_m) dz (flat); an lX row
+#   would be multiplied by Delta X(omega_m) / Delta X(model). Errors take the same factor.
+# Sources: paper, DOI, arXiv id and version; the file read (arXiv e-prints from https://arxiv.org/e-print/<id><version>,
+#   a gzipped tar), its sha256, the lines copied.
+# prochaska10_t4: Prochaska, O'Meara & Worseck 2010, ApJ 718, 392, doi:10.1088/0004-637X/718/1/392, arXiv:0912.0292v1.
+#   Journal Table 4 "LLS Statistics", column l_tau>=2(z) for S/N_912 = 2, the six "Redshift intervals" rows; read from
+#   the article page https://iopscience.iop.org/article/10.1088/0004-637X/718/1/392 (copy of 2026-11-17, sha256
+#   08c0571653e11e484bedd37b3c2932da00285324023b4c4b39bf724264341b3d: caption at HTML line 534, rows at lines 583-628,
+#   notes at lines 632-636). The arXiv version (prpt_dr7lls.tex, sha256
+#   f236288f014668c136b1f4a5b4e5d4c19b741f0538d3c090edeabffe2bd574b9, table tab:llssumm, lines 1550-1555) differs in
+#   four bins; the journal values are used. The SDSS-DR7 catalogue in pyigm (commit
+#   fef47716146bdafbf073c43603a5e24511ff3e38, data/LLS/SDSS/) counted with pyigm's rule reproduces the journal values.
+# omeara13_t5_wfc3, omeara13_t5_acs, omeara13_t5_comb: O'Meara, Prochaska, Worseck, Chen & Madau 2013, ApJ 765, 137,
+#   doi:10.1088/0004-637X/765/2/137, arXiv:1204.3093v2, file tab5.tex (sha256
+#   61c43be3e2cca635296e809423304ad1f2960841f55a6d15a2e4e68cb9081fe5), Table 5 "Incidence of LLS", the tau_912 >= 2 rows
+#   of [2.00,2.60]: line 19 (WFC3/UVIS-G280), line 22 (HST/ACS), line 25 ("Combined (with Ribaudo et al. 2011)": WFC3 +
+#   ACS + the [1.947,2.594] bin of ribaudo11). The journal Table 5 prints the same values.
+# ribaudo11_t5_r2, ribaudo11_t7_rp10: Ribaudo, Lehner & Howk 2011, ApJ 736, 42, doi:10.1088/0004-637X/736/1/42,
+#   arXiv:1105.0659v1, file aph_man.tex (sha256 9b6e97146e990d02fb1b62566cf77a8f97666b1bbdf3a0bc55b429a3ae62300e):
+#   Table 5 (label tab:stats), cut "tau_LLS >= 2", line 2390; Table 7 (label tab:stats2, sample RP10 = their R2 sample
+#   plus the SDSS-DR7 sample of prochaska10), lines 2445-2447 (its line 2444 repeats line 2390 and is not repeated here).
+# fumagalli13_nc: Fumagalli, O'Meara, Prochaska & Worseck 2013, ApJ 775, 78, doi:10.1088/0004-637X/775/1/78,
+#   arXiv:1308.1101v2, file llsz3.tex (sha256 9b04b5020ec0ada97dec15d8811deb5ee348c0ed1980e95d6792738492465c2d),
+#   line 651: the non-colour-selected sample (the one the paper analyses, lines 485-487); bin 2.6 <= z <= 3.0 (line 604).
+# crighton19_corr: Crighton, Prochaska, Murphy, O'Meara & Worseck 2019, MNRAS 482, 1456, doi:10.1093/mnras/sty2762,
+#   arXiv:1810.10040v1, file tab_lzlX.tex (sha256 59d384d25dfdcbc0ee7032c2de122b8721001fb98a9f519529fdcea660512a20),
+#   Table tab:lzlX, lines 9-11: the corrected l(z) (after the correction from mock spectra) and its -1 sigma and
+#   +1 sigma columns.
+# fumagalli20_dr16: Fumagalli, Fotopoulou & Thomson 2020, MNRAS 498, 1951, doi:10.1093/mnras/staa2388,
+#   arXiv:2009.03322v1, file mllls.tex (sha256 806b6d43760631b056e40b415dac55cc9db63356957a6c4142d978974b52f1f4),
+#   line 407 (section 5): SDSS DR16, z = [3.3, 3.6], Poisson error. Its LLS were classified as tau >~ 2 (line 283);
+#   the paper says the catalogue may include some LLS just below tau = 2 (line 413).
+#z_lo	z_hi	value	err_lo	err_hi	quantity	omega_m	source
+3.30	3.40	1.31	0.60	0.43	lz	nan	prochaska10_t4
+3.40	3.50	2.18	0.49	0.41	lz	nan	prochaska10_t4
+3.50	3.65	1.60	0.27	0.23	lz	nan	prochaska10_t4
+3.65	3.90	2.04	0.31	0.27	lz	nan	prochaska10_t4
+3.90	4.10	2.84	0.63	0.52	lz	nan	prochaska10_t4
+4.10	4.40	3.22	0.84	0.68	lz	nan	prochaska10_t4
+2.00	2.60	0.96	0.29	0.23	lz	nan	omeara13_t5_wfc3
+2.00	2.60	0.91	0.61	0.39	lz	nan	omeara13_t5_acs
+2.00	2.60	0.92	0.18	0.18	lz	nan	omeara13_t5_comb
+1.947	2.594	0.86	0.30	0.30	lz	nan	ribaudo11_t5_r2
+3.500	3.663	1.80	0.26	0.26	lz	nan	ribaudo11_t7_rp10
+3.663	3.925	1.99	0.29	0.29	lz	nan	ribaudo11_t7_rp10
+3.925	4.907	2.57	0.44	0.44	lz	nan	ribaudo11_t7_rp10
+2.6	3.0	1.21	0.28	0.28	lz	nan	fumagalli13_nc
+3.75	4.40	2.21	0.34	0.40	lz	nan	crighton19_corr
+4.40	4.70	2.20	0.39	0.47	lz	nan	crighton19_corr
+4.70	5.40	2.95	0.49	0.58	lz	nan	crighton19_corr
+3.3	3.6	2.32	0.08	0.08	lz	nan	fumagalli20_dr16

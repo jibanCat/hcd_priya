@@ -180,15 +180,45 @@ PW09, Noterdaeme+12 (× 0.76 He correction), Crighton+15, Berg+19 (XQ-100).
 All cluster at **0.4–1.0 × 10⁻³**; PRIYA LF sits near the low edge,
 PRIYA HR closer to the centre.
 
-Source for Berg+19 values: `~/data/omega_hi_tableB4_full_sample.csv`.
-Source for PW09: `~/DLA_data/dndx.txt` via the standard
-`rho_hi · conv / ρ_crit` conversion.  N12, C15 from the inline arrays
-in `sbird/dla_data/dla_data.py`.
+These two figures were made by a research script that is not in this repository
+(`scripts/plot_hcd_vs_obs_with_hr.py`), so they cannot be regenerated from it. The release's own
+dN/dX comparison, drawn from committed and traceable files by `scripts/figures/fig_dndx_vs_ho21.py`,
+is `docs/figures/dndx_vs_ho21.png` (see [`model_figures.md`](model_figures.md)).
 
-LLS dN/dz → dN/dX conversion uses Planck cosmology
-(Ω_M=0.315, Ω_Λ=0.685) via `dX/dz = (1+z)² H₀/H(z)`.  Local file:
-`~/data/lofz_literature.txt` (Prochaska+10, Fumagalli+13, Crighton+18,
-O'Meara+13, Ribaudo+11, BOSS).
+Where the measurements come from:
+
+- **Berg et al. (2019)**, the XQ-100 survey, MNRAS 488, 4356, doi:10.1093/mnras/stz2012
+  (arXiv:1907.07703): the Omega_HI curves of subDLAs and DLAs of its Table B4 (median and
+  percentiles in sliding redshift bins), copied into a local file that is not in this repository.
+- **Prochaska and Wolfe (2009)** (PW09), ApJ 696, 1543, doi:10.1088/0004-637X/696/2/1543: the
+  line density and the HI mass density of DLAs in the file `dndx.txt` of the DLA data collection
+  https://github.com/sbird/DLA_data, turned into Omega_HI as `rho_HI · conv / ρ_crit` by that
+  collection's reader.
+- **Noterdaeme et al. (2012)** (N12), A&A 547, L1, doi:10.1051/0004-6361/201220259, and
+  **Crighton et al. (2015)** (C15), MNRAS 452, 217, doi:10.1093/mnras/stv1182: the values written
+  into `dla_data.py` of the same collection.
+- **Ho, Bird and Garnett (2021)** (Ho21), MNRAS 507, 704, doi:10.1093/mnras/stab2169: the DLA
+  dN/dX tables of the same collection.
+- **The LLS incidences of the dN/dX figure:** Prochaska, O'Meara and Worseck (2010), O'Meara et
+  al. (2013) with Ribaudo, Lehner and Howk (2011), Fumagalli et al. (2013), Crighton et al. (2019)
+  and Fumagalli, Fotopoulou and Thomson (2020) (labelled "BOSS"), read from a local compilation that
+  is not in this repository. The published values, each traced to its paper's table, are in
+  `docs/figures/data/lls_incidence/` (PROVENANCE.md there).
+
+How to read the comparisons:
+
+- **Omega_HI** in these panels is the HI mass density without helium (μ = 1). The figure multiplies
+  N12 and C15 by 0.76 (its legend says so) and draws PW09 as pure HI.
+- **dN/dX of DLAs** (PW09, N12, Ho21) counts the absorbers with N_HI >= 10^20.3 cm^-2, the same set
+  as the DLA class.
+- **The LLS points** count every absorber with tau_912 >= 2, that is N_HI >= 10^17.5 cm^-2, counted
+  cumulatively (subDLAs and DLAs included). The LLS class of these figures is
+  10^17.2 <= N_HI < 10^19, a different set of absorbers: the model quantity these points measure is
+  the count above 10^17.5, the dashed line of `docs/figures/dndx_vs_ho21.png`.
+- **The conversion of the LLS points** from dN/dz to dN/dX in these figures used
+  `dX/dz = (1+z)² H₀/H(z)` in a flat cosmology with Ω_M = 0.315, Ω_Λ = 0.685 (Planck). The release
+  figure instead converts each published bin with Delta z / Delta X over the bin, in the cosmology
+  of its model line.
 
 ### 4.2 Per-class P1D templates
 

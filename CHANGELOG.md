@@ -30,7 +30,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - **Three figures with their scripts and data** ([`docs/model_figures.md`](docs/model_figures.md)): the model's
   incidence dN/dX and its column-density distribution against the DLA measurements of Ho, Bird and Garnett (2021),
   the column-density distribution also against three measurements below the DLA threshold (Zafar et al. 2013;
-  O'Meara et al. 2007 and Prochaska, O'Meara and Worseck 2010, both built from the papers' own tables), every
+  O'Meara et al. 2007 and Prochaska, O'Meara and Worseck 2010, both built from the papers' own tables), the
+  incidence also against five published measurements of Lyman limit systems (tau_912 >= 2, copied from the papers'
+  tables) beside the model's count of every absorber above 10^17.5 cm^-2, the quantity they measure, every
   measurement drawn in the cosmology of the model line (its absorption distance converted, the files unchanged),
   and the class power ratio
   of the training simulations (as ranges over the simulations and the mean-flux rungs) against Eq. 6 of Rogers et al.

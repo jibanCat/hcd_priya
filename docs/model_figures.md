@@ -20,17 +20,29 @@ bhfeedback = 0.05, with tau0_amp = 1 and dtau0 = 0
 These are the midpoint of the range each parameter was trained on. They are not a fiducial cosmology, not a best
 fit and not a simulation. Nothing in these figures was fitted to the measurements.
 
-## The incidence dN/dX against Ho, Bird and Garnett (2021)
+## The incidence dN/dX against Ho, Bird and Garnett (2021) and published LLS incidences
 
-![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS against redshift, with the DLA measurement of Ho, Bird and Garnett (2021)](figures/dndx_vs_ho21.png)
+![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS and of every absorber above 10^17.5 cm^-2 against redshift, with the DLA measurement of Ho, Bird and Garnett (2021) and five published measurements of the incidence of Lyman limit systems](figures/dndx_vs_ho21.png)
 
 - **Model (lines):** `pred.dndx` of the LF+MF model at the parameters above, for DLAs (the heavier line), subDLAs
-  and LLS, at the snapshots from z = 2.2 to 4.6. The curves end at 4.6, the upper edge of the grouped-validation
-  domain of the model's multi-fidelity correction of the P1D (z 2.2 to 4.6; a domain edge, not a statement that a
-  validation was passed); below 2.2 the model refuses an LF+MF prediction. The correction of dN/dX that is drawn
-  here has its own table, which is not limited to that range, and is not validated at any redshift: the choice of
-  4.6 keeps the figure inside the grouped-validation domain of the P1D correction, and says nothing about the
-  accuracy of the corrected dN/dX.
+  and LLS, at the snapshots from z = 2.2 to 4.6. The classes are bins of column density: LLS 10^17.2 <= N_HI <
+  10^19, subDLA 10^19 <= N_HI < 10^20.3, DLA N_HI >= 10^20.3 (in cm^-2). The curves end at 4.6, the upper edge of
+  the grouped-validation domain of the model's multi-fidelity correction of the P1D (z 2.2 to 4.6; a domain edge,
+  not a statement that a validation was passed); below 2.2 the model refuses an LF+MF prediction. The correction of
+  dN/dX that is drawn here has its own table, which is not limited to that range, and is not validated at any
+  redshift: the choice of 4.6 keeps the figure inside the grouped-validation domain of the P1D correction, and says
+  nothing about the accuracy of the corrected dN/dX.
+- **Model (dashed line): every absorber with N_HI >= 10^17.5 cm^-2,** which is what the LLS measurements count
+  (below). It is the sum, over the bins of the model's column-density distribution `pred.cddf`, of f(N_HI) times the
+  width in N_HI of the bin's part above 10^17.5. The bins are 0.2 wide in log10 N_HI, so 10^17.5 falls inside the
+  bin from 10^17.4 to 10^17.6: that bin counts from 10^17.5 to its upper edge with f taken constant within it. This
+  partial bin holds 7.2 to 8.4 per cent of the sum; a power law within it, with the slope between its two
+  neighbours, would make the sum 1.0 to 1.3 per cent smaller. The bin from 10^22.8 to 10^23 has no value at z = 2.2,
+  2.4 and 3.2 (no simulation pair has absorbers there at that redshift) and is left out of the sum there. As a
+  cross-check the same count formed from the class lines (the LLS line less the distribution's part from 10^17.2 to
+  10^17.5, plus the subDLA and the DLA line) agrees with it: their ratio is 0.9998 to 1.0020 over the snapshots (in
+  the side file). The partial bin enters both sums in the same way, so the cross-check does not test that choice.
+  The band of the dashed line is drawn over the design points like the others.
 - **Model (bands):** the lowest and the highest value over the 60 design points of the low-resolution training
   simulations. They show how far the prediction moves across the training set. They are not an uncertainty. For 12
   of the 60 points the predictor sets a flag that the drawn lines do not have (`outside_sampling_box` for the 12,
@@ -54,9 +66,29 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
   unit X of its own cosmology (Omega_m from 0.254 to 0.339), so only the lines are in the measurement's cosmology;
   in the cosmology of the bands' two extremes the points would sit 6.0 to 6.6 per cent lower or 6.9 to 7.6 per
   cent higher.
+- **Data (LLS points):** the incidence of Lyman limit systems, tau_912 >= 2, which is every absorber with N_HI >=
+  10^17.5 cm^-2 counted cumulatively (subDLAs and DLAs included), from five published samples: Prochaska, O'Meara
+  and Worseck (2010), journal Table 4, SDSS DR7, six bins from z 3.3 to 4.4; O'Meara et al. (2013), the combined row
+  of their Table 5 (their WFC3 and ACS samples with the bin z 1.95 to 2.59 of Ribaudo, Lehner and Howk 2011), z 2.0
+  to 2.6; Fumagalli et al. (2013), the non-colour-selected sample, z 2.6 to 3.0; Crighton et al. (2019), the
+  corrected values, three bins from z 3.75 to 5.4; Fumagalli, Fotopoulou and Thomson (2020), SDSS DR16, z 3.3 to
+  3.6. The last has its own marker (a hollow circle): its absorbers were classified as tau >~ 2, and the paper says
+  its catalogue may include some just below tau = 2. The values are copied from the papers' tables and text into
+  `docs/figures/data/lls_incidence/lls_lz_literature.dat`, unconverted;
+  `docs/figures/data/lls_incidence/PROVENANCE.md` gives each paper, DOI, table and line, and how to rebuild the
+  file. The file has six more rows, which share absorbers with the rows drawn and are left out so that no absorber
+  is counted twice.
+- **The LLS points in the cosmology of the line.** Each paper gives l(z) = dN/dz, which needs no cosmology. The
+  figure draws l(X) = l(z) Delta z / Delta X over the row's redshift bin, with Delta X in the cosmology of the line
+  (Omega_m = 0.2918); the published 1 sigma errors take the same factor. Each point sits at the centre of its bin,
+  with a horizontal bar over the bin. In the rows of Prochaska, O'Meara and Worseck (2010) and O'Meara et al. (2013)
+  the error printed with the plus sign is the smaller one, the reverse of the Poisson interval of a count; the
+  figure draws the Poisson interval, the larger error upward (for the O'Meara row the two are equal). The file keeps
+  the print.
 - **Snapshots against bins.** The model is drawn at snapshot redshifts 0.2 apart; the measurement is in bins one
-  sixth of a unit wide. The two measured points above z = 4.6 have no model curve beside them, and neither has
-  the one below 2.2.
+  sixth of a unit wide. The two measured points above z = 4.6 have no model curve beside them, and neither has the
+  one below 2.2. Of the LLS bins, the one from z 4.7 to 5.4 lies beyond the curves, and the one from 2.0 to 2.6
+  starts below them.
 - **Model (bars on the lines):** the held-out range of the corrected dN/dX, from `pred.dndx_lower` to
   `pred.dndx_upper`: the two bounds a prediction carries (`pred.dndx * exp(-pred.dndx_err)` and
   `pred.dndx * exp(+pred.dndx_err)`, each computed on its own, so the bars are asymmetric). `pred.dndx_err` is, at
@@ -64,10 +96,10 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
   It includes the bias. With five values it is an indication of size, not the standard deviation of a known
   distribution; `labels["incidence_mf_error"]` on a prediction says what it does not cover. It is not the same
   thing as the band, which shows how far the prediction moves across the training set.
-- **Not shown and not tested here.** Nothing was fitted. The
-  measurement covers DLAs only: the subDLA and LLS curves have no measured point in this figure (the collection of
-  absorber measurements the data come from holds no dN/dX of subDLAs or LLS). The simulations and
-  the survey define and find absorbers differently; that difference was not assessed.
+- **Not shown and not tested here.** Nothing was fitted. No measurement of the subDLA class alone is drawn. The LLS
+  measurements count every absorber above 10^17.5, not the LLS class: read them against the dashed line, not against
+  the LLS line. The simulations and the surveys define and find absorbers differently; that difference was not
+  assessed.
 
 To regenerate it (the second form when you hold the files of a release):
 

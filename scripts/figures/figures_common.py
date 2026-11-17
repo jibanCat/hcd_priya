@@ -37,12 +37,13 @@ MIDPOINT_TEXT = ", ".join(f"{name} = {value:g}" for name, value in MIDPOINT.item
 
 # The look: one hue for the model (a line, and a lighter band of the same hue), dark ink for measured points, a
 # recessive grid, text in ink and never in a series colour. The three hues are the first three of a palette that
-# was checked for colour-blind separation in every pairing.
+# was checked for colour-blind separation in every pairing. YELLOW is its fourth: it is told apart from ORANGE less
+# well, so where both are drawn the yellow line is also dashed and labelled at its end.
 SURFACE = "#fcfcfb"
 INK = "#0b0b0b"
 INK_SECONDARY = "#52514e"
 GRID = "#e4e3df"
-BLUE, ORANGE, AQUA = "#2a78d6", "#eb6834", "#1baf7a"
+BLUE, ORANGE, AQUA, YELLOW = "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 SHADE = "#efeeea"
 
 
@@ -204,7 +205,8 @@ def flags_set(pred) -> list:
 
 def envelope(emu, design, z, attribute, baseline=()):
     """The lowest and the highest ``pred.<attribute>`` over the design points at one redshift (LF+MF, tau0_amp = 1,
-    dtau0 = 0), ignoring NaN bins, with the points the predictor flagged and those it refused.
+    dtau0 = 0), ignoring NaN bins, with the points the predictor flagged and those it refused. ``attribute`` is the
+    name of a field of the prediction, or a function that takes the prediction and returns the values.
 
     A point is reported as flagged when the predictor sets a flag for it that the drawn line does not have
     (``baseline``: the flags of the prediction at the script's own parameters at this redshift). Every such flag is
@@ -225,7 +227,8 @@ def envelope(emu, design, z, attribute, baseline=()):
         except hp.PredictorInputError as exc:
             refused.append((i, str(exc)[:100]))
             continue
-        values.append(np.asarray(getattr(pred, attribute), dtype=float))
+        value = attribute(pred) if callable(attribute) else getattr(pred, attribute)
+        values.append(np.asarray(value, dtype=float))
         hit = sorted(set(flags_set(pred)) - set(baseline))
         if hit:
             flagged.append((i, hit))

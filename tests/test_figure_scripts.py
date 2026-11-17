@@ -26,6 +26,7 @@ NOT_DATA = {
     "README.md",
     "ho21/PROVENANCE.md",
     "lls_subdla/PROVENANCE.md",
+    "lls_incidence/PROVENANCE.md",
 }  # describe the data
 PNG = b"\x89PNG\r\n\x1a\n"
 # The synthetic model serves LF+MF from z = 2.6 only, so the tests that run a model figure move the script's
@@ -226,6 +227,211 @@ def test_the_conversion_to_the_line_cosmology():
         < 1.0
         < C.to_line_cosmology(z1, z2, C.OMEGA_M_LINE - 0.05)
     )
+
+
+def test_the_lls_incidence_provenance_names_the_file_its_sources_and_what_is_drawn():
+    """PROVENANCE.md names the file with its digest, each paper with its DOI and the arXiv source read, the rows the
+    figure draws and why the others are left out, the Poisson orientation, and the published table that the
+    catalogue check reproduces (a check, not a source of values)."""
+    with open(os.path.join(DATA, "lls_incidence", "PROVENANCE.md"), encoding="utf-8") as fh:
+        text = fh.read()
+    files = {n: d for n, d in _sums().items() if n.startswith("lls_incidence/")}
+    assert sorted(files) == ["lls_incidence/lls_lz_literature.dat"]
+    for name, digest in files.items():
+        assert os.path.basename(name) in text and digest in text, name
+    for needed in (
+        "10.1088/0004-637X/718/1/392",  # Prochaska, O'Meara and Worseck 2010: the journal's Table 4
+        "Table 4",
+        "10.1088/0004-637X/765/2/137",  # O'Meara et al. 2013
+        "1204.3093v2",
+        "10.1088/0004-637X/736/1/42",  # Ribaudo, Lehner and Howk 2011
+        "1105.0659v1",
+        "10.1088/0004-637X/775/1/78",  # Fumagalli et al. 2013
+        "1308.1101v2",
+        "10.1093/mnras/sty2762",  # Crighton et al. 2019
+        "1810.10040v1",
+        "10.1093/mnras/staa2388",  # Fumagalli, Fotopoulou and Thomson 2020
+        "2009.03322v1",
+        "tau_912 >= 2",
+        "N_HI >= 10^17.5",
+        "What the figure draws",
+        "Poisson interval",
+        "may include some just below tau = 2",
+        "How to reproduce the table",
+        "no value in the file comes from anywhere else",
+    ):
+        assert needed in text, needed
+
+
+def test_the_lls_incidence_rows_drawn_are_the_papers_published_values():
+    """The twelve rows the figure draws, restated from the papers in their printed notation: (z_lo, z_hi, l(z),
+    the printed minus error, the printed plus error). The file's err_lo is the printed minus error and err_hi the
+    printed plus one, as printed."""
+    fig = _script("fig_dndx_vs_ho21")
+    printed = {
+        "prochaska10_t4": [  # l(z)^{+a}_{-b}: the journal prints the smaller error with the plus sign
+            (3.30, 3.40, 1.31, 0.60, 0.43),
+            (3.40, 3.50, 2.18, 0.49, 0.41),
+            (3.50, 3.65, 1.60, 0.27, 0.23),
+            (3.65, 3.90, 2.04, 0.31, 0.27),
+            (3.90, 4.10, 2.84, 0.63, 0.52),
+            (4.10, 4.40, 3.22, 0.84, 0.68),
+        ],
+        "omeara13_t5_comb": [(2.00, 2.60, 0.92, 0.18, 0.18)],
+        "fumagalli13_nc": [(2.6, 3.0, 1.21, 0.28, 0.28)],
+        "crighton19_corr": [
+            (3.75, 4.40, 2.21, 0.34, 0.40),
+            (4.40, 4.70, 2.20, 0.39, 0.47),
+            (4.70, 5.40, 2.95, 0.49, 0.58),
+        ],
+        "fumagalli20_dr16": [(3.3, 3.6, 2.32, 0.08, 0.08)],
+    }
+    rows = fig.read_lls(os.path.join(DATA, *fig.LLS_FILE))
+    assert len(rows) == 18
+    for source, want in printed.items():
+        got = [row[1:] for row in rows if row[0] == source]
+        assert got == want, source
+    assert set(printed) == set(fig.LLS_DRAWN)
+
+
+def test_the_lls_incidence_rows_left_out_share_absorbers_with_rows_drawn():
+    """Each absorber is counted once: the rows not drawn are the WFC3 and ACS rows of O'Meara et al. (2013) and the
+    row of Ribaudo et al. (2011) below z 2.6 (inside the combined O'Meara row, whose bin covers theirs), and the rows
+    of Ribaudo et al. (2011) above z 3.5 (the SDSS-DR7 absorbers of Prochaska et al. 2010)."""
+    fig = _script("fig_dndx_vs_ho21")
+    rows = fig.read_lls(os.path.join(DATA, *fig.LLS_FILE))
+    left_out = sorted({row[0] for row in rows} - set(fig.LLS_DRAWN))
+    assert left_out == [
+        "omeara13_t5_acs",
+        "omeara13_t5_wfc3",
+        "ribaudo11_t5_r2",
+        "ribaudo11_t7_rp10",
+    ]
+    assert [fig.LLS_DRAWN[s][2] for s in fig.LLS_DRAWN] == [True, True, False, False, False]
+    assert fig.LLS_HOLLOW == {"fumagalli20_dr16"}
+    markers = [fig.LLS_DRAWN[s][1] for s in fig.LLS_DRAWN]
+    assert len(set(markers)) == len(markers) and "o" not in markers[:-1]
+    # each legend label begins with what the sample counts, never with the class name LLS
+    for source, (paper, _, _) in fig.LLS_DRAWN.items():
+        label = fig.lls_label(source)
+        assert label.endswith(", " + paper) and not label.startswith("LLS")
+        own = source == "fumagalli20_dr16"
+        assert label.startswith(r"$\tau \gtrsim 2$" if own else r"$N_\mathrm{HI} \geq 10^{17.5}$")
+
+
+def test_the_lls_incidence_rows_are_drawn_per_unit_x_with_the_poisson_interval():
+    """l(X) = l(z) Delta z / Delta X(line) over each row's bin, the errors times the same factor (Delta X checked
+    against a trapezoid sum on a fine grid); the larger error upward in the two samples drawn with the Poisson
+    interval, as printed in the others."""
+    fig = _script("fig_dndx_vs_ho21")
+    rows = fig.read_lls(os.path.join(DATA, *fig.LLS_FILE))
+    points = fig.lls_points(rows)
+    assert {s: len(p) for s, p in points.items()} == {
+        "prochaska10_t4": 6,
+        "omeara13_t5_comb": 1,
+        "fumagalli13_nc": 1,
+        "crighton19_corr": 3,
+        "fumagalli20_dr16": 1,
+    }
+    om = C.OMEGA_M_LINE
+    for source, z_lo, z_hi, value, err_lo, err_hi in rows:
+        if source not in fig.LLS_DRAWN:
+            continue
+        (point,) = [p for p in points[source] if p[0] == z_lo and p[1] == z_hi]
+        grid = np.linspace(z_lo, z_hi, 20001)
+        delta_x = np.trapezoid((1 + grid) ** 2 / np.sqrt(om * (1 + grid) ** 3 + 1 - om), grid)
+        factor = (z_hi - z_lo) / delta_x
+        assert point[5] == pytest.approx(factor, rel=1e-8) and 0.2 < factor < 0.4
+        np.testing.assert_allclose(point[2], point[5] * value, rtol=1e-14, atol=0)
+        down, up = (err_hi, err_lo) if fig.LLS_DRAWN[source][2] else (err_lo, err_hi)
+        np.testing.assert_allclose(point[3:5], [point[5] * down, point[5] * up], rtol=1e-14, atol=0)
+        assert point[4] >= point[3], "in every drawn row the larger error is upward"
+    # the swap moved something: in every row of Prochaska et al. (2010) the error drawn upward is the larger
+    p = points["prochaska10_t4"]
+    assert np.all(p[:, 4] > p[:, 3])
+
+
+def test_the_lls_reader_refuses_what_it_cannot_draw(tmp_path):
+    fig = _script("fig_dndx_vs_ho21")
+    per_x = tmp_path / "per_x.dat"
+    per_x.write_text("# header\n3.0\t3.5\t0.5\t0.1\t0.1\tlX\t0.3\tsynthetic\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="reads l\\(z\\) rows only"):
+        fig.read_lls(str(per_x))
+    short = tmp_path / "short.dat"
+    short.write_text("3.0\t3.5\t0.5\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="eight tab-separated fields"):
+        fig.read_lls(str(short))
+    # a sample drawn with the Poisson interval whose printed plus error is already the larger: nothing to reverse
+    rows = [("prochaska10_t4", 3.3, 3.4, 1.0, 0.2, 0.3)]
+    with pytest.raises(SystemExit, match="nothing to reverse"):
+        fig.lls_points(rows)
+    with pytest.raises(SystemExit, match="no row of"):
+        fig.lls_points([("prochaska10_t4", 3.3, 3.4, 1.0, 0.3, 0.2)])
+
+
+def test_the_count_above_the_threshold_from_a_synthetic_distribution():
+    """The count above 10^17.5 from a CDDF of bins 0.2 wide centred on 17.1, 17.3, ..., 22.9 (the bin 17.4 to 17.6
+    holds the threshold): for a constant f it is f (10^23 - 10^17.5); a bin with no value is left out; the
+    threshold on a bin edge; one value per redshift for a (n_z, Nbin) array; and the cross-check from class lines
+    built from the same distribution gives the same number."""
+    fig = _script("fig_dndx_vs_ho21")
+    log_nhi = np.round(np.arange(17.1, 23.0, 0.2), 10)
+    assert log_nhi.size == 30
+    f = np.full(30, 1e-17)  # synthetic
+    np.testing.assert_allclose(
+        fig.cumulative_dndx(f, log_nhi), 1e-17 * (10**23.0 - 10**17.5), rtol=1e-12, atol=0
+    )
+    only_partial = np.where(log_nhi == 17.5, 1e-17, 0.0)
+    np.testing.assert_allclose(
+        fig.cumulative_dndx(only_partial, log_nhi),
+        1e-17 * (10**17.6 - 10**17.5),
+        rtol=1e-12,
+        atol=0,
+    )
+    np.testing.assert_allclose(
+        fig.cumulative_dndx(f, log_nhi, threshold=17.6),
+        1e-17 * (10**23.0 - 10**17.6),
+        rtol=1e-12,
+        atol=0,
+    )
+    gap = f.copy()
+    gap[-1] = np.nan  # the bin 22.8 to 23.0 has no value
+    np.testing.assert_allclose(
+        fig.cumulative_dndx(gap, log_nhi), 1e-17 * (10**22.8 - 10**17.5), rtol=1e-12, atol=0
+    )
+    below = np.where(log_nhi < 17.4, np.nan, f)  # NaN below the threshold changes nothing
+    assert fig.cumulative_dndx(below, log_nhi) == fig.cumulative_dndx(f, log_nhi)
+    assert np.isnan(fig.cumulative_dndx(np.full(30, np.nan), log_nhi))
+    two = np.vstack([f, 2 * f])
+    np.testing.assert_allclose(
+        fig.cumulative_dndx(two, log_nhi),
+        [1e-17 * (10**23 - 10**17.5), 2e-17 * (10**23 - 10**17.5)],
+        rtol=1e-12,
+        atol=0,
+    )
+    # class lines from the same distribution: LLS 17.2 to 19, subDLA 19 to 20.3, DLA from 20.3
+    rising = 1e-17 * (1.0 + np.arange(30))  # synthetic, different in every bin
+    lls, sub, dla = (
+        fig.sum_over(rising, fig.widths_inside(log_nhi, a, b))
+        for a, b in ((17.2, 19.0), (19.0, 20.3), (20.3, np.inf))
+    )
+    check = fig.cross_check(np.array([lls, sub, dla]), rising, log_nhi, 17.2)
+    np.testing.assert_allclose(check, fig.cumulative_dndx(rising, log_nhi), rtol=1e-12, atol=0)
+    with pytest.raises(SystemExit, match="not evenly spaced"):
+        fig.widths_inside(np.array([17.1, 17.3, 17.6]), 17.5)
+
+
+def test_the_class_spans_in_the_labels_are_the_catalogues():
+    from hcd_analysis import catalog
+
+    fig = _script("fig_dndx_vs_ho21")
+    spans = {name: span for name, _, _, _, span in fig.CLASSES}
+    assert f"10^{{{catalog.LOG_NHI_DLA_MIN:g}}}" in spans["DLA"]
+    assert f"10^{{{catalog.LOG_NHI_SUBDLA_MIN:g}}}" in spans["subDLA"]
+    assert f"10^{{{catalog.LOG_NHI_DLA_MIN:g}}}" in spans["subDLA"]
+    assert f"10^{{{catalog.LOG_NHI_LLS_MIN:g}}}" in spans["LLS"]
+    assert f"10^{{{catalog.LOG_NHI_SUBDLA_MIN:g}}}" in spans["LLS"]
+    assert fig.LLS_THRESHOLD == 17.5
 
 
 def test_the_lls_subdla_tables_read_as_the_collections_own_readers_read_them():
@@ -534,16 +740,67 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
 ):
     dndx = _script("fig_dndx_vs_ho21")
     assert dndx.REDSHIFTS[0] == 2.2 and dndx.REDSHIFTS[-1] == 4.6 and len(dndx.REDSHIFTS) == 13
-    assert [(name, column) for name, column, _, _ in dndx.CLASSES] == [
+    assert [(name, column) for name, column, *_ in dndx.CLASSES] == [
         ("DLA", 2),
         ("subDLA", 1),
         ("LLS", 0),
     ]
     assert hp.HCD_CLASSES == ("LLS", "subDLA", "DLA"), "the columns of pred.dndx the script indexes"
     monkeypatch.setattr(dndx, "REDSHIFTS", SYNTHETIC_Z)
+    # record the points and the dashed line as drawn
+    from matplotlib.axes import Axes
+
+    drawn_points, real_errorbar, real_plot = {}, Axes.errorbar, Axes.plot
+
+    def spy_errorbar(self, x, y, *a, **k):
+        drawn_points[k.get("label")] = (np.asarray(x), np.asarray(y), k.get("xerr"), k.get("yerr"))
+        return real_errorbar(self, x, y, *a, **k)
+
+    drawn_lines = {}
+
+    def spy_plot(self, *a, **k):
+        drawn_lines[k.get("label")] = (k, a)
+        return real_plot(self, *a, **k)
+
+    monkeypatch.setattr(Axes, "errorbar", spy_errorbar)
+    monkeypatch.setattr(Axes, "plot", spy_plot)
     out = str(tmp_path / "dndx.png")
     assert dndx.main(_args(release) + ["--design", design, "--out", out]) == 0
+    monkeypatch.setattr(Axes, "errorbar", real_errorbar)
+    monkeypatch.setattr(Axes, "plot", real_plot)
     facts = _facts(out)
+    # the count above 10^17.5: the drawn dashed line, its cross-check, and what the side file says
+    emu = hp.load_release(str(release["root"]), release["sha"])
+    stack = emu.predict_many(C.MIDPOINT, z=list(SYNTHETIC_Z), tau0_amp=1.0, dtau0=0.0)
+    want = dndx.cumulative_dndx(stack.cddf, stack.log_nhi)
+    assert np.all(np.isfinite(want))
+    (label,) = [k for k in drawn_lines if k and "10^{17.5}" in k]
+    kw, (x, y) = drawn_lines[label]
+    assert list(x) == list(SYNTHETIC_Z) and kw["color"] == C.YELLOW and kw["ls"] != "-"
+    np.testing.assert_allclose(y, want, rtol=1e-12, atol=0)
+    ratio = want / dndx.cross_check(stack.dndx, stack.cddf, stack.log_nhi, 17.2)
+    cum = facts["cumulative"]
+    assert cum["threshold_log_nhi"] == 17.5 and cum["bin_holding_the_threshold"] == [17.5]
+    assert cum["cross_check_ratio_range"] == [float(ratio.min()), float(ratio.max())]
+    assert set(cum["bins_without_value_above_the_threshold"]) == {f"{z:g}" for z in SYNTHETIC_Z}
+    assert cum["label"] == "model (LF+MF): all absorbers with N_HI >= 10^17.5"
+    # the LLS points: l(X) with the factors of the side file, the Poisson interval where it is drawn
+    lls = facts["lls_measurements"]
+    assert lls["drawn"] == {source: v[0] for source, v in dndx.LLS_DRAWN.items()}
+    assert lls["poisson_interval"] == ["prochaska10_t4", "omeara13_t5_comb"]
+    assert "fumagalli20_dr16" in lls["own_marker"]
+    factors = facts["cosmology"]["factors_lls"]
+    assert len(factors) == 12
+    points = dndx.lls_points(dndx.read_lls(os.path.join(DATA, *dndx.LLS_FILE)))
+    for source in dndx.LLS_DRAWN:
+        x, y, xerr, yerr = drawn_points[dndx.lls_label(source)]
+        p = points[source]
+        np.testing.assert_allclose(x, (p[:, 0] + p[:, 1]) / 2, rtol=1e-14, atol=0)
+        np.testing.assert_allclose(y, p[:, 2], rtol=1e-14, atol=0)
+        np.testing.assert_allclose(np.asarray(xerr), [x - p[:, 0], p[:, 1] - x], rtol=1e-12, atol=0)
+        np.testing.assert_allclose(np.asarray(yerr), [p[:, 3], p[:, 4]], rtol=1e-14, atol=0)
+        mine = [f["factor"] for f in factors if f["source"] == source]
+        assert mine == list(p[:, 5])
     assert (
         "68 per cent interval" in facts["measurement"]
         and "18 redshift bins" in facts["measurement"]
@@ -585,7 +842,7 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
     table = SR.heldout_error()["dndx"]["lfmf"]
     bars = [d for d in drawn if d[3] == "none"]
     assert len(bars) == len(dndx.CLASSES) == 3
-    for (x, y, yerr, _), (name, column, _, _) in zip(bars, dndx.CLASSES):
+    for (x, y, yerr, _), (name, column, *_) in zip(bars, dndx.CLASSES):
         want = {z: row[column] for z, row in zip((3.0, 5.0), table) if row[column] is not None}
         assert list(x) == sorted(want), name  # no bar at 2.6, and none where the cell is null
         e = np.array([want[z] for z in x])
