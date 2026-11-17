@@ -32,7 +32,9 @@ spectra compare with the per-class model of Rogers et al. (2018) once those are 
 
 ## The Gaussian likelihood
 
-`hcd_analysis.likelihood` joins a loaded model, PRIYA's model of the mean flux and the mixture of the class spectra
+`hcd_analysis.likelihood` is a public DATA likelihood with a mock-recovery example, supported in this release (no
+emulator covariance is added); it is not the research likelihood of the pipeline. It joins a loaded model, PRIYA's
+model of the mean flux and the mixture of the class spectra
 into the Gaussian log likelihood of a P1D data vector with a full covariance. The module docstring states the
 mathematics, including the rule that brings the model to the data's wavenumbers (linear interpolation at the
 wavenumber of each bin, not an average over a bin) and what the covariance does not contain (no emulator error).
@@ -96,8 +98,8 @@ the repository file `docs/models_and_data.md`; the product ids are in the module
 
 **Outside the supported scope of this release.** These functions of `hcd_analysis.emulator.data_likelihood` load a
 measured P1D with its cuts and covariance for the research likelihood. They are listed here because they are how the
-verified data files are read. No fit runs from this repository at this commit (README, "Scope and limitations of
-this release"). Their full docstrings are in the source.
+verified data files are read. No fit to measured data is supported in this release (README, "Scope and
+limitations of this release"). Their full docstrings are in the source.
 
 ```{eval-rst}
 .. py:currentmodule:: hcd_analysis.emulator.data_likelihood

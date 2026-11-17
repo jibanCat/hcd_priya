@@ -317,19 +317,23 @@ filtered class spectra and was not tested with the troughs restored
 ## Scope and limitations of this release
 
 The supported public interface of this release is the predictor (`hcd_analysis.predictor`): the per-class P1D
-(clean, LLS, subDLA, DLA) from an LF+MF model, and a linear mix of the HCD classes (`add_hcd`). The rest of the
-repository (the catalogue pipeline, training, the likelihood and the fit scripts) is research code outside that scope.
+(clean, LLS, subDLA, DLA) from an LF+MF model, and a linear mix of the HCD classes (`add_hcd`).
+`hcd_analysis.likelihood` is a public DATA likelihood with a mock-recovery example, supported in this release (no
+emulator covariance is added). The research likelihood and the fit scripts of the pipeline stay outside the supported
+scope, with the rest of the research code (the catalogue pipeline and training).
 
 Not in this release:
 
-- **No cosmological inference.** No fit, sampler driver or supported likelihood runs from this repository at this
-  commit (Stages 3 and 4 of [`docs/pipeline.md`](docs/pipeline.md); [`tests/DEFERRED.md`](tests/DEFERRED.md)).
+- **No fit to measured data is supported:** the example fits a simulated mock; any fit to a measurement is the
+  user's, with the data likelihood as documented. The research fits (Stages 3 and 4 of
+  [`docs/pipeline.md`](docs/pipeline.md); [`tests/DEFERRED.md`](tests/DEFERRED.md)) are not part of the release.
 - **No HCD fitting, and no model of how the HCD content changes with redshift.** `add_hcd` evaluates any physical
   amplitudes, one per class per redshift, and fits nothing; the incidence law and its priors are research code.
 - **No prediction between snapshot redshifts.** Predictions exist at z = 2.0, 2.2, ..., 5.4 only; an LF+MF prediction
   is refused below the MF record's lower edge (z 2.2 by default) and flagged above z 4.6.
 - **No bandpower model.** A prediction is a per-class spectrum at points in k: no metal lines, no
-  spectrograph-resolution correction, no bin window, and no helper from a measured data leg to a model vector.
+  spectrograph-resolution correction and no bin window. `hcd_analysis.likelihood` brings it to a data set's bins by
+  linear interpolation and an optional factor ([`docs/likelihood.md`](docs/likelihood.md)).
 - **No calibrated emulator error.** `member_std` is the spread over ensemble members that differ only in their random
   seed; it is not an error bar and not a covariance.
 - **No trained model, catalogue or derived product of this project is public yet** (see

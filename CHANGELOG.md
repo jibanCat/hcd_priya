@@ -66,7 +66,7 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   as a walk-through in code that a test runs, and says when the linear interpolation to the data's wavenumbers is
   enough (bins several mode spacings apart) and when it is not established (bins about one mode spacing apart).
   `modes_per_bin`, a function and a method of the likelihood, reports which case a data set is in; it never warns
-  or refuses.
+  or refuses because of its value.
 - **A stored reference of a mock recovery** (`likelihood.P1DReference`, `read_reference`, `write_reference`): the
   truth, the posterior mean and two central intervals of each parameter, and percentiles of the posterior predictive
   on the bins of a data set; a strict file format, read only against its sha256. No reference is shipped.

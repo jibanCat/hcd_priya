@@ -374,6 +374,17 @@ def test_gaussian_terms_are_stated_log_densities_added_by_logp_only(emu):
         x = THETA[name]
         want = -0.5 * ((x - mean) / sd) ** 2 - math.log(sd * math.sqrt(2 * math.pi))
         assert got[name] == pytest.approx(want, rel=1e-14)
+    # away from the means the quadratic part counts: each term is the log density of a normal distribution
+    from scipy.stats import norm
+
+    away = dict(THETA, hub=THETA["hub"] + 0.023, bhfeedback=THETA["bhfeedback"] - 0.0061)
+    got_away = like.log_gaussian_terms(away)
+    for name, (mean, sd) in terms.items():
+        assert away[name] != mean
+        assert got_away[name] == pytest.approx(
+            norm.logpdf(away[name], loc=mean, scale=sd), rel=1e-12
+        )
+    assert like.logp(away) == pytest.approx(like.loglike(away) + sum(got_away.values()), rel=1e-12)
     plain = L.GaussianP1DLikelihood(emu, data)
     assert plain.log_gaussian_terms(THETA) == {} and plain.logp(THETA) == plain.loglike(THETA)
     assert like.loglike(THETA) == plain.loglike(THETA)  # loglike has no term in it

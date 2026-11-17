@@ -31,6 +31,9 @@ recovery (``P1DReference``), each with what it does not do stated in its docstri
 
        ln L = -1/2 r^T C^-1 r  -  1/2 ln det C  -  N/2 ln(2 pi)
 
+   with C the symmetric part of the covariance, (C + C^T) / 2: the covariance itself when it is
+   symmetric.
+
 **What the covariance is.** Whatever the data set states: C is used as given (when it differs
 from its transpose by rounding, its symmetric part: see ``P1DData``). This module adds no
 emulator error to it. A likelihood built this way treats the model as exact, so a posterior from
@@ -431,7 +434,8 @@ def interp_to_bins(k_model: ArrayLike, p_model: ArrayLike, k_data: ArrayLike) ->
     bins: for the data checked (the KODIAQ-SQUAD bins, on one high-resolution simulation,
     privately) the straight line and a smoother interpolation through the same modes differ by
     far less than the data errors. Where the bins are about one mode spacing apart (eBOSS, for
-    example), the two differ by an amount comparable to that measurement's errors: the rule is
+    example), for the data checked (eBOSS-like bins, on the same simulation, privately) the two
+    differ by an amount comparable to that measurement's errors: the rule is
     NOT established for such data, and you should check it before you rely on it.
     ``modes_per_bin`` tells you which case your data are in.
 
@@ -489,9 +493,9 @@ def modes_per_bin(k_model: ArrayLike, k_data: ArrayLike) -> np.ndarray:
     more, on one simulation) the straight line of ``interp_to_bins`` and a smoother interpolation
     differ by far less than the data errors. A value near 1 means the bins are about as fine as
     the modes: for such data the straight line is NOT established by this package, and you should
-    check it before you rely on it. Values in between, about 1.5 to 3, are not classified: check
-    them as you would a value near 1 (``docs/likelihood.md``, "Bringing the model to the data's
-    wavenumbers").
+    check it before you rely on it. Values between about 1 and 4, and the bins of any other data
+    set, are not classified: check them as you would a value near 1 (``docs/likelihood.md``,
+    "Bringing the model to the data's wavenumbers").
 
     It only reports. Nothing warns and nothing is refused because of its value, and it uses no
     model value: wavenumbers only.
@@ -723,7 +727,7 @@ class GaussianP1DLikelihood:
     hcd_mode : str
         "priya" (the model's own fractions, the default), "fractions" or "relative_to_priya".
     logdet : float
-        ln det C.
+        ln det of the symmetric part of C, (C + C^T) / 2: of C itself when it is symmetric.
     refuse_flags : tuple of str
     refusals : dict
         Filled by ``sampler_logp``: ``{kind of refusal: [count, the first message of that kind]}``.

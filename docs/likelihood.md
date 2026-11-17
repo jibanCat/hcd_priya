@@ -100,7 +100,9 @@ P_\mathrm{model}(k_n) = P_\mathrm{clean}(k_n) + \sum_c A_c \left[ P_c(k_n) - P_\
 with $c$ over LLS, subDLA and DLA. $A_c$ is the fraction of all sightlines that belong to class $c$ (each in
 [0, 1], their sum at most 1; the rest is clean forest). By default $A_c$ is the model's own fraction at the point,
 `pred.w_c`, so the HCD content follows the nine parameters; the section on the HCD content gives the two other
-ways. In the code it is `predictor.add_hcd`:
+ways. Under LF+MF, `pred.w_c` follows the corrected dN/dX only when the model carries an incidence record (the flag
+`incidence_mf_applied`); without one it is the LF model's fraction, mixed with MF-corrected class spectra. In the
+code it is `predictor.add_hcd`:
 
 ```python
 A = pred.w_c  # redshifts x 3: the model's own fractions of LLS, subDLA and DLA
@@ -172,14 +174,14 @@ from its transpose by rounding, `SYMMETRY_RTOL`) and its Cholesky factor $L$, $C
 once:
 
 ```math
-r^T C^{-1} r = \left| L^{-1} r \right|^2, \qquad \ln \det C = 2 \sum_i \ln L_{ii}
+r^T C_\mathrm{sym}^{-1} r = \left| L^{-1} r \right|^2, \qquad \ln \det C_\mathrm{sym} = 2 \sum_i \ln L_{ii}
 ```
 
 (the Cholesky factor is only a numerically safe way to compute these two numbers: one triangular solve, and no
 inverse is formed; you never need it to use the class), and
 
 ```math
-\ln \mathcal{L} = -\frac{1}{2} \, r^T C^{-1} r - \frac{1}{2} \ln \det C - \frac{N}{2} \ln (2 \pi).
+\ln \mathcal{L} = -\frac{1}{2} \, r^T C_\mathrm{sym}^{-1} r - \frac{1}{2} \ln \det C_\mathrm{sym} - \frac{N}{2} \ln (2 \pi).
 ```
 
 `chi2(theta)` returns $r^T C^{-1} r$; `loglike(theta)` returns $\ln \mathcal{L}$. By hand, and then with the class,
@@ -236,12 +238,12 @@ counted in mode spacings:
   a smooth curve sampled finely. For the data checked (the KODIAQ-SQUAD bins, on one high-resolution simulation,
   privately), the straight line and a smoother interpolation through the same modes differ by far less than the
   data errors.
-- **Bins about one mode spacing apart** (the eBOSS bins, for example): there the two differ by an amount comparable
-  to that measurement's errors. **For such data this rule is not established by this package.** Check it before you
+- **Bins about one mode spacing apart** (the eBOSS bins, for example): for the data checked (eBOSS-like bins, on the
+  same simulation, privately), the two differ by an amount comparable to that measurement's errors. **For such data this rule is not established by this package.** Check it before you
   rely on it: compare with a smoother interpolation through the same modes, or bring in the window of the
   measurement.
-- **In between** (about 1.5 to 3 mode spacings, the lowest XQ-100 bins for example): not classified by this
-  package. Check such bins as you would the second case.
+- **Anything else** (between about 1 and 4 mode spacings, the lowest XQ-100 bins for example, or the bins of another
+  data set at any spacing): not classified by this package. Check such bins as you would the second case.
 
 **`modes_per_bin` says which case your data are in.** It gives, for each bin, the spacing of the bin centres there
 over the spacing of the modes there. It only reports: nothing warns and nothing is refused because of its value. For
@@ -266,20 +268,22 @@ depends on the window of the measurement, which this package does not model. So 
 safe; they do not make the comparison safe in every respect. A window that is a multiplicative factor can be given
 as `model_factor`; a true bin average is not computed here.
 
-**The example's mock recovery is touched by neither effect.** Its mock is the simulation's own spectrum, brought
-from the simulation's modes to the bin centres by this same rule (a straight line between two neighbouring modes,
-read at the centre), and the same resolution table multiplies the mock and the model. The mock and the model are
-therefore treated alike.
+**The example's mock recovery does not test this rule.** Its mock is the simulation's own spectrum, brought from
+the simulation's modes to the bin centres by this same rule (a straight line between two neighbouring modes, read at
+the centre), and the same resolution table multiplies the mock and the model. At the truth the mock and the model
+are therefore treated alike (away from it the model's modes move with `hub` and `omegamh2`). So the recovery is not
+disturbed by either effect, and it cannot detect an error of the rule either: that needs a comparison with a
+smoother interpolation, as above.
 
 **The numbers.** The modes are the box modes of the PRIYA simulations, `k_n = 2 pi n / (120 Mpc/h)`, n = 1 to 172.
 In s/km they depend on z and on `hub` and `omegamh2`; at the midpoint of the parameters their spacing is
-0.00052 s/km at z = 2.2 and 0.00042 s/km at z = 4.2 (0.00040 to 0.00055 over the corners of `hub` and `omegamh2`),
-and they reach 0.068 to 0.095 s/km. The data bins, from the public files:
+0.00052 s/km at z = 2.2 and 0.00042 s/km at z = 4.2 (0.00039 to 0.00056 over the corners of `hub` and `omegamh2`),
+and they reach 0.067 to 0.097 s/km. The data bins, from the public files:
 
 | Data set | Bins | Spacing of the bin centres | Mode spacings per bin spacing (`modes_per_bin`) |
 |---|---|---|---|
 | eBOSS DR14 (Chabanier et al. 2019) | 35 per redshift, 0.00108 to 0.0195 s/km | 0.000542 s/km, uniform | about 1 |
-| KODIAQ-SQUAD (Karacayli et al. 2022) | 21 per redshift: 0.0011 to 0.0077 s/km in steps of 0.0022, then steps of 0.1 in log10 k to 0.40 s/km | 0.0020 to 0.081 s/km | about 4 at the lowest k, more above |
+| KODIAQ-SQUAD (Karacayli et al. 2022) | 21 per redshift: 0.0011 to 0.0077 s/km in steps of 0.0022, then from 0.0099 s/km in steps of 0.1 in log10 k to 0.40 s/km | 0.0022 to 0.081 s/km | about 4 at the lowest k, more above |
 | XQ-100 (`load_xq100`) | 13 per redshift, 0.00316 to 0.0631 s/km | 0.108 in log10 k (0.0009 to 0.014 s/km) | about 2 at the lowest k, more above |
 
 **The situations to avoid:**
@@ -287,8 +291,10 @@ and they reach 0.068 to 0.095 s/km. The data bins, from the public files:
 - **Data beyond the modes.** A data wavenumber below the first or above the last mode at a point is refused
   (`OutsideModesError`), never extrapolated. The modes move with `hub` and `omegamh2`, so a bin near an end can be
   inside the modes at one point and outside at another: `sampler_logp` returns minus infinity there. Keep the data
-  well inside the modes over the whole box. The first mode lies between about 0.0004 and 0.0006 s/km, and the
-  KODIAQ-SQUAD bins above about 0.07 s/km are outside the modes at some points of the box.
+  well inside the modes over the whole box. The first mode lies between about 0.0004 and 0.0006 s/km and the last
+  between about 0.067 and 0.097 s/km: the KODIAQ-SQUAD bins above about 0.097 s/km are beyond the modes at every
+  point of the box, and those from about 0.067 s/km at some points. Drop them: the example keeps the 11 bins from
+  0.0055 to 0.063 s/km.
 - **Features finer than the mode spacing.** A feature narrower than about two mode spacings is not resolved by
   interpolating it.
 - **Features the model does not have.** Interpolating never creates one. The oscillation of the
@@ -318,6 +324,9 @@ mistake can be caught: small values meant as absolute fractions but given to `hc
   exact, so a posterior from it is narrower than one that accounts for the error of the emulator.
 - **No bandpower model, no resolution model, no metals, no continuum or DLA-masking systematics** beyond what a data
   set puts into its covariance and its `model_factor`.
+- **No MF correction of the class fractions without an incidence record.** Under LF+MF the default `pred.w_c` is
+  then the LF model's, while the class spectra are MF-corrected; the flag `incidence_mf_applied` says which case a
+  prediction is in.
 - **The two omissions of the mixture** stated on a prediction (`pred.labels["omissions"]`): the power of the subDLA
   cores that the PRIYA filter removes, and the DLA damping-wing core.
 - **No prior.** Flat boxes belong to the sampler. Gaussian terms on parameters can be given when the likelihood is
@@ -511,9 +520,10 @@ DOWNLOAD_DIR` writes the same two images (and the posterior predictive over the 
 `docs/figures/mock_recovery/`, say in words what each image shows and name the reference and the mock by their
 sha256.
 
-Reading the first figure: the Gaussian terms on `hub` and `bhfeedback` are centred at 0.70 and 0.05, away from the
-truth of this mock, and the truth of `omegamh2` lies near the lower edge of its box, so the means of these three sit
-away from their truth for that reason. The interval of `ns` spans most of its box: these bins constrain it little.
+Reading the first figure: the means of `hub` and `bhfeedback` sit at the centres of their Gaussian terms (0.70 and
+0.05), away from the truth of this mock. The posterior of `omegamh2` covers most of its box, so its mean sits near
+the middle while its truth lies near the lower edge. The interval of `ns` also spans most of its box: these bins
+constrain it little.
 
 ![The stored reference for the eleven parameters: the mean, the central 68 and 95 per cent intervals and the truth of the mock, each on the scale of the parameter's flat box](figures/mock_recovery/posterior_intervals.png)
 

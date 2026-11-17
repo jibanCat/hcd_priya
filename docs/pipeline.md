@@ -1,8 +1,9 @@
 # The research pipeline: catalogue construction and the four stages
 
 This page was part of the [README](../README.md) until 2026-11 and is kept word for word. It describes the research
-pipeline that the emulator was built for. The supported interface of this release is the predictor
-([README](../README.md#scope-and-limitations-of-this-release)).
+pipeline that the emulator was built for. The supported interface of this release is the predictor and the data
+likelihood of `hcd_analysis.likelihood` ([README](../README.md#scope-and-limitations-of-this-release)); the
+likelihood and the fits described on this page are the research ones.
 
 Throughout this page, each stage is marked with what it needs:
 **requires the full data / Great Lakes (not in this repo)** for anything that
