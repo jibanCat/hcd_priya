@@ -44,6 +44,16 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
   https://github.com/sbird/DLA_data (fetched from its fork https://github.com/jibanCat/DLA_data), read as that
   collection's own reader `ho21_cddf` reads them where it has a reader; the provenance file compares the two step
   by step.
+- **The points are in the cosmology of the line.** dN/dX is a count per unit absorption distance X, and the
+  measurement's X is that of a flat cosmology with Omega_m = 0.279 (the default of the paper's public code; the paper
+  does not state it: `docs/figures/data/ho21/PROVENANCE.md`). The line is per unit X of the cosmology of its
+  parameters, flat with Omega_m = omegamh2 / hub^2 = 0.143 / 0.70^2 = 0.2918. Each bin's value and its limits are
+  multiplied by the same factor, Delta X(0.279) / Delta X(0.2918), with Delta X the integral of
+  (1 + z)^2 / sqrt(Omega_m (1 + z)^3 + 1 - Omega_m) over the bin: 1.0202 to 1.0224 (+0.0087 to +0.0096 dex). The
+  table stays as published; the factors are in the side file. The bands are not converted: each design point is per
+  unit X of its own cosmology (Omega_m from 0.254 to 0.339), so only the lines are in the measurement's cosmology;
+  in the cosmology of the bands' two extremes the points would sit 6.0 to 6.6 per cent lower or 6.9 to 7.6 per
+  cent higher.
 - **Snapshots against bins.** The model is drawn at snapshot redshifts 0.2 apart; the measurement is in bins one
   sixth of a unit wide. The two measured points above z = 4.6 have no model curve beside them, and neither has
   the one below 2.2.
@@ -91,11 +101,24 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
   collection's own reader `ho21_cddf` reads them where it has a reader; the provenance file compares the two step
   by step.
 - **Data below the DLA threshold:** in every panel, the f(N_HI) of subDLAs that Zafar et al. (2013) measured over
-  z 1.5 to 5 (open squares); in the panel 3 < z < 4, the f(N_HI) of O'Meara et al. (2007) for log10 N_HI 19.0 to
+  z 1.51 to 5.00 (open squares); in the panel 3 < z < 4, the f(N_HI) of O'Meara et al. (2007) for log10 N_HI 19.0 to
   20.3 at a mean z of 3.1 (filled diamonds), and the region of f(N_HI) that Prochaska, O'Meara and Worseck (2010)
-  allow for LLS at z 3.7 (the shaded region). They are the files of the same collection, read as its own readers read
-  them; `docs/figures/data/lls_subdla/PROVENANCE.md` in the repository gives their origin and compares the readers
-  step by step. Their redshifts are not the model's snapshots, and Zafar et al. cover a wider range than any panel.
+  allow for LLS at z 3.7 (the shaded region). The subDLA table is a file of the same collection, read as its own
+  reader reads it; the other two are built from the papers' own tables (O'Meara et al., Table 5, sample ALL-19.0;
+  Prochaska, O'Meara and Worseck, the conservative range of their f(N) table), in the formats of the collection's
+  readers. `docs/figures/data/lls_subdla/PROVENANCE.md` in the repository gives the sources line by line and
+  compares the readers step by step. Their redshifts are not the model's snapshots, and Zafar et al. cover a wider
+  range than any panel.
+- **Every measurement is in the cosmology of the line.** f(N_HI, X) is a count per unit X. Ho, Bird and Garnett
+  computed their X in a flat cosmology with Omega_m = 0.279 (the default of their public code), the other three in
+  one with Omega_m = 0.3 (stated in each paper). The line is per unit X of the cosmology of its parameters, flat with
+  Omega_m = 0.2918. Each measurement's values and limits are multiplied by the same factor, Delta X(own) /
+  Delta X(0.2918) over its redshift range (each panel's bin for Ho, Bird and Garnett; the paper's sample for the
+  others): 1.0205, 1.0213 and 1.0219 (+0.0088 to +0.0094 dex) for the three DLA tables; 0.9870, 0.9871 and 0.9867
+  (-0.0057 to -0.0058 dex) for Zafar et al., O'Meara et al. and Prochaska, O'Meara and Worseck. The files stay as
+  published; the factors are in the side file, and the two PROVENANCE.md files give each cosmology and redshift
+  range with its source. The band is not converted (each design point is per unit X of its own cosmology, Omega_m
+  from 0.254 to 0.339): only the line is in the measurements' cosmology.
 - **One snapshot against one bin.** Each panel sets one snapshot beside a measurement over a range of redshifts. In
   the third panel the model is at the single redshift 3.4 inside a bin one unit wide.
 - **The bin 4 to 5 is left out.** It reaches beyond z = 4.6, the upper edge of the grouped-validation domain of the

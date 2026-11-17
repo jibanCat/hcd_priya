@@ -18,10 +18,20 @@ What is drawn, in three panels (one per redshift bin of the measurement):
 - points: f(N_HI) of Ho, Bird and Garnett (2021) with the limits of their 68 per cent interval, from
   ``docs/figures/data/ho21`` (see PROVENANCE.md there). A bin in which the measured f is zero is not drawn, also
   where the table gives an upper limit for it;
-- below the DLA threshold, from ``docs/figures/data/lls_subdla`` (see PROVENANCE.md there), read as the collection's
-  own readers read them: the subDLA f(N_HI) of Zafar et al. (2013), z 1.5 to 5, in every panel; and in the panel
+- below the DLA threshold, from ``docs/figures/data/lls_subdla`` (see PROVENANCE.md there), in the formats of the
+  collection's own readers: the subDLA f(N_HI) of Zafar et al. (2013), z 1.5 to 5, in every panel; and in the panel
   3 < z < 4, the f(N_HI) of O'Meara et al. (2007) (mean z 3.1) and the region of f(N_HI) for LLS that Prochaska,
-  O'Meara and Worseck (2010) allow at z 3.7, drawn as a filled region.
+  O'Meara and Worseck (2010) allow at z 3.7, drawn as a filled region (these two files are built from the papers'
+  own tables).
+
+**Every measurement is drawn in the cosmology of the model line.** f(N_HI, X) is a count per unit absorption
+distance X, and each survey computed its Delta X in its own flat cosmology (Ho, Bird and Garnett: Omega_m = 0.279;
+the other three: 0.3). The line is per unit X of the cosmology of its parameters (flat, Omega_m = omegamh2 / hub^2
+of the midpoint). Each measurement's values and limits are multiplied by Delta X(own) / Delta X(line), with
+Delta X = integral of (1+z)^2 / sqrt(Omega_m (1+z)^3 + 1 - Omega_m) dz over its redshift range (each panel's bin
+for Ho, Bird and Garnett; the paper's sample for the other three): ``figures_common.to_line_cosmology``. The factors
+go into the side file. The band is not converted: each design point is per unit X of its own cosmology (Omega_m
+from 0.25 to 0.34), so only the line is in the measurements' cosmology.
 
 The model needs an incidence MF record (an optional part of a release): without one it returns no CDDF. The measurement bin
 from z = 4 to 5 is left out: it reaches beyond z 4.6, the upper edge of the grouped-validation domain of the
@@ -46,6 +56,12 @@ PANELS = (
     ("2.5 < z < 3", "cddf_z253.txt", 2.8),
     ("3 < z < 4", "cddf_z34.txt", 3.4),
 )
+# the redshift range of each table of Ho, Bird and Garnett (2021): the range of its Delta X
+HO21_Z_RANGE = {
+    "cddf_z225.txt": (2.0, 2.5),
+    "cddf_z253.txt": (2.5, 3.0),
+    "cddf_z34.txt": (3.0, 4.0),
+}
 
 
 def read_ho21_cddf(path: str):
@@ -72,10 +88,11 @@ def read_zafar13(path: str):
 
 
 def read_omeara07(path: str):
-    """The table of O'Meara et al. (2007), as the collection's reader ``omeara_data`` reads it (through
-    ``format_error_bars``): a header line, then one row per bin, six columns, all log10. Column 0: N_HI. Column 1:
-    f(N_HI). Columns 2 and 3: the lower and the upper edge of the bin in N_HI. Columns 4 and 5: the lower and the
-    upper limit of f. Returns log10 N_HI, the two edges in log10 N_HI, f, and its two limits."""
+    """The table of O'Meara et al. (2007), in the format of the collection's reader ``omeara_data`` (through
+    ``format_error_bars``): header lines starting with "#", then one row per bin, six columns, all log10. Column 0:
+    N_HI. Column 1: f(N_HI). Columns 2 and 3: the lower and the upper edge of the bin in N_HI. Columns 4 and 5: the
+    lower and the upper limit of f. Returns log10 N_HI, the two edges in log10 N_HI, f, and its two limits.
+    """
     a = np.loadtxt(path, ndmin=2)
     if a.shape[1] != 6:
         raise SystemExit(f"{path}: expected six columns, found {a.shape[1]}")
@@ -84,9 +101,9 @@ def read_omeara07(path: str):
 
 
 def read_prochaska10(path: str):
-    """The LLS region of Prochaska, O'Meara and Worseck (2010), as the collection's reader ``prochaska_10_data`` reads
-    it: the corners of a polygon, one per row, log10 N_HI and log10 f(N_HI); the reader fills the polygon. Returns
-    log10 N_HI and f of the corners."""
+    """The LLS region of Prochaska, O'Meara and Worseck (2010), in the format of the collection's reader
+    ``prochaska_10_data``: the corners of a polygon, one per row, log10 N_HI and log10 f(N_HI); the reader fills the
+    polygon. Returns log10 N_HI and f of the corners."""
     a = np.loadtxt(path, ndmin=2)
     if a.shape[1] != 2:
         raise SystemExit(f"{path}: expected two columns, found {a.shape[1]}")
@@ -96,10 +113,22 @@ def read_prochaska10(path: str):
 # the measurements below the DLA threshold: the subDLA points in every panel, the other two in the panel 3 < z < 4
 LLS_SUBDLA = {
     "zafar_2013.txt": "Zafar et al. (2013), subDLAs, z 1.5 to 5",
-    "summary.dat": "O'Meara et al. (2007), mean z 3.1",
-    "prochaska_lls.dat": "Prochaska, O'Meara and Worseck (2010), LLS region at z 3.7",
+    "omeara2007_fn_all19p0.dat": "O'Meara et al. (2007), mean z 3.1",
+    "prochaska2010_lls_region.dat": "Prochaska, O'Meara and Worseck (2010), LLS region at z 3.7",
+}
+# each file's key in figures_common.OMEGA_M_OF and Z_RANGE_OF
+LLS_SUBDLA_KEY = {
+    "zafar_2013.txt": "zafar13",
+    "omeara2007_fn_all19p0.dat": "omeara07",
+    "prochaska2010_lls_region.dat": "prochaska10",
 }
 LLS_SUBDLA_PANEL = "3 < z < 4"
+
+
+def factor_of(name: str) -> float:
+    """The factor that puts the file's f(N_HI, X) into the cosmology of the model line (figures_common)."""
+    key = LLS_SUBDLA_KEY[name]
+    return C.to_line_cosmology(*C.Z_RANGE_OF[key], C.OMEGA_M_OF[key])
 
 
 def main(argv=None) -> int:
@@ -131,6 +160,16 @@ def main(argv=None) -> int:
         design_table=C.design_source(args),
         measurement_source=C.MEASUREMENT_SOURCE,
         measurement_source_below_dla=C.MEASUREMENT_SOURCE_LLS_SUBDLA,
+        cosmology=dict(
+            C.cosmology_facts(),
+            factors_below_dla={
+                LLS_SUBDLA[n]: {
+                    "z_range": list(C.Z_RANGE_OF[LLS_SUBDLA_KEY[n]]),
+                    "factor": factor_of(n),
+                }
+                for n in LLS_SUBDLA
+            },
+        ),
         panels=[],
     )
     for ax, (bin_label, name, z) in zip(axes, PANELS):
@@ -162,29 +201,37 @@ def main(argv=None) -> int:
             for i, why in refused:
                 print(f"   design point {i} refused: {why}")
         C.line(ax, x, pred.cddf, color=C.BLUE, zorder=2, label="model (LF+MF), at the parameters of the script")  # fmt: skip
+        # every measurement: values and limits times its factor to the line's cosmology (module docstring)
         logn, f, f_lo, f_hi = read_ho21_cddf(C.data_file("ho21", name))
+        k = C.to_line_cosmology(*HO21_Z_RANGE[name], C.OMEGA_M_OF["ho21"])
+        panel["ho21_z_range"], panel["ho21_factor"] = list(HO21_Z_RANGE[name]), k
+        f, f_lo, f_hi = k * f, k * f_lo, k * f_hi
         ax.errorbar(
             logn, f, yerr=[f - f_lo, f_hi - f], fmt="o", ms=3.4, color=C.INK, ecolor=C.INK_SECONDARY, elinewidth=0.8,
             mec=C.SURFACE, mew=0.5, zorder=3, label="Ho, Bird and Garnett (2021), 68 per cent interval",
         )  # fmt: skip
         logn, half, f, f_lo, f_hi = read_zafar13(C.data_file("lls_subdla", "zafar_2013.txt"))
+        k = factor_of("zafar_2013.txt")
+        f, f_lo, f_hi = k * f, k * f_lo, k * f_hi
         ax.errorbar(
             logn, f, xerr=half, yerr=[f - f_lo, f_hi - f], fmt="s", ms=3.2, color=C.INK_SECONDARY, mfc=C.SURFACE,
             ecolor=C.INK_SECONDARY, elinewidth=0.8, zorder=3, label=LLS_SUBDLA["zafar_2013.txt"],
         )  # fmt: skip
         drawn = ["zafar_2013.txt"]
         if bin_label == LLS_SUBDLA_PANEL:
-            logn, lo_n, hi_n, f, f_lo, f_hi = read_omeara07(
-                C.data_file("lls_subdla", "summary.dat")
-            )
+            name_om, name_pow = "omeara2007_fn_all19p0.dat", "prochaska2010_lls_region.dat"
+            logn, lo_n, hi_n, f, f_lo, f_hi = read_omeara07(C.data_file("lls_subdla", name_om))
+            k = factor_of(name_om)
+            f, f_lo, f_hi = k * f, k * f_lo, k * f_hi
             ax.errorbar(
                 logn, f, xerr=[logn - lo_n, hi_n - logn], yerr=[f - f_lo, f_hi - f], fmt="D", ms=3.2,
                 color=C.INK_SECONDARY, mfc=C.INK_SECONDARY, ecolor=C.INK_SECONDARY, elinewidth=0.8, zorder=3,
-                label=LLS_SUBDLA["summary.dat"],
+                label=LLS_SUBDLA[name_om],
             )  # fmt: skip
-            logn, f = read_prochaska10(C.data_file("lls_subdla", "prochaska_lls.dat"))
-            ax.fill(logn, f, color=C.SHADE, ec=C.INK_SECONDARY, lw=0.6, zorder=0, label=LLS_SUBDLA["prochaska_lls.dat"])  # fmt: skip
-            drawn += ["summary.dat", "prochaska_lls.dat"]
+            logn, f = read_prochaska10(C.data_file("lls_subdla", name_pow))
+            f = factor_of(name_pow) * f
+            ax.fill(logn, f, color=C.SHADE, ec=C.INK_SECONDARY, lw=0.6, zorder=0, label=LLS_SUBDLA[name_pow])  # fmt: skip
+            drawn += [name_om, name_pow]
         panel["measurements_below_dla"] = [LLS_SUBDLA[n] for n in drawn]
         ax.set_yscale("log")
         ax.set_title(f"measured: {bin_label};  model: z = {z:g}", loc="left")

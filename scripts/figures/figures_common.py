@@ -14,6 +14,8 @@ import hashlib
 import json
 import os
 
+import numpy as np
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA = os.path.join(REPO, "docs", "figures", "data")
 FIGURES = os.path.join(REPO, "docs", "figures")
@@ -98,10 +100,57 @@ MEASUREMENT_SOURCE = (
     "fetched from the fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/ho21/PROVENANCE.md"
 )
 MEASUREMENT_SOURCE_LLS_SUBDLA = (
-    "Zafar et al. (2013), doi:10.1051/0004-6361/201321154; O'Meara et al. (2007), doi:10.1086/510711; Prochaska, "
-    "O'Meara and Worseck (2010), doi:10.1088/0004-637X/718/1/392; files of github.com/sbird/DLA_data, fetched from the "
-    "fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/lls_subdla/PROVENANCE.md"
+    "Zafar et al. (2013), doi:10.1051/0004-6361/201321154, file of github.com/sbird/DLA_data, fetched from the fork "
+    "github.com/jibanCat/DLA_data (commit daa595c); O'Meara et al. (2007), doi:10.1086/510711, and Prochaska, O'Meara "
+    "and Worseck (2010), doi:10.1088/0004-637X/718/1/392, files built from the papers' own tables; "
+    "docs/figures/data/lls_subdla/PROVENANCE.md"
 )
+
+# ---- The cosmology of the absorption distance X.
+# A measurement per unit absorption distance (dN/dX, or f(N_HI, X)) is a count divided by the Delta X its survey
+# covered, and a survey computes Delta X in its own cosmology. In a flat cosmology with matter density Omega_m (h
+# cancels),
+#     Delta X = integral from z1 to z2 of (1 + z)^2 / sqrt(Omega_m (1 + z)^3 + 1 - Omega_m) dz.
+# The figures draw every measurement in the cosmology of the model line (flat, Omega_m = omegamh2 / hub^2 of
+# MIDPOINT): its values and its limits are multiplied by
+#     factor = Delta X(its own Omega_m) / Delta X(the line's Omega_m), over its redshift range.
+# The data files stay as published; docs/figures/data/*/PROVENANCE.md give each cosmology and redshift range with its
+# source. The band over the design points is not converted: each design point is per unit X of its own cosmology.
+OMEGA_M_LINE = MIDPOINT["omegamh2"] / MIDPOINT["hub"] ** 2
+# the Omega_m of each measurement's X (flat; the sources are in the PROVENANCE.md files)
+OMEGA_M_OF = {"ho21": 0.279, "zafar13": 0.3, "omeara07": 0.3, "prochaska10": 0.3}
+# the redshift range of the Delta X of the measurements below the DLA threshold (Ho+21 is converted per bin)
+Z_RANGE_OF = {"zafar13": (1.51, 5.00), "omeara07": (1.68, 4.47), "prochaska10": (3.3, 4.4)}
+# Gauss-Legendre nodes and weights on [-1, 1]: 64 points integrate this smooth integrand to about 1e-15
+_GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(64)
+
+
+def absorption_distance(z1: float, z2: float, omega_m: float) -> float:
+    """Delta X from z1 to z2 in a flat cosmology with matter density omega_m (see the comment above)."""
+    z = 0.5 * (z2 - z1) * _GL_NODES + 0.5 * (z2 + z1)
+    integrand = (1.0 + z) ** 2 / np.sqrt(omega_m * (1.0 + z) ** 3 + 1.0 - omega_m)
+    return float(0.5 * (z2 - z1) * np.sum(_GL_WEIGHTS * integrand))
+
+
+def to_line_cosmology(z1: float, z2: float, omega_m_own: float) -> float:
+    """The factor that puts a quantity per unit X, measured over z1 to z2 in a flat cosmology with omega_m_own, into
+    the cosmology of the model line: Delta X(omega_m_own) / Delta X(OMEGA_M_LINE). Values and limits take the same
+    factor."""
+    return absorption_distance(z1, z2, omega_m_own) / absorption_distance(z1, z2, OMEGA_M_LINE)
+
+
+def cosmology_facts() -> dict:
+    """What the side file of a figure says about the conversion (the factors themselves are added per data set)."""
+    return {
+        "line_omega_m": OMEGA_M_LINE,
+        "conversion": "values and limits per unit X multiplied by Delta X(own Omega_m) / Delta X(line Omega_m) over "
+        "the measurement's redshift range, flat cosmologies; Delta X = integral of (1+z)^2 / sqrt(Omega_m (1+z)^3 + "
+        "1 - Omega_m) dz",
+        "band": "not converted: each design point is per unit X of its own cosmology",
+        "own_omega_m": dict(OMEGA_M_OF),
+    }
+
+
 DESIGN_FILE = "priya_lf_design_60.csv"  # the 60 low-resolution design points of the PRIYA suite
 
 

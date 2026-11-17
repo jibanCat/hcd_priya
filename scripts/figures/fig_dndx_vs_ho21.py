@@ -27,6 +27,15 @@ What is drawn, on one axis:
 confirmed the rows on 2026-11-13 (see PROVENANCE.md beside the file): row 0 the redshift of the bin centre, row 1
 dN/dX of DLAs, rows 2 and 3 the lower and the upper limit of the 68 per cent interval, rows 4 and 5 those of the 95
 per cent interval. The figure shows the 68 per cent interval.
+
+**The points are drawn in the cosmology of the model line.** dN/dX is a count per unit absorption distance X, and
+the measurement computed its Delta X in a flat cosmology with Omega_m = 0.279 (the default of the paper's public
+code; see PROVENANCE.md beside the file). The line is per unit X of the cosmology of its parameters (flat, Omega_m =
+omegamh2 / hub^2 of the midpoint). Each bin's value and limits are multiplied by Delta X(0.279) / Delta X(line),
+with Delta X = integral of (1+z)^2 / sqrt(Omega_m (1+z)^3 + 1 - Omega_m) dz over the bin (the table's centres are
+evenly spaced; each bin runs half a spacing either side of its centre): ``figures_common.to_line_cosmology``. The
+factors go into the side file. The bands are not converted: each design point is per unit X of its own cosmology
+(Omega_m from 0.25 to 0.34), so only the lines are in the measurement's cosmology.
 """
 
 from __future__ import annotations
@@ -53,6 +62,17 @@ def read_ho21_dndx(path: str):
     if a.ndim != 2 or a.shape[0] != 6:
         raise SystemExit(f"{path}: expected six rows, found shape {a.shape}")
     return a[0], a[1], a[2], a[3]
+
+
+def bin_edges(centres):
+    """The redshift range of each bin: the table's centres are evenly spaced (eighteen bins of 1/6 from 2 to 5), and
+    each bin runs half a spacing either side of its centre. Refuses centres that are not evenly spaced.
+    """
+    step = np.diff(centres)
+    if not np.allclose(step, step[0], rtol=0.0, atol=1e-9):
+        raise SystemExit("the bin centres of the dN/dX table are not evenly spaced")
+    half = step[0] / 2.0
+    return centres - half, centres + half
 
 
 def main(argv=None) -> int:
@@ -154,6 +174,16 @@ def main(argv=None) -> int:
         else "not drawn: the model carries no held-out error at these redshifts"
     )
     zm, dndx, lo68, hi68 = read_ho21_dndx(C.data_file("ho21", "dndx_all.txt"))
+    # each bin's value and limits times its factor to the line's cosmology (module docstring)
+    z_lo, z_hi = bin_edges(zm)
+    k = np.array([C.to_line_cosmology(a, b, C.OMEGA_M_OF["ho21"]) for a, b in zip(z_lo, z_hi)])
+    dndx, lo68, hi68 = k * dndx, k * lo68, k * hi68
+    facts["cosmology"] = dict(
+        C.cosmology_facts(),
+        factors_ho21=[
+            {"z_range": [float(a), float(b)], "factor": float(f)} for a, b, f in zip(z_lo, z_hi, k)
+        ],
+    )
     ax.errorbar(
         zm, dndx, yerr=[dndx - lo68, hi68 - dndx], fmt="o", ms=3.6, color=C.INK, ecolor=C.INK_SECONDARY,
         elinewidth=0.8, mec=C.SURFACE, mew=0.5, zorder=3, label="DLA, Ho, Bird and Garnett (2021), 68 per cent interval",

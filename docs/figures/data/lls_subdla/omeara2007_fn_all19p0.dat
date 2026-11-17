@@ -1,0 +1,20 @@
+# O'Meara et al. (2007), binned H I frequency distribution f(N_HI, X) of super Lyman limit systems, sample
+# "ALL-19.0" (MIKE + UVES, log N_HI 19.0 to 20.3; Delta X = 329.8, mean z = 3.10, 60 systems).
+# Paper: O'Meara, J. M., Prochaska, J. X., Burles, S., Prochter, G., Bernstein, R. A., Burgess, K. M. 2007,
+#   "The Keck + Magellan Survey for Lyman Limit Absorption. I. The Frequency Distribution of Super Lyman Limit
+#   Systems", ApJ 656, 666, doi:10.1086/510711, arXiv:astro-ph/0610726 (version 2).
+# Source: arXiv e-print astro-ph/0610726v2 (https://arxiv.org/e-print/astro-ph/0610726v2), file prpt_paper1.tex,
+#   sha256 5dd7e2e9891b2d5c16ffda8620ddeae74c5916a8c005fb303c4999d11ed84bb8; table "\hfreq\ SUMMARY" (label tab_fn, lines 750-771; journal Table 5, p. 676),
+#   row "ALL-19.0" (line 767), its four columns "log f_HI(N,X)" with bins N in [19.0,19.3), [19.3,19.6),
+#   [19.6,19.9), [19.9,20.3) (column heads, lines 758-761). Read 2026-11-17. Values copied, not rescaled
+#   (per unit X for the paper's flat Omega_m = 0.3, Omega_Lambda = 0.7 cosmology).
+# Columns, all log10 (the columns of summary.dat of PR #27):
+#   x    = centre of the bin in log10 N_HI (a convention: the table gives bins, not a point)
+#   y    = log10 f(N_HI, X) of the table (f in cm^2)
+#   xmin, xmax = the bin edges of the table's column head
+#   ymin = y minus the table's lower error; ymax = y plus the table's upper error (errors in dex)
+#x	y	xmin	xmax	ymin	ymax
+19.15	-20.17	19.0	19.3	-20.27	-20.07
+19.45	-20.70	19.3	19.6	-20.84	-20.57
+19.75	-21.04	19.6	19.9	-21.19	-20.90
+20.10	-21.48	19.9	20.3	-21.62	-21.35

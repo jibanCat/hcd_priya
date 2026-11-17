@@ -134,36 +134,106 @@ def test_the_ho21_provenance_names_each_file_with_its_digest_and_the_commit():
     )
 
 
-def test_the_lls_subdla_provenance_names_each_file_with_its_digest_and_the_commits():
+def test_the_lls_subdla_provenance_names_each_file_with_its_digest_and_its_source():
+    """PROVENANCE.md names each file with its digest; the collection file with its commits; the two built files with
+    their papers' arXiv sources (the .tex digests and table lines); and the two files they replace.
+    """
     with open(os.path.join(DATA, "lls_subdla", "PROVENANCE.md"), encoding="utf-8") as fh:
         text = fh.read()
     files = {n: d for n, d in _sums().items() if n.startswith("lls_subdla/")}
     assert sorted(files) == [
-        "lls_subdla/prochaska_lls.dat",
-        "lls_subdla/summary.dat",
+        "lls_subdla/omeara2007_fn_all19p0.dat",
+        "lls_subdla/prochaska2010_lls_region.dat",
         "lls_subdla/zafar_2013.txt",
     ]
     for name, digest in files.items():
         assert os.path.basename(name) in text and digest in text, name
     for needed in (
-        "github.com/sbird/DLA_data",  # where the files originate
-        "90104dd49364f0478e7dccd52675a41794af4033",  # the commit that added the subDLA table there
-        "3498694e59701b72c738e5eef950c62b73683c1e",  # the commit that added the other two
-        "github.com/jibanCat/DLA_data",  # the fork they were fetched from
+        "github.com/sbird/DLA_data",  # where the subDLA table originates
+        "90104dd49364f0478e7dccd52675a41794af4033",  # the commit that added it there
+        "github.com/jibanCat/DLA_data",  # the fork it was fetched from
         "daa595c692254c93b86009318a6e2b029db67112",
+        "no licence file",
         "10.1051/0004-6361/201321154",
         "10.1086/510711",
         "10.1088/0004-637X/718/1/392",
-        "no licence file",
+        "astro-ph/0610726v2",  # the source of the O'Meara table, and its .tex digest
+        "5dd7e2e9891b2d5c16ffda8620ddeae74c5916a8c005fb303c4999d11ed84bb8",
+        "0912.0292v1",  # the source of the region, and its .tex digest
+        "f236288f014668c136b1f4a5b4e5d4c19b741f0538d3c090edeabffe2bd574b9",
+        "summary.dat",  # the two files these replace, and why
+        "prochaska_lls.dat",
+        "3498694e59701b72c738e5eef950c62b73683c1e",
+        "Omega_m = 0.3",  # the cosmology of each, and the conversion
+        "Delta X(own Omega_m) / Delta X(line Omega_m)",
     ):
         assert needed in text, needed
+
+
+def test_the_two_built_tables_are_the_papers_published_values():
+    """omeara2007_fn_all19p0.dat holds row ALL-19.0 of the f(N) table of O'Meara et al. (2007) (their Table 5): log f
+    and its errors per bin, the bin edges, and the bin centre. prochaska2010_lls_region.dat holds the corners of the
+    region between the four extreme power laws of the "Conservative Range" of the f(N) table of Prochaska, O'Meara
+    and Worseck (2010): each row's line log f = log f19 + beta (log N - 19), beta = (log f19 - log k) / 19, for log N
+    from 17.5 to 19. The published numbers are restated here from the papers."""
+    om = np.loadtxt(os.path.join(DATA, "lls_subdla", "omeara2007_fn_all19p0.dat"), ndmin=2)
+    edges = np.array([19.0, 19.3, 19.6, 19.9, 20.3])
+    logf = np.array([-20.17, -20.70, -21.04, -21.48])
+    err_up, err_down = np.array([0.10, 0.13, 0.14, 0.13]), np.array([0.10, 0.14, 0.15, 0.14])
+    assert om.shape == (4, 6)
+    assert np.allclose(om[:, 2], edges[:-1], rtol=0, atol=1e-12)
+    assert np.allclose(om[:, 3], edges[1:], rtol=0, atol=1e-12)
+    assert np.allclose(om[:, 0], (edges[:-1] + edges[1:]) / 2, rtol=0, atol=1e-12)
+    assert np.allclose(om[:, 1], logf, rtol=0, atol=1e-12)
+    assert np.allclose(om[:, 4], logf - err_down, rtol=0, atol=1e-12)
+    assert np.allclose(om[:, 5], logf + err_up, rtol=0, atol=1e-12)
+    rows = [(-20.25, -4.1), (-20.25, 4.7), (-19.85, -18.0), (-19.85, -4.6)]  # (log f19, log k)
+
+    def lines(log_n):
+        return np.array([f19 + (f19 - k) / 19.0 * (log_n - 19.0) for f19, k in rows])
+
+    corners = np.loadtxt(os.path.join(DATA, "lls_subdla", "prochaska2010_lls_region.dat"), ndmin=2)
+    assert corners.shape == (6, 2)
+    # the corners in the file's order: at log N 19 the lowest and the highest line, the upper kink, at 17.5 the
+    # highest and the lowest, the lower kink
+    envelope = ["min", "max", "max", "max", "min", "min"]
+    for (log_n, log_f), side in zip(corners, envelope):
+        values = lines(log_n)
+        edge = values.max() if side == "max" else values.min()
+        assert abs(log_f - edge) < 1e-6, (log_n, log_f, side, edge)
+    assert list(corners[:, 0][[0, 1, 3, 4]]) == [19.0, 19.0, 17.5, 17.5]
+    for i in (2, 5):  # each kink is where two of the lines cross
+        values = lines(corners[i, 0])
+        edge = values.max() if envelope[i] == "max" else values.min()
+        assert np.sum(np.abs(values - edge) < 1e-5) == 2, corners[i]
+
+
+def test_the_conversion_to_the_line_cosmology():
+    """Delta X against two closed forms (Omega_m = 1: the integral of (1 + z)^(1/2); Omega_m = 0: of (1 + z)^2), the
+    line's Omega_m from the midpoint, a factor of 1 for a measurement already in the line's cosmology, and the sign
+    of the factor: a larger Omega_m gives a shorter Delta X."""
+    z1, z2 = 2.0, 4.0
+    assert C.absorption_distance(z1, z2, 1.0) == pytest.approx(
+        2.0 / 3.0 * ((1 + z2) ** 1.5 - (1 + z1) ** 1.5), rel=1e-13
+    )
+    assert C.absorption_distance(z1, z2, 0.0) == pytest.approx(
+        ((1 + z2) ** 3 - (1 + z1) ** 3) / 3.0, rel=1e-13
+    )
+    assert C.OMEGA_M_LINE == C.MIDPOINT["omegamh2"] / C.MIDPOINT["hub"] ** 2
+    assert C.to_line_cosmology(z1, z2, C.OMEGA_M_LINE) == 1.0
+    assert (
+        C.to_line_cosmology(z1, z2, C.OMEGA_M_LINE + 0.05)
+        < 1.0
+        < C.to_line_cosmology(z1, z2, C.OMEGA_M_LINE - 0.05)
+    )
 
 
 def test_the_lls_subdla_tables_read_as_the_collections_own_readers_read_them():
     """The mappings of ``zafar_data``, ``omeara_data`` (with ``format_error_bars``) and ``prochaska_10_data`` of the DLA
     data collection (PROVENANCE.md compares them step by step), restated here in plain numpy, against the readers of the
-    CDDF figure: the same points, the same error bars, the same polygon. The values of f are near 1e-20, so every
-    comparison is relative, with no absolute tolerance."""
+    CDDF figure, on the three files (the two built from the papers' tables keep the collection's formats): the same
+    points, the same error bars, the same polygon. The values of f are near 1e-20, so every comparison is relative,
+    with no absolute tolerance."""
     cddf = _script("fig_cddf_vs_ho21")
 
     def same(a, b):
@@ -190,7 +260,7 @@ def test_the_lls_subdla_tables_read_as_the_collections_own_readers_read_them():
         np.log10(f) - np.log10(lo), data[:, 4]
     )
     # omeara_data: format_error_bars on 10**data: x, y, then the bin edges and the limits of f as distances
-    path = os.path.join(DATA, "lls_subdla", "summary.dat")
+    path = os.path.join(DATA, "lls_subdla", "omeara2007_fn_all19p0.dat")
     data = 10 ** np.loadtxt(path)
     assert data.shape == (4, 6)
     logn, lo_n, hi_n, f, f_lo, f_hi = cddf.read_omeara07(path)
@@ -200,7 +270,7 @@ def test_the_lls_subdla_tables_read_as_the_collections_own_readers_read_them():
     assert same(f - f_lo, data[:, 1] - data[:, 4]) and same(f_hi - f, data[:, 5] - data[:, 1])
     assert np.all(lo_n < logn) and np.all(logn < hi_n) and np.all(f_lo < f) and np.all(f < f_hi)
     # prochaska_10_data: ax.fill(10**c0, 10**c1), the corners in the file's order
-    path = os.path.join(DATA, "lls_subdla", "prochaska_lls.dat")
+    path = os.path.join(DATA, "lls_subdla", "prochaska2010_lls_region.dat")
     data = np.loadtxt(path)
     assert data.shape == (6, 2)
     logn, f = cddf.read_prochaska10(path)
@@ -361,15 +431,49 @@ def test_the_cddf_figure_runs_on_a_model_with_an_incidence_record(
     assert [z for _, _, z in cddf.PANELS] == [2.2, 2.8, 3.4]
     moved = tuple((label, name, z) for (label, name, _), z in zip(cddf.PANELS, SYNTHETIC_Z))
     monkeypatch.setattr(cddf, "PANELS", moved)
+    # record what is drawn as points: the measurements must be drawn times their cosmology factors
+    from matplotlib.axes import Axes
+
+    drawn_points, real_errorbar = {}, Axes.errorbar
+
+    def spy(self, x, y, *a, **k):
+        drawn_points.setdefault(k.get("label"), []).append(
+            (np.asarray(y), np.asarray(k.get("yerr")))
+        )
+        return real_errorbar(self, x, y, *a, **k)
+
+    monkeypatch.setattr(Axes, "errorbar", spy)
     out = str(tmp_path / "cddf.png")
     assert cddf.main(_args(release) + ["--design", design, "--out", out]) == 0
     facts = _facts(out)
+    # the conversion to the line's cosmology: the factors in the side file, and the drawn values and limits
+    cosmo = facts["cosmology"]
+    assert cosmo["line_omega_m"] == C.OMEGA_M_LINE and cosmo["own_omega_m"] == C.OMEGA_M_OF
+    for panel, (_, name, _) in zip(facts["panels"], moved):
+        assert panel["ho21_factor"] == C.to_line_cosmology(*cddf.HO21_Z_RANGE[name], 0.279)
+    for name, label in cddf.LLS_SUBDLA.items():
+        assert cosmo["factors_below_dla"][label]["factor"] == cddf.factor_of(name)
+    k = facts["panels"][0]["ho21_factor"]
+    logn, f, f_lo, f_hi = cddf.read_ho21_cddf(os.path.join(DATA, "ho21", moved[0][1]))
+    y, yerr = drawn_points["Ho, Bird and Garnett (2021), 68 per cent interval"][0]
+    assert np.allclose(y, k * f, rtol=1e-12, atol=0.0)
+    assert np.allclose(yerr, [k * (f - f_lo), k * (f_hi - f)], rtol=1e-12, atol=0.0)
+    name = "omeara2007_fn_all19p0.dat"
+    _, _, _, f, f_lo, f_hi = cddf.read_omeara07(os.path.join(DATA, "lls_subdla", name))
+    y, yerr = drawn_points[cddf.LLS_SUBDLA[name]][0]
+    k = cddf.factor_of(name)
+    assert np.allclose(y, k * f, rtol=1e-12, atol=0.0)
+    assert np.allclose(yerr, [k * (f - f_lo), k * (f_hi - f)], rtol=1e-12, atol=0.0)
+    assert (
+        k != 1.0 and facts["panels"][0]["ho21_factor"] != 1.0
+    ), "the conversion is not a no-op here"
     assert facts["parameters"] == C.MIDPOINT and facts["incidence_record"] is True
     assert "github.com/sbird/DLA_data" in facts["measurement_source"]
     assert "lls_subdla/PROVENANCE.md" in facts["measurement_source_below_dla"]
     below = [p["measurements_below_dla"] for p in facts["panels"]]
     zafar, omeara, prochaska = (
-        cddf.LLS_SUBDLA[n] for n in ("zafar_2013.txt", "summary.dat", "prochaska_lls.dat")
+        cddf.LLS_SUBDLA[n]
+        for n in ("zafar_2013.txt", "omeara2007_fn_all19p0.dat", "prochaska2010_lls_region.dat")
     )
     assert below == [
         [zafar],
@@ -444,6 +548,16 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
         "68 per cent interval" in facts["measurement"]
         and "18 redshift bins" in facts["measurement"]
     )
+    # the conversion to the line's cosmology: one factor per bin, the bins of 1/6 from 2 to 5 about their centres
+    factors = facts["cosmology"]["factors_ho21"]
+    assert len(factors) == 18
+    assert factors[0]["z_range"][0] == pytest.approx(2.0) and factors[-1]["z_range"][
+        1
+    ] == pytest.approx(5.0)
+    for a, b in zip(factors, factors[1:]):
+        assert a["z_range"][1] == pytest.approx(b["z_range"][0])
+    for row in factors:
+        assert row["factor"] == C.to_line_cosmology(*row["z_range"], 0.279)
     assert facts["design_points"] == 3 and facts["design_points_refused"] == 0
     assert facts["redshifts"] == list(dndx.REDSHIFTS) and facts["parameters"] == C.MIDPOINT
     assert facts["heldout_error"].startswith(
