@@ -365,13 +365,15 @@ nothing to relax. To study these edges:
   is for diagnosis only, for example a chain with and one without the switch.
 - `fidelity="LF"` makes a likelihood without the multi-fidelity correction: compare the two to see its effect.
 - The flat boxes of the example (`BOXES`) can be widened: the predictor flags, and does not refuse, points outside
-  them.
+  them, as long as the model's wavenumbers at the point are finite (see "Still raised" below).
 
 **Still raised, not minus infinity:** a point with missing or unknown names, or with a value that is not a real
 number (text, True or False, a list); a fidelity the model cannot serve and a
 data redshift below the multi-fidelity correction (`MFUnavailableError`, `MFRangeError`), which hold for every point,
 so minus infinity everywhere would hide the reason; a name in `refuse_flags` that is not a flag of a prediction,
-or whose value is not True or False.
+or whose value is not True or False; a point at which the model's wavenumbers in s/km are not finite (for example
+`hub = 0`, or an `omegamh2` so negative that the expansion rate is not defined at a redshift of the data), which
+raises `LikelihoodInputError`. Such points lie far outside every box of the example.
 
 ## A data set
 
@@ -562,3 +564,12 @@ PRIYA simulations", JCAP 2024 (07) 029, [arXiv:2309.03943](https://arxiv.org/abs
 Wilson, B., Irsic, V., McQuinn, M. 2021, "A measurement of the Lyman-beta forest power spectrum and its cross with
 the Lyman-alpha forest in X-Shooter XQ-100", [arXiv:2106.04837](https://arxiv.org/abs/2106.04837) (title and authors
 read from the arXiv page; the journal fields were not verified).
+
+Kim, T.-S., Bolton, J. S., Viel, M., Haehnelt, M. G., Carswell, R. F. 2007, "An improved measurement of the flux
+distribution of the Ly-alpha forest in QSO absorption spectra: the effect of continuum fitting, metal contamination
+and noise properties", MNRAS 382, 1657, [arXiv:0711.1862](https://arxiv.org/abs/0711.1862), DOI
+10.1111/j.1365-2966.2007.12406.x (all fields read from the arXiv record).
+
+Chabanier, S., Palanque-Delabrouille, N., Yeche, C., et al. 2019, "The one-dimensional power spectrum from the SDSS
+DR14 Ly-alpha forests", JCAP 2019 (07) 017, [arXiv:1812.03554](https://arxiv.org/abs/1812.03554), DOI
+10.1088/1475-7516/2019/07/017 (all fields read from the arXiv record).

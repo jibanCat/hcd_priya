@@ -1105,7 +1105,10 @@ class GaussianP1DLikelihood:
         fidelity the model cannot serve and a data redshift below the multi-fidelity correction
         (``predictor.MFUnavailableError``, ``predictor.MFRangeError``), which hold for every point,
         so minus infinity everywhere would hide the reason; a name in ``refuse_flags`` that is not
-        a flag of a prediction, or whose value is not True or False.
+        a flag of a prediction, or whose value is not True or False; a point at which the model's
+        wavenumbers in s/km are not finite (for example hub = 0, or an omegamh2 so negative that
+        the expansion rate is not defined at a redshift of the data), which raises
+        ``LikelihoodInputError``; such points lie far outside every box of the example.
 
         Parameters
         ----------
