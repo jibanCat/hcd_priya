@@ -443,6 +443,17 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   finite, positive and consistent in shape, and a record fitted from a tree with uncommitted changes.
 - The predictor applies a record only when its `lf_cache.sha256` equals the training cache of the backbone, as
   re-derived from the member metas, and only together with the P1D MF record.
+- **On a research (fold) model.** `predictor.load_research_bundle(..., mf_dir=..., mf_record_sha256=...,
+  incidence_dir=..., incidence_record_sha256=...)` applies a record to a fold model that carries its fold MF record,
+  for held-out predictions of the corrected `dndx`, `w_c` and `cddf`. The table must be built without the
+  simulations the backbone holds out. Refused: a record with a name in `train_sims` that is the same run as a
+  held-out simulation (the same string, or the same nine parameters within 1.5 per cent: the high- and the
+  low-resolution run of one design point can be named with a digit of difference); and a record whose
+  `composition.excluded_sims` does not list every held-out simulation by the exact string the backbone holds. The
+  guard compares the names a record declares; it cannot see which simulations the table was really built from.
+  A backbone that holds out a simulation without a high-resolution run gets no record from the builder that
+  passes: the builder's exclusions can only name simulations that have one. Without the two keywords the loader
+  does what it did.
 - **Redshifts outside the table.** At a snapshot redshift the table does not hold, the factor is interpolated
   between the neighbouring rows and the LF+MF prediction is flagged `incidence_mf_z_interpolated`; beyond the table
   it is held at the edge row and flagged `incidence_mf_z_clamped`. An LF prediction applies no table and has both
@@ -463,9 +474,11 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   simulations than the record uses unless that is said to be intended, and it refuses to run unless the held-out
   error is stated one way or the other (`--no-heldout-error`). The block is inside the record's bytes, so the
   record's digest covers it.
-- **On a prediction:** `dndx_err` (3,) and `cddf_err` (Nbin,) are the held-out rms of ln(prediction / truth) of `dndx`
-  and `cddf`: numbers on the logarithm. On the quantity itself the held-out range is the value times exp(-err) to the
-  value times exp(+err), each bound transformed on its own, so the range is asymmetric about the value. They are given
+- **On a prediction:** the held-out range on the quantity itself is in `dndx_lower` and `dndx_upper` (3,) and in
+  `cddf_lower` and `cddf_upper` (Nbin,). `dndx_err` (3,) and `cddf_err` (Nbin,) are the held-out rms of
+  ln(prediction / truth) of `dndx` and `cddf`: numbers on the logarithm, as the record stores them. A lower bound is
+  the value times exp(-err) and an upper bound the value times exp(+err), each transformed on its own, so for a
+  non-zero error the range is asymmetric about the value. They are given
   for the fidelity of the prediction: the `lf` tables for an LF prediction, the `lfmf` tables for an
   LF+MF one. It is an indication of size from a handful of held-out simulations, not the standard deviation of a
   known distribution; `labels["incidence_mf_error"]` gives the record's definition word for word, and
@@ -480,7 +493,8 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
 - **The w_c map at the corrected incidence.** The map from dN/dX to the class fractions is a Poisson model with a
   small term per class fitted on LF counts, and it is applied unchanged to the corrected dN/dX. It has no range
   check on dN/dX: nothing flags a corrected dN/dX outside the counts that term was fitted on. `w_c` has no held-out
-  error of its own: it inherits the error of the corrected dN/dX (`dndx_err`) and the map's own error.
+  error of its own: it inherits the error of the corrected dN/dX (the range `dndx_lower` to `dndx_upper`; on the
+  logarithm `dndx_err`) and the map's own error.
   Tested on the training simulations. Evaluated as the predictor evaluates it, at each high-resolution run's
   own dN/dX, the shipped map returns that run's counted class fractions with an rms relative error of 0.5 to 0.6 per
   cent for LLS, subDLA and DLA at z 2.2 to 4.6 (largest 1.3 per cent), the same as for the low-resolution runs (0.5

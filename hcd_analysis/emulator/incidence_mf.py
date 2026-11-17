@@ -92,17 +92,21 @@ HELDOUT_ERROR_STATEMENT = (
 def heldout_error_label(n_table_sims: int, heldout: dict | None = None) -> str:
     """The text of ``labels["incidence_mf_error"]``.
 
-    With a held-out error in the record (``heldout``: the record's ``heldout_error`` block): what the numbers of
-    ``dndx_err`` and ``cddf_err`` are, in the record's own words, word for word.
+    With a held-out error in the record (``heldout``: the record's ``heldout_error`` block): where the prediction
+    carries it (the range on the quantity, ``dndx_lower`` to ``dndx_upper`` and ``cddf_lower`` to ``cddf_upper``;
+    on the logarithm ``dndx_err`` and ``cddf_err``), and what the numbers are, in the record's own words, word
+    for word.
 
     Without one: ``HELDOUT_ERROR_STATEMENT``, the sentences that link it to this record (the statement speaks of the
     six fold models, and a record's table is built from the HR simulations that the record lists, which need not be
     those six), and the statement that the two error fields are NaN."""
     if heldout is not None:
         return (
-            f"The held-out error of this prediction's dndx and cddf is in dndx_err and cddf_err ({heldout['kind']})."
+            "The held-out error of this prediction's dndx and cddf is given on the quantity, as the range dndx_lower to "
+            "dndx_upper and cddf_lower to cddf_upper, and on the logarithm, as dndx_err and cddf_err "
+            f"({heldout['kind']})."
             f" {heldout['definition']} LF: {heldout['lf']} LF+MF: {heldout['lfmf']} What it does not cover: "
-            f"{heldout['what_it_does_not_cover']} On the quantity itself the held-out range of a value v is v * exp(-err) to v * exp(+err): each bound is transformed from the logarithm on its own, and the range is asymmetric about v. The correction table of this record is built from the HR "
+            f"{heldout['what_it_does_not_cover']} The two ends of the range of a value v are v * exp(-err) and v * exp(+err): each is transformed from the logarithm on its own, so for a non-zero err the range is asymmetric about v. The correction table of this record is built from the HR "
             f"simulations listed in provenance incidence_mf train_sims, {int(n_table_sims)} in number; the held-out "
             f"error was measured for a correction of {int(heldout['n_hr_simulations'])} HR simulations."
         )
@@ -111,8 +115,8 @@ def heldout_error_label(n_table_sims: int, heldout: dict | None = None) -> str:
         + " The six fold models are those of the six LF simulations that have an HR partner. The correction table "
         "of this record is built from the HR simulations listed in provenance incidence_mf train_sims, "
         f"{int(n_table_sims)} in number (a redshift row or a CDDF bin may rest on fewer: n_sims, cddf_n_pairs); "
-        "they need not be all of those six. No held-out error is available for this record: dndx_err and cddf_err "
-        "are NaN."
+        "they need not be all of those six. No held-out error is available for this record: dndx_err and cddf_err, "
+        "and with them the four bounds, are NaN."
     )
 
 

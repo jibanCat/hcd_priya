@@ -1,0 +1,8 @@
+{
+ "chain": "none: the stored reference alone",
+ "covariance": "the covariance of the mock alone: no emulator error is added",
+ "figure": "the mean and the central 68 and 95 per cent intervals of the stored reference for each of the eleven parameters, with the truth of the mock",
+ "made_by": "examples/mock_recovery.py, part three (draw_reference); it needs the example download",
+ "reference": "reference.json of the example download, sha256 35a0ad02dfa502234c79775ba4b37f82a8ec2efd2c162b4fe7b35b0e968cc8ac",
+ "scale": "each parameter on its flat box of the example (BOXES): 0 and 1 are the edges of the box"
+}

@@ -16,10 +16,10 @@ What is drawn, on one axis:
 - bands: the lowest and the highest value over the 60 design points of the PRIYA suite
   (``docs/figures/data/priya_lf_design_60.csv``; another table with ``--design``, none with ``--no-band``);
 - bars on the model lines (only when the model's incidence record carries a held-out error): the held-out range
-  ``pred.dndx * exp(-pred.dndx_err)`` to ``pred.dndx * exp(+pred.dndx_err)``, each bound computed on its own, so the
-  bar is asymmetric about the line; ``pred.dndx_err`` is the held-out rms of ln(prediction / truth) of the corrected
-  dN/dX. It is an indication of size from a handful of held-out simulations, not the standard deviation of a known
-  distribution;
+  from ``pred.dndx_lower`` to ``pred.dndx_upper``, the two bounds a prediction carries (``pred.dndx *
+  exp(-pred.dndx_err)`` and ``pred.dndx * exp(+pred.dndx_err)``, each computed on its own, so the bar is asymmetric
+  about the line); ``pred.dndx_err`` is the held-out rms of ln(prediction / truth) of the corrected dN/dX. The range
+  is an indication of size from a handful of held-out simulations, not an interval of a known distribution;
 - points: the DLA dN/dX of Ho, Bird and Garnett (2021) in eighteen redshift bins, with the limits of the 68 per cent
   interval, from ``docs/figures/data/ho21/dndx_all.txt``.
 
@@ -63,9 +63,6 @@ def main(argv=None) -> int:
     C.add_design_arguments(ap)
     ap.add_argument("--out", default=os.path.join(C.FIGURES, "dndx_vs_ho21.png"))
     args = ap.parse_args(argv)
-    import matplotlib
-
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FuncFormatter
 
@@ -128,14 +125,14 @@ def main(argv=None) -> int:
         ax.plot(
             z, stack.dndx[:, col], color=colour, lw=width, zorder=2, label=f"model (LF+MF): {name}"
         )
-        # the held-out range of the corrected dN/dX, as a bar on the model line. dndx_err is the held-out rms of
-        # ln(prediction / truth): the bounds are dndx * exp(-dndx_err) and dndx * exp(+dndx_err), each computed on
-        # its own (the bar is asymmetric). Drawn only where the model carries an estimate.
-        log_err = None if stack.dndx_err is None else stack.dndx_err[:, col]
-        if log_err is not None and np.any(np.isfinite(log_err)):
-            ok = np.isfinite(log_err)
+        # the held-out range of the corrected dN/dX, as a bar on the model line: from dndx_lower to dndx_upper, the
+        # two bounds the prediction carries (each computed on its own from the held-out rms of ln(prediction / truth),
+        # so the bar is asymmetric). Nothing is transformed here. Drawn only where the model carries an estimate.
+        lower = None if stack.dndx_lower is None else stack.dndx_lower[:, col]
+        if lower is not None and np.any(np.isfinite(lower)):
+            ok = np.isfinite(lower)
             value = stack.dndx[ok, col]
-            lower, upper = value * np.exp(-log_err[ok]), value * np.exp(log_err[ok])
+            lower, upper = lower[ok], stack.dndx_upper[ok, col]
             ax.errorbar(
                 z[ok], value, yerr=[value - lower, upper - value], fmt="none", ecolor=colour, elinewidth=1.1,
                 capsize=2.2, capthick=1.1, zorder=2, label="held-out range of the model" if not drew_error else None,
@@ -150,8 +147,9 @@ def main(argv=None) -> int:
             fontsize=8.5,
         )
     facts["heldout_error"] = (
-        "drawn on the model lines (LF+MF): the range pred.dndx * exp(-pred.dndx_err) to pred.dndx * exp(+pred.dndx_err), "
-        "each bound computed on its own (asymmetric); pred.dndx_err is the held-out rms of ln(prediction / truth)"
+        "drawn on the model lines (LF+MF): the held-out range from pred.dndx_lower to pred.dndx_upper "
+        "(pred.dndx * exp(-pred.dndx_err) and pred.dndx * exp(+pred.dndx_err), each bound computed on its own: "
+        "asymmetric); pred.dndx_err is the held-out rms of ln(prediction / truth)"
         if drew_error
         else "not drawn: the model carries no held-out error at these redshifts"
     )

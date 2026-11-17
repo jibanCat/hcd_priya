@@ -1,0 +1,8 @@
+{
+ "data": "the published bin centres and diagonal errors of KODIAQ-SQUAD (Karacayli et al. 2022: the example's 11 bins with the errors of the example's mock, the published final bins, and the full 21-bin layout with its published error columns added in quadrature), eBOSS DR14 (Chabanier et al. 2019), XQ-100 (as read by load_xq100) and DESI DR1",
+ "figure": "at each bin centre of six data layouts, the largest difference between three other interpolations through the same modes (a cubic spline, a monotone PCHIP interpolation and a straight line, each in log k and log P) and the straight line, in units of that bin's error: 95th percentile and largest value over the spectra, coloured by redshift; it measures how much the choice of interpolation matters, not an error against a known truth",
+ "made_by": "a check of the project outside this package; its script and the simulated spectra are not in this repository, so this figure cannot be redrawn from it",
+ "not_tested": "the true spectrum between modes, the simulations' sample variance, the measurements' windows, correlated errors, the emulator",
+ "quantities": "dimensionless ratios from the PRIYA simulations' spectra and published data errors; no spectrum value",
+ "spectra": "the PRIYA simulations' own flux power (the total P1D) at their box modes: the low-resolution runs, every snapshot from z 2.2 to 4.6, every mean-flux level; no emulator and no measured spectrum"
+}

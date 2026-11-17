@@ -1,0 +1,6 @@
+{
+ "figure": "the size of each emulator term at each bin against the data error, sqrt(C_emu,ii)/sqrt(C_obs,ii)",
+ "quantities": "dimensionless ratios; no spectrum value and no covariance in physical units",
+ "made_by": "a sensitivity check of the project outside this package; its covariance products are not in this repository, so this figure cannot be redrawn from it",
+ "used_by": "no fit of this package: the data likelihood adds no emulator covariance"
+}

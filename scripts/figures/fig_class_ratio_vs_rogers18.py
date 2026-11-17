@@ -109,9 +109,6 @@ def main(argv=None) -> int:
     )
     ap.add_argument("--out", default=os.path.join(C.FIGURES, "class_ratio_vs_rogers18.png"))
     args = ap.parse_args(argv)
-    import matplotlib
-
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.ticker import FuncFormatter
 

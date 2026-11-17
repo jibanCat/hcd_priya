@@ -463,6 +463,7 @@ def rel(tmp_path_factory):
     return {
         "two": hp.load_release(str(two["root"]), two["sha"]),
         "one": hp.load_release(str(one), sha1),
+        "one_sha": sha1,
         "info": two,
         "root": root,
     }
@@ -976,14 +977,15 @@ def test_a_prediction_carries_the_held_out_error_of_its_fidelity(rel_err):
     ), "a finite estimate beside every corrected value: nothing to warn about"
     label = mf.labels["incidence_mf_error"]
     assert label.startswith(
-        "The held-out error of this prediction's dndx and cddf is in dndx_err and cddf_err"
+        "The held-out error of this prediction's dndx and cddf is given on the quantity, as the range dndx_lower to "
+        "dndx_upper and cddf_lower to cddf_upper, and on the logarithm, as dndx_err and cddf_err"
     )
     for text in (
         "A synthetic definition of the synthetic numbers.",
         "rms_log_error_heldout",
         "2 in number",
-        "the held-out range of a value v is v * exp(-err) to v * exp(+err)",
-        "the range is asymmetric about v",
+        "The two ends of the range of a value v are v * exp(-err) and v * exp(+err)",
+        "for a non-zero err the range is asymmetric about v",
     ):
         assert text in label
     assert "No held-out error" not in label
@@ -1058,51 +1060,308 @@ def test_a_record_without_a_held_out_error_gives_nan_and_warns_once(rel, monkeyp
 
 
 # ------------------------------------------------------------------------------------------------- the log
-def test_a_call_that_applies_a_correction_says_so_once_in_the_log(rel, caplog):
+def test_a_predictor_says_its_corrections_once_at_info_and_then_at_debug(rel, caplog):
     import logging
 
-    two, one, info = rel["two"], rel["one"], rel["info"]
+    info = rel["info"]
+    # two new predictors: neither has said anything yet, whatever ran before and at whatever log level
+    two = hp.load_release(str(info["root"]), info["sha"])
+    one = hp.load_release(str(rel["root"] / "one"), rel["one_sha"])
     name = "hcd_analysis.predictor"
     # the library configures no logging: its logger has no level and no handler of its own
     assert logging.getLogger(name).level == logging.NOTSET and not logging.getLogger(name).handlers
+    # at the default level (WARNING, from the root logger) nothing is recorded, and the one INFO record is not used up
+    with caplog.at_level(logging.WARNING):
+        two.predict(PARAMS, 3.0, tau_eff=0.4)
+    assert not [r for r in caplog.records if r.name == name]
     with caplog.at_level(logging.INFO, logger=name):
         two.predict(PARAMS, 3.0, tau_eff=0.4)
+        two.predict(PARAMS, 3.0, tau_eff=0.4)  # the same predictor again: no second INFO record
+        two.predict_many(PARAMS, [2.6, 3.0, 5.2], tau_eff=0.4)
+        two.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")  # nothing applied: nothing logged
     (record,) = [r for r in caplog.records if r.name == name]
     text = record.getMessage()
     assert record.levelno == logging.INFO and "LF+MF" in text and "at 1 redshift(s)" in text
     assert f"the P1D MF correction (record sha256 {info['mf_sha']})" in text
     assert f"dN/dX and CDDF (record sha256 {info['incidence_sha']})" in text
+    assert text.endswith(
+        "(said once per predictor at INFO; its later corrected predictions say it at DEBUG)"
+    )
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger=name):
-        two.predict_many(
-            PARAMS, [2.6, 3.0, 5.2], tau_eff=0.4
-        )  # one record for the call, not one per redshift
+    # afterwards: one DEBUG record per corrected call (not one per redshift), none for LF; and another predictor
+    # says its own corrections at INFO, once
+    with caplog.at_level(logging.DEBUG, logger=name):
+        two.predict_many(PARAMS, [2.6, 3.0, 5.2], tau_eff=0.4)
+        two.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")
         one.predict(
             PARAMS, 3.0, tau_eff=0.4
         )  # no incidence record: only the P1D correction is named
-        two.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")  # nothing applied: nothing logged
-    texts = [r.getMessage() for r in caplog.records if r.name == name]
-    assert len(texts) == 2 and "at 3 redshift(s)" in texts[0]
+        one.predict(PARAMS, 3.0, tau_eff=0.4)
+    records = [r for r in caplog.records if r.name == name]
+    assert [r.levelno for r in records] == [logging.DEBUG, logging.INFO, logging.DEBUG]
+    texts = [r.getMessage() for r in records]
+    assert "at 3 redshift(s)" in texts[0] and f"sha256 {info['incidence_sha']}" in texts[0]
+    assert "said once" not in texts[0] and "said once" in texts[1] and "said once" not in texts[2]
     assert "P1D MF correction" in texts[1] and "incidence" not in texts[1]
-    # so at the default level (WARNING, from the root logger) nothing is recorded
     caplog.clear()
     assert logging.getLogger(name).level == logging.NOTSET  # caplog put back what it found
-    with caplog.at_level(logging.WARNING):
-        two.predict(PARAMS, 3.0, tau_eff=0.4)
-    assert not [r for r in caplog.records if r.name == name]
     assert not logging.getLogger(name).handlers
 
 
-def test_the_two_error_fields_are_described_on_the_quantity_without_an_approximation():
-    """The PI's rule (2026-11-15): the docstrings of dndx_err and cddf_err, and the module's paragraph on the held-out
-    error, state the range on the quantity (the bounds transformed separately) and never an approximation from the
-    logarithm, and never call the range symmetric."""
+# ------------------------------------------------------------------------- a fold model with an incidence record
+def _fold(tmp_path):
+    """A synthetic research bundle that holds out synthsim2, with its fold MF record: (bundle, the loader keywords,
+    the cache sha256)."""
+    from hcd_analysis.emulator import release_testing as RT
+    from tests.test_predictor_mf import write_mf
+
+    res = RT.write_synthetic_research_bundle(
+        str(tmp_path / "res"), held_out_sims=("synthsim2",), n_groups=3
+    )
+    cache = res.lineage["cache"]["sha256"]
+    s = write_mf(
+        tmp_path / "fold",
+        manifest=res.manifest_sha256,
+        cache=cache,
+        kind="fold",
+        backbone_kind="research",
+        held_out=["synthsim2"],
+        fold={"fold_id": "f0", "holdout_sims": ["synthsim2"]},
+    )
+    return res, dict(purpose="a test", mf_dir=str(tmp_path / "fold"), mf_record_sha256=s), cache
+
+
+def _fold_incidence(path, cache, *, train, excluded):
+    return write_incidence(
+        path,
+        cache=cache,
+        train_sims=train,
+        composition={
+            "id": "synthetic-fold-composition",
+            "excluded_sims": excluded,
+            "ruling_ids": ["synthetic ruling"],
+        },
+    )
+
+
+def test_a_fold_model_takes_an_incidence_record_built_without_its_held_out_simulations(
+    tmp_path, monkeypatch
+):
+    """``load_research_bundle(..., incidence_dir=..., incidence_record_sha256=...)``: the fold model's LF+MF dN/dX
+    is multiplied by the record's factor, the class spectra are untouched, an LF prediction is untouched, and without
+    the two keywords the loader does what it did."""
+    import warnings
+
+    monkeypatch.setattr(hp, "_HELDOUT_WARNED", set())
+    res, kw, cache = _fold(tmp_path)
+    sha = _fold_incidence(
+        tmp_path / "inc", cache, train=["synthsim0", "synthsim1"], excluded=["synthsim2"]
+    )
+    plain = hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, **kw)
+    rp = hp.load_research_bundle(
+        res.bundle_dir,
+        res.manifest_sha256,
+        **kw,
+        incidence_dir=str(tmp_path / "inc"),
+        incidence_record_sha256=sha,
+    )
+    assert type(rp) is hp.ResearchPredictor and plain._inc is None
+    a = plain.predict(PARAMS, 3.0, tau_eff=0.4)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        p = rp.predict(PARAMS, 3.0, tau_eff=0.4)
+    assert len(_heldout_warnings(caught)) == 1  # the synthetic record carries no held-out error
+    assert p.flags["research_model"] is True and p.flags["mf_applied"] is True
+    assert p.flags["incidence_mf_applied"] is True and "incidence_mf_applied" not in a.flags
+    np.testing.assert_allclose(
+        p.dndx, a.dndx * np.array(INCIDENCE_TABLES["dndx_ratio"][1]), rtol=1e-13, atol=0
+    )
+    assert p.P_class.tobytes() == a.P_class.tobytes()  # the class spectra are not touched
+    assert not np.array_equal(p.w_c, a.w_c)  # the fractions follow the corrected incidence
+    assert p.provenance["incidence_mf"]["record_sha256"] == sha
+    for (
+        name
+    ) in BOUNDS:  # a fold model's record without a held-out error: the bounds exist and are NaN
+        assert getattr(p, name).shape == getattr(p, name[:4]).shape, name
+        assert np.all(np.isnan(getattr(p, name))) and getattr(a, name) is None, name
+    assert p.provenance["model_kind"] == "research" and "incidence_mf" not in a.provenance
+    lf, lf0 = (m.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF") for m in (rp, plain))
+    assert lf.flags["incidence_mf_applied"] is False
+    assert lf.dndx.tobytes() == lf0.dndx.tobytes() and lf.w_c.tobytes() == lf0.w_c.tobytes()
+
+
+def test_a_fold_model_refuses_an_incidence_record_that_is_not_held_out(tmp_path):
+    """Refused: one keyword without the other; a record whose table was built with a held-out simulation; a record
+    that does not state that it excludes every held-out simulation; a record without the fold MF record.
+    """
+    res, kw, cache = _fold(tmp_path)
+    good = _fold_incidence(
+        tmp_path / "good", cache, train=["synthsim0", "synthsim1"], excluded=["synthsim2"]
+    )
+    leak = _fold_incidence(
+        tmp_path / "leak", cache, train=["synthsim1", "synthsim2"], excluded=["synthsim0"]
+    )
+    silent = _fold_incidence(
+        tmp_path / "silent", cache, train=["synthsim0", "synthsim1"], excluded=[]
+    )
+
+    def load(name, sha, **over):
+        return hp.load_research_bundle(
+            res.bundle_dir,
+            res.manifest_sha256,
+            **dict(kw, **over),
+            incidence_dir=None if name is None else str(tmp_path / name),
+            incidence_record_sha256=sha,
+        )
+
+    for name, sha in (("good", None), (None, good)):
+        with pytest.raises(E, match="both incidence_dir and incidence_record_sha256"):
+            load(name, sha)
+    with pytest.raises(E, match="not a held-out prediction"):
+        load("leak", leak)
+    with pytest.raises(E, match="does not state that it excludes"):
+        load("silent", silent)
+    with pytest.raises(E, match="applied with the P1D MF record"):
+        load("good", good, mf_dir=None, mf_record_sha256=None)
+    with pytest.raises(E, match="sha256 does not match"):
+        load("good", leak)
+    assert load("good", good).provenance["incidence_mf"]["record_sha256"] == good
+
+
+def test_two_spellings_of_one_run_are_the_same_run_and_two_design_points_are_not():
+    lf = "ns0.9Ap1.5e-09herei3.9heref2.8alphaq1.57hub0.7omegamh20.141hireionz7.1bhfeedback0.05"
+    hr = lf.replace("alphaq1.57", "alphaq1.58").replace("omegamh20.141", "omegamh20.142")
+    assert hp.same_run(lf, lf) and hp.same_run(lf, hr) and hp.same_run(hr, lf)
+    assert not hp.same_run(lf, lf.replace("ns0.9", "ns0.95"))  # another design point
+    assert not hp.same_run(lf, lf.replace("hireionz7.1", "hireionz7.3"))
+    assert not hp.same_run("synthsim1", "synthsim2") and hp.same_run("synthsim1", "synthsim1")
+    assert not hp.same_run(lf, lf + "x") and not hp.same_run(lf, "synthsim1")
+
+
+def test_a_record_that_trains_on_the_other_spelling_of_a_held_out_run_is_refused(
+    tmp_path, monkeypatch
+):
+    """The high- and the low-resolution run of one design point can be named with a digit of difference. A record
+    that lists the held-out run under one spelling among its training simulations and under the other among its
+    exclusions must not pass."""
+    lf = "ns0.9Ap1.5e-09herei3.9heref2.8alphaq1.57hub0.7omegamh20.141hireionz7.1bhfeedback0.05"
+    hr = lf.replace("alphaq1.57", "alphaq1.58").replace("omegamh20.141", "omegamh20.142")
+    res, kw, cache = _fold(tmp_path)
+    rp = hp.load_research_bundle(res.bundle_dir, res.manifest_sha256, **kw)
+    real = rp._backbone_identity()
+    monkeypatch.setattr(rp, "_backbone_identity", lambda: dict(real, held_out_sims=[lf]))
+    leak = _fold_incidence(tmp_path / "leak", cache, train=["synthsim0", hr], excluded=[lf])
+    with pytest.raises(E, match="not a held-out prediction"):
+        rp._attach_incidence(IM.load_record(tmp_path / "leak", expected_record_sha256=leak))
+    # the exclusion must name the held-out run by the exact string: the other spelling is refused, loudly
+    other = _fold_incidence(
+        tmp_path / "other", cache, train=["synthsim0", "synthsim1"], excluded=[hr]
+    )
+    with pytest.raises(E, match="does not state that it excludes"):
+        rp._attach_incidence(IM.load_record(tmp_path / "other", expected_record_sha256=other))
+    assert rp._inc is None  # nothing was attached by either
+
+
+BOUNDS = ("dndx_lower", "dndx_upper", "cddf_lower", "cddf_upper")
+
+
+def test_a_prediction_carries_the_held_out_range_on_the_quantity_itself(rel_err):
+    """The PI's rule (2026-11-15): the held-out error is on dN/dX, not on its logarithm. Every prediction carries the
+    two ends of the range on the quantity, each computed on its own from the record's log rms e: value * exp(-e) and
+    value * exp(+e). The log rms stays beside them, unchanged."""
+    mf = rel_err.predict(PARAMS, 3.0, tau_eff=0.4)
+    lf = rel_err.predict(PARAMS, 3.0, tau_eff=0.4, fidelity="LF")
+    np.testing.assert_array_equal(mf.dndx_err, [0.05, 0.06, 0.07])  # the log rms is what it was
+    for p in (mf, lf):
+        np.testing.assert_array_equal(p.dndx_lower, p.dndx * np.exp(-p.dndx_err))
+        np.testing.assert_array_equal(p.dndx_upper, p.dndx * np.exp(+p.dndx_err))
+        np.testing.assert_array_equal(p.cddf_lower, p.cddf * np.exp(-p.cddf_err))
+        np.testing.assert_array_equal(p.cddf_upper, p.cddf * np.exp(+p.cddf_err))
+        for name in BOUNDS:
+            a = getattr(p, name)
+            assert a.dtype == np.float64 and not a.flags.writeable, name
+        assert p.dndx_lower.shape == p.dndx_upper.shape == (3,)
+        assert p.cddf_lower.shape == p.cddf_upper.shape == p.cddf.shape
+        # the two ends enclose the value, and the upper end lies farther from it than the lower one
+        assert np.all(p.dndx_lower < p.dndx) and np.all(p.dndx < p.dndx_upper)
+        assert np.all(p.dndx_upper - p.dndx > p.dndx - p.dndx_lower)
+        ok = np.isfinite(p.cddf) & (p.cddf > 0)
+        assert np.all(p.cddf_upper[ok] - p.cddf[ok] > p.cddf[ok] - p.cddf_lower[ok])
+        # a bound is NaN exactly where the log rms is
+        assert np.array_equal(np.isnan(p.cddf_lower), np.isnan(p.cddf_err))
+        assert np.array_equal(np.isnan(p.cddf_upper), np.isnan(p.cddf_err))
+    np.testing.assert_allclose(mf.dndx_upper / mf.dndx, np.exp([0.05, 0.06, 0.07]), rtol=1e-15)
+    np.testing.assert_allclose(lf.dndx_lower / lf.dndx, np.exp([-0.11, -0.12, -0.13]), rtol=1e-15)
+    # the label names the range first, and the label of w_c and the warning name the bounds too
+    assert (
+        "as the range dndx_lower to dndx_upper and cddf_lower to cddf_upper"
+        in mf.labels["incidence_mf_error"]
+    )
+    assert "(the range dndx_lower to dndx_upper; on the logarithm dndx_err)" in mf.labels["w_c"]
+
+
+def test_a_bound_is_nan_where_there_is_no_estimate_and_none_without_a_record(
+    rel_err, rel, monkeypatch
+):
+    import warnings
+
+    monkeypatch.setattr(hp, "_HELDOUT_WARNED", set())
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", hp.HeldOutErrorWarning)
+        mf = rel_err.predict(
+            PARAMS, 5.0, tau_eff=1.5
+        )  # the subDLA class has no LF+MF estimate at z 5.0
+        between = rel_err.predict(PARAMS, 2.6, tau_eff=0.4)  # not a redshift of the error table
+        stack = rel_err.predict_many(PARAMS, [3.0, 5.0], tau_eff=[0.4, 1.5])
+        no_error = rel["two"].predict(PARAMS, 3.0, tau_eff=0.4)  # a record without a held-out error
+        no_record = rel["one"].predict(PARAMS, 3.0, tau_eff=0.4)  # no incidence record at all
+    assert np.array_equal(np.isnan(mf.dndx_lower), [False, True, False])
+    assert np.array_equal(np.isnan(mf.dndx_upper), [False, True, False])
+    for name in BOUNDS:
+        assert np.all(np.isnan(getattr(between, name))), name
+        assert np.all(np.isnan(getattr(no_error, name))), name
+        assert getattr(no_error, name).shape == getattr(no_error, name[:4]).shape
+        assert getattr(no_record, name) is None, name
+        assert not getattr(stack, name).flags.writeable
+    assert stack.dndx_lower.shape == stack.dndx_upper.shape == (2, 3)
+    assert stack.cddf_lower.shape == stack.cddf_upper.shape == (2, 30)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        stack_lf = rel_err.predict_many(PARAMS, [3.0, 5.0], tau_eff=[0.4, 1.5], fidelity="LF")
+    assert not np.array_equal(
+        stack_lf.dndx, stack.dndx
+    )  # the uncorrected values, with their own error table
+    for s in (stack, stack_lf):
+        np.testing.assert_array_equal(s.dndx_lower, s.dndx * np.exp(-s.dndx_err))
+        np.testing.assert_array_equal(s.dndx_upper, s.dndx * np.exp(+s.dndx_err))
+        np.testing.assert_array_equal(s.cddf_lower, s.cddf * np.exp(-s.cddf_err))
+        np.testing.assert_array_equal(s.cddf_upper, s.cddf * np.exp(+s.cddf_err))
+        for name in BOUNDS:
+            assert getattr(s, name).dtype == np.float64, name
+            assert np.array_equal(
+                np.isnan(getattr(s, name)), np.isnan(getattr(s, name[:4] + "_err"))
+            ), name
+    assert np.isnan(stack.dndx_lower[1, 1]) and np.all(np.isfinite(stack_lf.dndx_lower))
+    assert (
+        "dndx_err and cddf_err, and with them the four bounds, are NaN"
+        in no_error.labels["incidence_mf_error"]
+    )
+
+
+def test_the_error_fields_are_described_on_the_quantity_without_an_approximation():
+    """The PI's rule (2026-11-15): the docstrings of the held-out fields, and the module's paragraph on the held-out
+    error, state the range on the quantity (the bounds transformed separately, each a field of its own) and never an
+    approximation from the logarithm, and never call the range symmetric."""
     import re
 
-    forbidden = r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|1 ?sigma|gaussian"
+    forbidden = (
+        r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|gaussian"
+        r"|1[- ]?sigma|one sigma|1σ|±|lineari[sz]|approximat|propagat"
+    )
     doc = hp.Prediction.__doc__
+    order = ("dndx_err", "cddf_err", *BOUNDS, "member_std")
     fields = {}
-    for name, nxt in (("dndx_err", "cddf_err"), ("cddf_err", "member_std")):
+    for name, nxt in zip(order, order[1:]):
         a = doc.index(f"    {name} : ")
         fields[name] = doc[a : doc.index(f"    {nxt} : ", a)]
     paragraph = hp.__doc__[hp.__doc__.index("**The held-out error.**") :]
@@ -1111,7 +1370,29 @@ def test_the_two_error_fields_are_described_on_the_quantity_without_an_approxima
         hit = re.search(forbidden, text, re.I)
         assert hit is None, (where, hit and hit.group(0))
     flat = {k: " ".join(v.split()) for k, v in dict(fields, module=paragraph).items()}
-    assert "dndx * exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``" in flat["dndx_err"]
-    assert "cddf * exp(-cddf_err)`` to ``cddf * exp(+cddf_err)``" in flat["cddf_err"]
-    assert "asymmetric" in flat["dndx_err"] and "asymmetric" in flat["module"]
-    assert "exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``" in flat["module"]
+    # each bound says what it is computed from, on its own
+    assert "``dndx * exp(-dndx_err)``" in flat["dndx_lower"]
+    assert "``dndx * exp(+dndx_err)``" in flat["dndx_upper"]
+    assert "``cddf * exp(-cddf_err)``" in flat["cddf_lower"]
+    assert "``cddf * exp(+cddf_err)``" in flat["cddf_upper"]
+    assert "asymmetric" in flat["dndx_upper"] and "asymmetric" in flat["module"]
+    assert "``dndx * exp(-dndx_err)`` and ``dndx * exp(+dndx_err)``" in flat["module"]
+    assert "on its own" in flat["module"] and "on its own" in flat["dndx_upper"]
+    # asymmetric is said of a non-zero error only: at an error of zero both ends equal the value
+    assert "for a non-zero error the range is asymmetric" in flat["module"]
+    assert "for a non-zero ``dndx_err`` the range is asymmetric" in flat["dndx_upper"]
+    assert "a number on the logarithm" in flat["cddf_err"]
+    # the log numbers say they are on the logarithm and point to the fields on the quantity
+    assert "a number on the logarithm" in flat["dndx_err"]
+    assert "``dndx_lower``" in flat["dndx_err"] and "``dndx_upper``" in flat["dndx_err"]
+    assert "``cddf_lower``" in flat["cddf_err"] and "``cddf_upper``" in flat["cddf_err"]
+    for name in BOUNDS:
+        assert f"``{name}``" in flat["module"], name
+    # the shapes table lists the four fields
+    table = doc[
+        doc.index("attribute     predict     predict_many") : doc.index(
+            "Every array is a read-only"
+        )
+    ]
+    for name in BOUNDS:
+        assert name in table, name

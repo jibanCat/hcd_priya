@@ -392,19 +392,26 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
         np.testing.assert_allclose(y + above, y * np.exp(e), rtol=1e-12, atol=0)
         assert np.all(above > below) and np.all(y > 0)  # asymmetric: exp(+e) - 1 > 1 - exp(-e)
     assert _facts(out2)["heldout_error"].startswith(
-        "drawn on the model lines (LF+MF): the range pred.dndx * exp(-pred.dndx_err) to pred.dndx * exp(+pred.dndx_err)"
+        "drawn on the model lines (LF+MF): the held-out range from pred.dndx_lower to pred.dndx_upper "
+        "(pred.dndx * exp(-pred.dndx_err) and pred.dndx * exp(+pred.dndx_err), each bound computed on its own"
     )
 
 
 # the PI's rule (2026-11-15): a held-out error is stated on the quantity, never propagated from the logarithm by an
 # approximation, and its range is never called symmetric
-FORBIDDEN = r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|1 ?sigma|gaussian"
+FORBIDDEN = (
+    r"to first order|first-order|for small values|fractional error|multiply by d|\bsymmetric|gaussian"
+    r"|1[- ]?sigma|one sigma|1σ|±|lineari[sz]|approximat|propagat"
+)
 
 
 def test_no_public_text_on_the_held_out_error_uses_an_approximation_or_calls_it_symmetric():
     import re
 
-    held_out = re.compile(r"dndx_err|cddf_err|held-out (error|range|rms)", re.I)
+    held_out = re.compile(
+        r"dndx_err|cddf_err|dndx_lower|dndx_upper|cddf_lower|cddf_upper|held-out (error|range|rms)",
+        re.I,
+    )
     files = (
         "README.md",
         "CHANGELOG.md",
@@ -414,20 +421,23 @@ def test_no_public_text_on_the_held_out_error_uses_an_approximation_or_calls_it_
         "scripts/figures/fig_dndx_vs_ho21.py",
         "hcd_analysis/predictor.py",
         "hcd_analysis/emulator/incidence_mf.py",
+        "docs/figures/dndx_vs_ho21.json",
     )
-    checked = 0
     for name in files:
+        checked = 0
         text = open(os.path.join(REPO, name), encoding="utf-8").read()
-        for paragraph in re.split(r"\n\s*\n", text):
+        # a unit is a paragraph, and in a list each item on its own (a changelog lists one change per item)
+        for paragraph in re.split(r"\n\s*\n|\n(?=\s*- )", text):
             if held_out.search(paragraph):
                 checked += 1
                 hit = re.search(FORBIDDEN, paragraph, re.I)
                 assert hit is None, (name, hit and hit.group(0), paragraph[:300])
-    assert checked >= len(files)
-    # and the figure computes its bars from the two bounds, never as the error times the value
+        assert checked >= 1, f"{name}: no paragraph on the held-out error was found to check"
+    # and the figure takes its bars from the two bounds the prediction carries: it transforms nothing itself, and
+    # never forms the error times the value
     src = open(os.path.join(REPO, "scripts/figures/fig_dndx_vs_ho21.py"), encoding="utf-8").read()
     assert not re.search(r"dndx_err[^\n]*\*\s*[\w.]*dndx\b|dndx\[[^\n]*\*\s*[\w.]*dndx_err", src)
-    assert "np.exp(-log_err[ok])" in src and "np.exp(log_err[ok])" in src
+    assert "stack.dndx_lower" in src and "stack.dndx_upper" in src and "np.exp" not in src
 
 
 def test_the_dndx_figure_refuses_a_model_without_an_incidence_record(tmp_path):
@@ -545,3 +555,42 @@ def test_a_band_with_every_point_refused_stops_with_a_message(release):
     not_a_point = dict(C.MIDPOINT, ns=float("nan"))
     with pytest.raises(SystemExit, match="refused every design point"):
         C.envelope(emu, [not_a_point], 3.0, "dndx")
+
+
+def test_the_example_the_figure_scripts_and_the_report_module_force_no_matplotlib_backend():
+    """The choice of backend is the user's (the PI's review of 2026-11-16). The example, the figure scripts and the
+    report module only save files, which works under any backend, so none of them calls matplotlib.use. A session
+    without a display sets MPLBACKEND=Agg, and the example's help and the docs say so. (Older research scripts
+    still set a backend; they are not in this list.)"""
+    import glob
+    import re
+
+    files = ["examples/mock_recovery.py", "hcd_analysis/report.py"]
+    files += sorted(
+        os.path.relpath(f, REPO)
+        for f in glob.glob(os.path.join(REPO, "scripts", "figures", "*.py"))
+    )
+    assert len(files) >= 6
+    for name in files:
+        src = open(os.path.join(REPO, name), encoding="utf-8").read()
+        assert not re.search(r"\b(matplotlib|mpl)\.use\(|switch_backend\(", src), name
+    for name in ("examples/mock_recovery.py", "docs/likelihood.md", "docs/model_figures.md"):
+        assert "MPLBACKEND=Agg" in open(os.path.join(REPO, name), encoding="utf-8").read(), name
+
+
+def test_a_figure_script_draws_under_the_backend_the_user_chose(tmp_path):
+    """Under a backend that is not Agg the figure is still written as a PNG file, and the backend is left as the
+    user chose it."""
+    import matplotlib
+    import matplotlib.pyplot as plt
+
+    ratio = _script("fig_class_ratio_vs_rogers18")
+    before = matplotlib.get_backend()
+    plt.switch_backend("svg")
+    try:
+        out = str(tmp_path / "ratio.png")
+        assert ratio.main(["--out", out]) == 0
+        assert matplotlib.get_backend().lower() == "svg"
+        assert open(out, "rb").read(8) == b"\x89PNG\r\n\x1a\n"
+    finally:
+        plt.switch_backend(before)

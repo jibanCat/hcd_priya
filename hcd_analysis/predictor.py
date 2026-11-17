@@ -83,9 +83,12 @@ incidence record ``cddf`` and ``log_nhi`` are None: the model files do not
 say what the bins are. A release without that part has no such
 record and behaves as before. ``provenance["incidence_mf"]`` names the record, its inputs and its composition.
 
-**Logging.** Each call of ``predict`` or ``predict_many`` that applies a correction emits one INFO record on the logger
-``hcd_analysis.predictor``: which correction (the P1D MF correction; with an incidence record also the correction of
-dN/dX and the CDDF) and the sha256 of each record. An LF prediction emits none, and neither do the research helpers
+**Logging.** A predictor says which corrections it applies in one INFO record on the logger
+``hcd_analysis.predictor``, at its first call of ``predict`` or ``predict_many`` that applies one while INFO records
+of that logger pass: which correction (the P1D MF correction; with an incidence record also the correction of
+dN/dX and the CDDF) and the sha256 of each record. Every later such call of the same predictor emits the same
+facts as one DEBUG record, so a sampler that calls a predictor at every step writes one line and not one per
+step. An LF prediction emits none, and neither do the research helpers
 of this module that evaluate a backbone directly. The library configures no logging; to
 see the records, let that logger's INFO records pass, for example
 ``logging.getLogger("hcd_analysis.predictor").setLevel(logging.INFO)`` after ``logging.basicConfig()``. The same
@@ -93,11 +96,13 @@ facts are on every prediction without any logging: the flags ``mf_applied`` and 
 ``provenance``.
 
 **The held-out error.** A corrected dN/dX or CDDF is not exact. An incidence record may carry a held-out error, and
-then every prediction carries it too: ``dndx_err`` and ``cddf_err``, the held-out rms of ln(prediction / truth), for the
-fidelity of the prediction (NaN where the record has no estimate; an error is never interpolated between redshifts).
-They are numbers on the logarithm. On the quantity itself the held-out range is ``dndx * exp(-dndx_err)`` to
-``dndx * exp(+dndx_err)`` (the same for ``cddf``): each bound is transformed on its own, and the range is
-asymmetric about the value. ``labels["incidence_mf_error"]`` says what the numbers are, in the record's own words. An LF+MF
+then every prediction carries it too, for the fidelity of the prediction, in two forms. On the quantity itself: the
+held-out range, from ``dndx_lower`` to ``dndx_upper`` and from ``cddf_lower`` to ``cddf_upper``. On the logarithm:
+``dndx_err`` and ``cddf_err``, the held-out rms of ln(prediction / truth), which is what the record stores. Each bound
+is computed from the logarithm on its own, ``dndx * exp(-dndx_err)`` and ``dndx * exp(+dndx_err)`` (the same for
+``cddf``), so for a non-zero error the range is asymmetric about the value. All six are NaN where the record has no
+estimate; an error is
+never interpolated between redshifts. ``labels["incidence_mf_error"]`` says what the numbers are, in the record's own words. An LF+MF
 prediction that returns a corrected value without an estimate beside it emits ``HeldOutErrorWarning``, once per
 process for each record.
 
@@ -144,6 +149,7 @@ import copy
 import dataclasses
 import logging
 import os
+import re
 import warnings
 from typing import Any, Mapping, Sequence
 
@@ -208,17 +214,20 @@ class MFRangeError(PredictorInputError):
     """
 
 
-# One INFO record per prediction call that applied a correction: which correction, with which record (sha256). The
+# Which correction a prediction applied, with which record (sha256): one INFO record per predictor, at its first
+# corrected call while INFO records pass; one DEBUG record for every later corrected call of that predictor. The
 # library configures no logging, so nothing is printed unless the application lets this logger's INFO records pass:
 #     logging.getLogger("hcd_analysis.predictor").setLevel(logging.INFO)   (with a handler, or logging.basicConfig)
 _log = logging.getLogger(__name__)
+_SAID_ONCE = " (said once per predictor at INFO; its later corrected predictions say it at DEBUG)"
 
 
 class HeldOutErrorWarning(UserWarning):
     """A corrected dN/dX or CDDF was returned without a held-out error beside it.
 
     With an incidence MF record an LF+MF prediction returns a corrected ``dndx`` and ``cddf``. They are not exact.
-    When the record carries a held-out error, the prediction carries it too (``dndx_err``, ``cddf_err``), and
+    When the record carries a held-out error, the prediction carries it too (the range ``dndx_lower`` to
+    ``dndx_upper`` and ``cddf_lower`` to ``cddf_upper``; on the logarithm ``dndx_err``, ``cddf_err``), and
     nothing is warned. When the record carries none, or has no estimate for a class or bin at the redshift asked
     for, those fields are NaN there and this warning says so: once per process for each incidence record, not
     once per call, because a sampler calls the predictor thousands of times.
@@ -643,6 +652,10 @@ class Prediction:
         w_c, dndx     (3,)        (n_z, 3)
         cddf          (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         log_nhi       (Nbin,)     (Nbin,)         only with an incidence record; else None
+        dndx_lower    (3,)        (n_z, 3)        only with an incidence record; else None
+        dndx_upper    (3,)        (n_z, 3)        only with an incidence record; else None
+        cddf_lower    (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
+        cddf_upper    (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         dndx_err      (3,)        (n_z, 3)        only with an incidence record; else None
         cddf_err      (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         member_std    (4, K)      (n_z, 4, K)
@@ -672,7 +685,8 @@ class Prediction:
         parameters and redshift, from ``dndx`` through the w_c map of the bundle.
         With an incidence MF record (flag ``incidence_mf_applied``), from the corrected ``dndx``;
         it then has no held-out error of its own and inherits that of the corrected ``dndx``
-        (``dndx_err``) and the map's own error.
+        (the range ``dndx_lower`` to ``dndx_upper``; on the logarithm ``dndx_err``) and the
+        map's own error.
         Without one it is the low-fidelity model's also under LF+MF: the multi-fidelity
         correction of the spectra acts on ``P_class`` only, so ``add_hcd(pred, pred.w_c)`` then
         mixes corrected class spectra with LF fractions.
@@ -692,17 +706,35 @@ class Prediction:
         Shape (Nbin,). The bin centres, log10 of N_HI in cm^-2, from the incidence record.
     dndx_err : numpy.ndarray or None
         Shape (3,), in the order of ``dndx``. The held-out rms of ln(prediction / truth) of
-        ``dndx``: a number on the logarithm, not on ``dndx``. On ``dndx`` itself the held-out
-        range is ``dndx * exp(-dndx_err)`` to ``dndx * exp(+dndx_err)``, each bound computed on
-        its own; the range is asymmetric about ``dndx``. It is an indication of size, not
+        ``dndx``: a number on the logarithm, not on ``dndx``. The held-out range on ``dndx``
+        itself is in ``dndx_lower`` and ``dndx_upper``. It is an indication of size, not
         the standard deviation of a known distribution; see ``labels["incidence_mf_error"]`` for
         what it is and what it does not cover. For an LF prediction it is that of the uncorrected value,
         for an LF+MF prediction that of the corrected one. NaN where the incidence record has no
         estimate (it carries no held-out error, or none at this redshift; an error is never
         interpolated between redshifts). None without an incidence record.
     cddf_err : numpy.ndarray or None
-        Shape (Nbin,). The same for ``cddf``, per column-density bin: the held-out range is
-        ``cddf * exp(-cddf_err)`` to ``cddf * exp(+cddf_err)``. NaN also where ``cddf`` is.
+        Shape (Nbin,). The same for ``cddf``, per column-density bin: a number on the logarithm.
+        The held-out range on ``cddf`` itself is in ``cddf_lower`` and ``cddf_upper``. NaN also
+        where ``cddf`` is.
+    dndx_lower : numpy.ndarray or None
+        Shape (3,). The lower end of the held-out range of ``dndx``, on ``dndx`` itself:
+        ``dndx * exp(-dndx_err)``. NaN where ``dndx_err`` is NaN; None without an incidence
+        record.
+    dndx_upper : numpy.ndarray or None
+        Shape (3,). The upper end of that range: ``dndx * exp(+dndx_err)``. Each end is computed
+        from the logarithm on its own, so for a non-zero ``dndx_err`` the range is asymmetric
+        about ``dndx``: the upper end lies farther from ``dndx`` than the lower end (at an
+        error of exactly zero both ends equal ``dndx``). Like ``dndx_err``, the range is an
+        indication of size, not an interval of a known distribution. NaN where ``dndx_err`` is
+        NaN; None without an incidence record.
+    cddf_lower : numpy.ndarray or None
+        Shape (Nbin,). The lower end of the held-out range of ``cddf``, per column-density bin, on
+        ``cddf`` itself: ``cddf * exp(-cddf_err)``. NaN where ``cddf_err`` is NaN (so also where
+        ``cddf`` is); None without an incidence record.
+    cddf_upper : numpy.ndarray or None
+        Shape (Nbin,). The upper end of that range: ``cddf * exp(+cddf_err)``, computed on its own
+        as for ``dndx``. NaN where ``cddf_err`` is NaN; None without an incidence record.
     member_std : numpy.ndarray or None
         Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
         members disagree. It is not a calibrated emulator error and not a covariance. None for a
@@ -771,11 +803,19 @@ class Prediction:
     log_nhi: np.ndarray | None = None
     dndx_err: np.ndarray | None = None
     cddf_err: np.ndarray | None = None
+    dndx_lower: np.ndarray | None = None
+    dndx_upper: np.ndarray | None = None
+    cddf_lower: np.ndarray | None = None
+    cddf_upper: np.ndarray | None = None
 
 
 class _PredictorBase:
     """The forward shared by the production ``Bundle`` and the ``ResearchPredictor`` (moved unchanged from
     ``Bundle``): the members' checks, the jitted forward, the attributes, the labels, the flags."""
+
+    _corrections_said = (
+        False  # set on a predictor once its INFO record of the corrections is written
+    )
 
     def _setup(self, rb):
         for i, m in enumerate(rb.metas):
@@ -1174,7 +1214,8 @@ class _PredictorBase:
                 labels["w_c"]
                 + "; the dN/dX is multiplied by the incidence MF factor R_c(z) before the map (the map itself "
                 "was fitted on LF counts). w_c has no held-out error of its own: it inherits the error of the "
-                "corrected dN/dX (dndx_err) and the map's own error"
+                "corrected dN/dX (the range dndx_lower to dndx_upper; on the logarithm dndx_err) and the map's "
+                "own error"
             )
             if _W_C_STAYS_LF not in labels["mf"]:
                 raise RuntimeError("the MF label no longer carries the statement about w_c")
@@ -1355,8 +1396,9 @@ class _PredictorBase:
           (these three say how the table was looked up, so they are False on an LF prediction);
           ``cddf_bins_without_support``, some bins of ``cddf`` are NaN because no correction was
           measured there at this redshift; ``incidence_heldout_error_available``, every class of
-          ``dndx`` has a held-out error beside it in ``dndx_err`` (the per-bin gaps of ``cddf_err``
-          are NaN in that array).
+          ``dndx`` has a held-out error beside it in ``dndx_err``, and so a range in ``dndx_lower``
+          and ``dndx_upper`` (the per-bin gaps of ``cddf_err`` are NaN in that array and in the
+          two bounds of ``cddf``).
         - ``synthetic_build``: present, and True, only for a model package built with untrained
           networks for tests; ``labels["synthetic_build"]`` says so in words.
 
@@ -1547,16 +1589,25 @@ class _PredictorBase:
         if self._mf is not None:
             flags.update(self._mf_flags(zs, taus, use_mf))
             labels.update(self._mf_labels(labels, use_mf))
-        if use_mf:  # said in the log, once per call: which corrections this prediction carries
+        # Said in the log: which corrections this prediction carries. The corrections of a predictor are fixed when
+        # it is loaded, so it says them once at INFO (the first time INFO records pass: a call made before the
+        # application lets them pass does not use the one record up) and at DEBUG for every later call.
+        level = logging.DEBUG if self._corrections_said else logging.INFO
+        if use_mf and _log.isEnabledFor(level):
             applied = [f"the P1D MF correction (record sha256 {self._mf.record_sha256})"]
             if self._inc is not None:
                 applied.append(
                     "the MF correction of the incidence, dN/dX and CDDF (record sha256 "
                     f"{self._inc.record_sha256})"
                 )
-            _log.info(
-                "prediction at %d redshift(s), LF+MF: applied %s", len(zs), " and ".join(applied)
+            _log.log(
+                level,
+                "prediction at %d redshift(s), LF+MF: applied %s%s",
+                len(zs),
+                " and ".join(applied),
+                "" if self._corrections_said else _SAID_ONCE,
             )
+            self._corrections_said = True
         dndx_err = cddf_err = None
         if self._inc is not None:
             flags.update(self._incidence_flags(zs, use_mf, cddf_gap))
@@ -1571,6 +1622,15 @@ class _PredictorBase:
         elif use_mf and flags["mf_tau0_clamped"]:
             self._warn_mf_tau0_clamped(zs, taus)
         sel = (lambda a: a[0]) if single else (lambda a: a)
+        bounds = {}
+        if dndx_err is not None:
+            # the held-out range on the quantity itself: each end from the log rms on its own (NaN stays NaN)
+            bounds = {
+                "dndx_lower": dmean * np.exp(-dndx_err),
+                "dndx_upper": dmean * np.exp(+dndx_err),
+                "cddf_lower": cddf * np.exp(-cddf_err),
+                "cddf_upper": cddf * np.exp(+cddf_err),
+            }
         return Prediction(
             z=zs[0] if single else _frozen(zs),
             k=_frozen(sel(kout)),
@@ -1589,6 +1649,7 @@ class _PredictorBase:
             log_nhi=None if cddf is None else _frozen(self._inc.log_nhi_centres),
             dndx_err=None if dndx_err is None else _frozen(sel(dndx_err)),
             cddf_err=None if cddf_err is None else _frozen(sel(cddf_err)),
+            **{name: _frozen(sel(a)) for name, a in bounds.items()},
         )
 
     def _heldout_errors(self, zs, use_mf, cddf):
@@ -1617,8 +1678,9 @@ class _PredictorBase:
         )
         warnings.warn(
             HeldOutErrorWarning(
-                f"the corrected dN/dX and CDDF of this prediction are not exact, and {why}: dndx_err and cddf_err "
-                "are NaN there (labels['incidence_mf_error'] says what a held-out error is). w_c is computed from "
+                f"the corrected dN/dX and CDDF of this prediction are not exact, and {why}: dndx_err and cddf_err, "
+                "and with them the bounds dndx_lower, dndx_upper, cddf_lower and cddf_upper, are NaN there "
+                "(labels['incidence_mf_error'] says what a held-out error is). w_c is computed from "
                 "the corrected dN/dX and never has a held-out error of its own: it inherits that of dN/dX and the "
                 "map's own error. This warning is shown once per process for this record."
             ),
@@ -1784,6 +1846,46 @@ class Bundle(_PredictorBase):
             self._attach_mf(mf, kind="release")
 
 
+_RUN_NAME = re.compile(
+    "".join(rf"{name}(?P<{name}>[0-9.]+(?:e[-+]?[0-9]+)?)" for name in PARAM_NAMES) + r"\Z"
+)
+SAME_RUN_RTOL = 0.015
+
+
+def same_run(a: str, b: str) -> bool:
+    """Whether two simulation names are the same run.
+
+    True for equal strings. Otherwise both names must be of the PRIYA form, the nine parameters
+    in the order of ``PARAM_NAMES`` each followed by its value (``ns0.9Ap1.5e-09herei3.9...``),
+    and every parameter must agree within ``SAME_RUN_RTOL`` (1.5 per cent). The high- and the
+    low-resolution run of one design point can differ in the last printed digit of a parameter;
+    two different design points differ by far more in at least one. A name of another form is
+    equal only to itself.
+
+    Examples
+    --------
+    >>> import hcd_analysis.predictor as hp
+    >>> lf = "ns0.9Ap1.5e-09herei3.9heref2.8alphaq1.57hub0.7omegamh20.141hireionz7.1bhfeedback0.05"
+    >>> hr = "ns0.9Ap1.5e-09herei3.9heref2.8alphaq1.58hub0.7omegamh20.142hireionz7.1bhfeedback0.05"
+    >>> print("two spellings of one run:", hp.same_run(lf, hr))
+    two spellings of one run: True
+    >>> other = lf.replace("ns0.9", "ns0.95")
+    >>> print("another run:", hp.same_run(lf, other), "| a name of another form:", hp.same_run("simA", "simB"))
+    another run: False | a name of another form: False
+    """
+    if a == b:
+        return True
+    ma, mb = _RUN_NAME.match(str(a)), _RUN_NAME.match(str(b))
+    if not (ma and mb):
+        return False
+    try:
+        va = np.array([float(ma[n]) for n in PARAM_NAMES])
+        vb = np.array([float(mb[n]) for n in PARAM_NAMES])
+    except ValueError:
+        return False
+    return bool(np.all(np.abs(va - vb) <= SAME_RUN_RTOL * np.maximum(np.abs(va), np.abs(vb))))
+
+
 class ResearchPredictor(_PredictorBase):
     """A research model, ready to predict. ``load_research_bundle`` returns it.
 
@@ -1863,6 +1965,38 @@ class ResearchPredictor(_PredictorBase):
             research=self.research,
             load_purpose=self._rb.load_purpose,
         )
+
+    def _attach_incidence(self, inc):
+        """As the base, after the held-out guard of a research model: the record's table must be built without the
+        simulations this backbone holds out (as re-derived from the member metas), and the record must say so.
+
+        Refused: a record with a name in ``train_sims`` that is the same run as a held-out simulation
+        (``same_run``: the same string, or the same nine parameters within 1.5 per cent, because the high- and the
+        low-resolution run of one design point can be named with two digits of difference); and a record whose
+        ``composition.excluded_sims`` does not list every held-out simulation by the exact string the backbone
+        holds.
+
+        Limits. The guard compares the names the record declares about itself; it cannot see which simulations
+        the table was really built from. And since ``excluded_sims`` can only name simulations that have a
+        high-resolution run, a backbone that holds out a simulation without one gets no record from the builder
+        that passes here: a refusal, the safe side."""
+        inc = _IM.reverify(inc)
+        held = set(self._backbone_identity()["held_out_sims"])
+        seen = sorted(
+            name for name in inc.record["train_sims"] if any(same_run(name, h) for h in held)
+        )
+        if seen:
+            raise _MR.MFRecordError(
+                f"refusing the incidence MF record {inc.record_sha256[:12]}: its table was built with the "
+                f"simulations {seen}, which this research backbone holds out: not a held-out prediction"
+            )
+        unstated = sorted(held - set(inc.record["composition"]["excluded_sims"]))
+        if unstated:
+            raise _MR.MFRecordError(
+                f"refusing the incidence MF record {inc.record_sha256[:12]}: it does not state that it excludes "
+                f"the simulations {unstated}, which this research backbone holds out (composition.excluded_sims)"
+            )
+        super()._attach_incidence(inc)
 
     def labels(self):
         sp = self._rb.split
@@ -2063,6 +2197,8 @@ def load_research_bundle(
     purpose: str,
     mf_dir: str | os.PathLike[str] | None = None,
     mf_record_sha256: str | None = None,
+    incidence_dir: str | os.PathLike[str] | None = None,
+    incidence_record_sha256: str | None = None,
 ) -> ResearchPredictor:
     """Load a research model bundle, checked against its manifest digest.
 
@@ -2083,6 +2219,13 @@ def load_research_bundle(
         grouped cross-validation. Give it together with ``mf_record_sha256``.
     mf_record_sha256 : str, optional
         The sha256 of that MF record.
+    incidence_dir : str or os.PathLike, optional
+        The directory of an incidence MF record whose table was built without this bundle's
+        held-out simulations, for held-out predictions of the corrected ``dndx`` and ``w_c``.
+        It is applied only together with the fold MF record. Give it together with
+        ``incidence_record_sha256``.
+    incidence_record_sha256 : str, optional
+        The sha256 of that incidence MF record.
 
     Returns
     -------
@@ -2097,7 +2240,11 @@ def load_research_bundle(
         is a production bundle (use ``load_bundle``).
     MFRecordError
         If only one of ``mf_dir`` and ``mf_record_sha256`` is given; if the record is not a fold
-        record of this bundle; or if its held-out simulations were used to train this bundle.
+        record of this bundle; or if its held-out simulations were used to train this bundle. If
+        only one of ``incidence_dir`` and ``incidence_record_sha256`` is given; if the incidence
+        record is given without the fold MF record, or was fitted on another LF cache; if its
+        table was built with a simulation this bundle holds out; or if it does not state that it
+        excludes every one of them.
 
     Examples
     --------
@@ -2115,10 +2262,20 @@ def load_research_bundle(
     >>> print("and names the simulations the model was trained without:", same)
     and names the simulations the model was trained without: True
     """
+    if (incidence_dir is None) != (incidence_record_sha256 is None):
+        raise _MR.MFRecordError(
+            "give both incidence_dir and incidence_record_sha256 (the record's published sha256), "
+            "or neither"
+        )
     rb = _H.load_research(
         bundle_dir, expected_manifest_sha256=expected_manifest_sha256, purpose=purpose
     )
-    return ResearchPredictor(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "fold"))
+    rp = ResearchPredictor(rb, mf=_load_mf(rb, mf_dir, mf_record_sha256, "fold"))
+    if incidence_dir is not None:
+        rp._attach_incidence(
+            _IM.load_record(incidence_dir, expected_record_sha256=incidence_record_sha256)
+        )
+    return rp
 
 
 # -------------------------------------------------------------------------------------------- published models

@@ -51,9 +51,41 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   mean times the record's HR/LF ratio per bin. A bin is NaN, never a number, where no HR/LF simulation pair has
   absorbers at any tabulated redshift, and under LF+MF also where none has them at the redshift used.
   Without an incidence record both are `None`.
-- **A log record when a correction is applied.** Each call of `predict` or `predict_many` that applies the P1D MF correction, and with
+- **A Gaussian data likelihood of a P1D data vector** (`hcd_analysis.likelihood`; the data covariance only, no
+  emulator error): a data container with a full
+  covariance, the rule that brings the model to the data's wavenumbers (linear interpolation at each bin's k), the
+  log likelihood with its normalisation, optional Gaussian terms on parameters, and a strict file format for a
+  data set, read only against its sha256. No emulator error is added to the covariance. No data set is shipped yet.
+  `sampler_logp` gives a sampler minus infinity where the model refuses a point, and counts why. `load_xq100`
+  reads the XQ-100 P1D from two files the user supplies, each checked by its sha256: a loader only, nothing
+  fitted. An example, `examples/mock_recovery.py`, and a page, `docs/likelihood.md`.
+  The HCD content is the model's own class fractions at each point, or given explicitly in one of two ways:
+  absolute fractions (`hcd_fractions`) or factors on the model's own (`hcd_relative_to_priya`), each a mapping of
+  the three classes. `SAMPLER_REFUSALS` lists every condition under which `sampler_logp` returns minus infinity;
+  `refuse_flags` adds conditions for diagnosis only. The page gives the mathematics step by step, as equations and
+  as a walk-through in code that a test runs. It says what was checked about the linear interpolation to the data's
+  wavenumbers, on the PRIYA simulations' spectra against the published errors of four data sets (with three
+  figures), and how to check it for other data. `modes_per_bin`, a function and a method of the likelihood, reports
+  the bin layout against the model's modes. It describes the layout only: neither whether the interpolation is
+  adequate nor how large the bin-average difference is can be read from it. The checks found differences of both
+  kinds at bins many mode spacings apart and at bins about one apart. It never warns or refuses because of its
+  value.
+- **A stored reference of a mock recovery** (`likelihood.P1DReference`, `read_reference`, `write_reference`): the
+  truth, the posterior mean and two central intervals of each parameter, and percentiles of the posterior predictive
+  on the bins of a data set; a strict file format, read only against its sha256. No reference is shipped.
+- **The example download.** `examples/mock_recovery.py --download DIR` (or the environment variable
+  `HCD_PRIYA_EXAMPLE_DOWNLOAD`) reads the mock, a fold model trained without the mock's simulation, its two records
+  and a stored reference from one directory, each item against the sha256 written in the script, and draws the
+  chain of a run over the stored reference. The download is NOT published yet; `docs/likelihood.md` lists its items
+  and their sha256.
+- **A research (fold) model can take an incidence record.** `load_research_bundle` accepts `incidence_dir` and
+  `incidence_record_sha256`. The record is refused unless its table was built without the simulations the model
+  holds out and its composition says so.
+- **A log record when a correction is applied.** A predictor that applies the P1D MF correction, and with
   an incidence record the correction of dN/dX and the CDDF, emits one INFO record on the logger
-  `hcd_analysis.predictor` with the sha256 of each record. The library configures no logging.
+  `hcd_analysis.predictor` with the sha256 of each record: once per predictor, at its first corrected call of
+  `predict` or `predict_many` while INFO records pass. Every later corrected call of that predictor emits the same
+  facts as a DEBUG record, so a sampler writes one line and not one per step. The library configures no logging.
 - **The held-out error on the output.** An incidence record may carry a held-out error of the dN/dX and the CDDF (an
   optional block, copied by the builder from a table and never computed by it; the block names that table file by
   its sha256). A prediction then returns it as
@@ -63,6 +95,10 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   no estimate exists. An LF+MF prediction that returns a corrected value without an estimate beside it emits the new
   `HeldOutErrorWarning`, once per process for each record. The builder refuses to run unless the held-out error is
   stated (`--heldout-error FILE SHA256` or `--no-heldout-error`).
+- **The held-out range as fields of a prediction.** `dndx_lower`, `dndx_upper`, `cddf_lower` and `cddf_upper`: the
+  two ends of the held-out range on the quantity itself, each computed on its own from the record's held-out rms of
+  ln(prediction / truth) (the value times exp(-err), the value times exp(+err)); NaN where there is no estimate,
+  None without an incidence record. `dndx_err` and `cddf_err` stay beside them, unchanged: numbers on the logarithm.
 - **A documentation page on the class spectra against the per-class model of Rogers et al. (2018)**
   ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)): what was compared, the numbers, and what the
   comparison is not.
@@ -108,6 +144,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - The `hcd` command needs an explicit `--config` file and refuses to run without one. Keys the file leaves out
   still take the built-in values of `hcd_analysis.config`, and keys it does not know are ignored.
 - The install name is `hcd-priya`; the import name stays `hcd_analysis`.
+- The example, the figure scripts of `scripts/figures/` and `hcd_analysis.report` no longer choose a matplotlib
+  backend: they save their figures under the backend of the session. Without a display, set `MPLBACKEND=Agg`.
+  Older research scripts still set one.
 - The README is short: install, load a model, predict. The release format, the runtime data inputs and the
   description of the research pipeline moved, word for word, to `docs/models_and_data.md` and `docs/pipeline.md`.
 - The Python code is formatted with black (line length 100), with no change in behaviour. Catalogues built from

@@ -35,7 +35,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Defer matplotlib import so the module is importable in headless envs
+# Defer matplotlib import so the module is importable without it. The backend is the session's own: the figures
+# are saved to files, which works under any backend (without a display, set MPLBACKEND=Agg in the environment).
 _MPL_AVAILABLE = None
 
 
@@ -43,9 +44,6 @@ def _get_plt():
     global _MPL_AVAILABLE
     if _MPL_AVAILABLE is None:
         try:
-            import matplotlib
-
-            matplotlib.use("Agg")
             import matplotlib.pyplot as plt
 
             _MPL_AVAILABLE = plt
