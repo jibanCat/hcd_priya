@@ -61,7 +61,7 @@ written, with no switch and no warning.
 
 **Notes.**
 
-- Newer dependency versions and Python 3.12 are tested in continuous integration but not supported yet; macOS and
+- Newer dependency versions and Python 3.12 are tested in the nightly continuous integration but not supported yet; macOS and
   Windows are not tested. [`docs/compatibility.md`](docs/compatibility.md) lists what is tested and what is not.
 - **Extras:** `test` (pytest), `tutorials` (jupyter, nbformat) and `dev`. `pyproject.toml` declares the
   dependencies; `requirements.txt` only points to the install above.
@@ -403,15 +403,17 @@ JAX_PLATFORMS=cpu python -m pytest -q tests/test_cli_config.py
 
 Many tests need real assets that are not in this repository (the training cache, trained emulator members,
 observational data, raw simulation outputs). [`tests/ci_tiers.toml`](tests/ci_tiers.toml) assigns every test
-file to a tier and says why a file or test is not run in continuous integration. The workflow
-[`.github/workflows/tests.yml`](.github/workflows/tests.yml) builds the wheel and the source archive, checks
-their contents against the commit, installs the wheel into a fresh environment and runs the "wheel" and "source"
-tiers with [`tools/ci/run_test_tier.py`](tools/ci/run_test_tier.py), which reports every skipped, deferred or
-deselected test as not run, never as passed. The same runner works from a clone:
+file to a tier and a level (pr, nightly or release) and says why a file or test is not run in continuous
+integration. The workflow [`.github/workflows/tests.yml`](.github/workflows/tests.yml) builds the wheel and the
+source archive, checks their contents against the commit, installs the wheel into a fresh environment and runs the
+"wheel" and "source" tiers at the pr level with [`tools/ci/run_test_tier.py`](tools/ci/run_test_tier.py), which
+reports every skipped, deferred or deselected test as not run, never as passed; the nightly level runs in
+[`.github/workflows/nightly.yml`](.github/workflows/nightly.yml) ([`docs/compatibility.md`](docs/compatibility.md)
+says what runs where). The same runner works from a clone:
 
 ```bash
-JAX_PLATFORMS=cpu python tools/ci/run_test_tier.py --tier source --out <new_results_dir>
-python tools/ci/run_test_tier.py --list-not-run
+JAX_PLATFORMS=cpu python tools/ci/run_test_tier.py --tier source --level pr --out <new_results_dir>
+python tools/ci/run_test_tier.py --list-not-run --level pr
 ```
 
 Status: research code under active development. The validation results are not public yet.

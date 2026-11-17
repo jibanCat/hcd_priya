@@ -15,7 +15,12 @@ code release (see the last section).
 
 ## 2. Tests and continuous integration
 - [ ] The supported CI job ("Python 3.11, pinned (supported)") passes on the release commit on GitHub.
-- [ ] The newer-dependency jobs are read. A failure there is listed in the release notes and is never hidden.
+- [ ] The latest nightly run on the release commit passed (`.github/workflows/nightly.yml`, all three stacks), and the
+      release validation workflow (`.github/workflows/release-validation.yml`, started by hand on that commit) passes:
+      it refuses to go on otherwise. Nightly failures block a release. A failure of a newer-dependency stack is
+      fixed, or listed in the release notes and never hidden, before a passing nightly run is made on the commit.
+- [ ] The release-level tests (`tests/ci_tiers.toml`) ran with the real assets on the release commit (`python
+      tools/ci/run_test_tier.py --tier assets`), and the record of that run is attached to the release.
 - [ ] The older-libhdf5 job passes.
 - [ ] The documentation builds on Read the Docs, with warnings treated as errors.
 - [ ] The bit-level digest replay passes with the supported pinned stack on the kind of CPU the digests were

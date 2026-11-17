@@ -1,0 +1,131 @@
+# The nightly level (tests/ci_tiers.toml): the pr tests and the nightly tests of the wheel and source tiers, and the
+# external tests of the nightly level, on the supported pinned stack and on two newer-dependency stacks, with the
+# build, the content scans, a fresh install and the README's first example, as in tests.yml. It runs once a day on
+# the default branch and on the release stack's branch (#23's) while that is open, on every push to that branch, and
+# by hand on any branch. A failure fails the run, visibly (no issue is opened: that would need a write permission).
+# A release is refused unless the latest run of this workflow on the release commit passed (tools/ci/nightly_gate.py,
+# in .github/workflows/release-validation.yml and publish.yml). A schedule runs only from the default branch: until
+# this file is on the default branch, the release stack's branch is tested here on each push to it and by hand.
+name: nightly
+
+on:
+  schedule:
+    - cron: "23 6 * * *"  # once a day, 06:23 UTC
+  push:
+    branches: [ci/joss-stack-optb]  # the release stack while it is open (#23's branch); remove when #23 merges
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# As in tests.yml: every run step runs in bash with -e and -o pipefail.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  nightly:
+    name: ${{ matrix.stack.label }}${{ matrix.ref != '' && format(' on {0}', matrix.ref) || '' }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # The branch: the one that started the run; on the daily schedule (which GitHub runs on the default branch)
+        # also the branch of the release stack while it is open (#23's branch). Remove that entry when #23 merges.
+        ref: ${{ fromJSON(github.event_name == 'schedule' && '["", "ci/joss-stack-optb"]' || '[""]') }}
+        # Only the pinned stack is a supported environment (docs/compatibility.md). The others show how newer
+        # versions behave; their failures stay visible (no continue-on-error) and do not make them supported.
+        stack:
+          - python: "3.11"
+            deps: development-environment
+            label: Python 3.11, pinned (supported)
+          - python: "3.11"
+            deps: newest
+            label: Python 3.11, newest dependencies (not supported)
+          - python: "3.12"
+            deps: newest
+            label: Python 3.12, newest dependencies (not supported)
+    env:
+      JAX_PLATFORMS: cpu
+      MPLBACKEND: Agg
+      # "1" only in the pinned (supported) job: tests that check bit-level results on the pinned stack then require
+      # the running versions to be the pins, so the supported job cannot pass on another stack by mistake.
+      HCD_PINNED_STACK: ${{ matrix.stack.deps == 'development-environment' && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.stack.python }}
+      - name: Build the sdist and the wheel (SOURCE_DATE_EPOCH set to the commit time)
+        run: |
+          python -m pip install build
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist .
+          sha256sum dist/*
+      - name: Check the distribution contents against the commit
+        run: python tools/ci/check_dist.py dist
+      # The archives can match the commit and still carry private content: scan what they hold. A finding not in the
+      # known list fails; the release gate (docs/release_checklist.md) runs the same scan with --release, no list.
+      # A failure here stops the job before the install and both test tiers, on purpose: fix the content first.
+      - name: Scan the distribution for private or internal content
+        run: python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt
+      # hcd-priya requires the model package hcd-priya-models. CI never needs the real models: the script builds the
+      # model package with a synthetic bundle (untrained networks; version 0+synthetic) and installs both wheels.
+      - name: Install the wheel and a synthetic model package into a fresh virtual environment
+        id: install
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          constraints=()
+          if [ "${{ matrix.stack.deps }}" = development-environment ]; then
+            constraints=(-c tools/ci/constraints-devenv.txt)
+          fi
+          tools/ci/install_with_synthetic_models.sh "$RUNNER_TEMP/venv/bin/python" "$(ls dist/*.whl)[test]" \
+            "$RUNNER_TEMP/dist_models" "${constraints[@]}"
+          sha256sum "$RUNNER_TEMP"/dist_models/*.whl
+          "$RUNNER_TEMP/venv/bin/python" -m pip check
+          mkdir -p "$RUNNER_TEMP/results"
+          "$RUNNER_TEMP/venv/bin/python" -m pip freeze | tee "$RUNNER_TEMP/results/pip-freeze.txt"
+      # What a user gets: a clean environment with only the two wheels (no test extra, no clone on the import
+      # path). The first example of the README runs as written, and the release check loads the model of the model
+      # package. The model package is the synthetic build, so the test switch is set.
+      - name: Fresh install of both wheels, then the README's first example
+        env:
+          HCD_PRIYA_ALLOW_SYNTHETIC: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/fresh"
+          constraints=()
+          if [ "${{ matrix.stack.deps }}" = development-environment ]; then
+            constraints=(-c tools/ci/constraints-devenv.txt)
+          fi
+          "$RUNNER_TEMP/fresh/bin/python" -m pip install "${constraints[@]}" \
+            "$(ls dist/*.whl)" "$(ls "$RUNNER_TEMP"/dist_models/*.whl)"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/fresh/bin/python" -I "$GITHUB_WORKSPACE/tools/ci/readme_first_example.py" "$GITHUB_WORKSPACE/README.md"
+          "$RUNNER_TEMP/fresh/bin/python" -I -m hcd_analysis.check_release --published
+      - name: Wheel tier (the installed package, tests copied outside the checkout)
+        run: >-
+          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier wheel --level nightly --wheel "$(ls dist/*.whl)"
+          --workdir "$RUNNER_TEMP/wheeltest" --out "$RUNNER_TEMP/results/wheel"
+      - name: Source tier (tests that also read repository files, from the checkout)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: >-
+          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier source --level nightly
+          --out "$RUNNER_TEMP/results/source"
+      - name: External tests of the nightly level (their extra public package installed first; a skip fails)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          "$RUNNER_TEMP/venv/bin/python" -m pip install safetensors
+          "$RUNNER_TEMP/venv/bin/python" tools/ci/run_test_tier.py --tier external --level nightly \
+            --out "$RUNNER_TEMP/results/external"
+      - name: List the tests this workflow does not run (other levels and tiers)
+        if: ${{ !cancelled() }}
+        run: python tools/ci/run_test_tier.py --list-not-run --level nightly
+      - name: Keep the results (junit reports, tier summaries and the pip freeze)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-py${{ matrix.stack.python }}-${{ matrix.stack.deps }}${{ matrix.ref != '' && '-stack-branch' || '' }}
+          path: ${{ runner.temp }}/results
+          retention-days: 14

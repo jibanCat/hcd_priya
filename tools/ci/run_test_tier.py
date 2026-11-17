@@ -1,10 +1,16 @@
-"""Run one CI test tier of tests/ci_tiers.toml, one pytest process per file, and refuse any undeclared skip.
+"""Run one CI test tier of tests/ci_tiers.toml at one level, one pytest process per file, and refuse any undeclared skip.
 
 usage:
-  python tools/ci/run_test_tier.py --tier wheel  --workdir NEW_DIR --out NEW_DIR [--wheel WHEEL]
-  python tools/ci/run_test_tier.py --tier source --out NEW_DIR
+  python tools/ci/run_test_tier.py --tier wheel  --level LEVEL --workdir NEW_DIR --out NEW_DIR [--wheel WHEEL]
+  python tools/ci/run_test_tier.py --tier source --level LEVEL --out NEW_DIR
+  python tools/ci/run_test_tier.py --tier external --level nightly --out NEW_DIR
   python tools/ci/run_test_tier.py --tier assets --out NEW_DIR
-  python tools/ci/run_test_tier.py --list-not-run
+  python tools/ci/run_test_tier.py --list-not-run [--level LEVEL]
+
+LEVEL is pr (every pull request) or nightly (the pr level and the nightly files); without --level a tier runs at
+nightly, everything CI runs. At pr, a nightly file runs only the tests its entry names in pr_tests, and a pr file
+does not run the tests in its nightly_tests. At every CI level the tests in a file's release_tests are deselected:
+they need an asset and fail without it; the assets job runs them, and there they must run.
 
 Run it with the interpreter under test (CI: the fresh venv holding the installed wheel).
 
@@ -12,6 +18,8 @@ Run it with the interpreter under test (CI: the fresh venv holding the installed
   interpreter's site-packages; the runner checks that before running anything, and with --wheel also that the
   installed files are exactly that wheel's (the RECORD entries of its package files).
 - source tier: pytest runs from the repository checkout this script belongs to, so hcd_analysis comes from it.
+- external tier, at nightly only: the files of tests/external whose level is nightly, from the checkout, in an
+  interpreter that has their extra package (the nightly workflow installs it); a skip fails, as everywhere.
 - assets: a job meant to test the real model, never run by the CI workflow (it has no assets). From the checkout,
   it runs the files of the "assets" tier and every wheel or source file that declares asset_tests, with
   HCD_GATE_RUN=1 (tests/gate_helpers.py: a missing real cache fails instead of skipping), and with the tests marked
@@ -52,6 +60,11 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__
 TIERS_FILE = os.path.join(REPO, "tests", "ci_tiers.toml")
 CI_TIERS = ("wheel", "source")
 ASSET_JOB = "assets"
+EXTERNAL = "external"
+LEVELS = ("pr", "nightly", "release", "not run")
+# the file levels that run at each CI level
+RUN_LEVELS = {"pr": ("pr",), "nightly": ("pr", "nightly")}
+PER_TEST_KEYS = ("pr_tests", "nightly_tests", "release_tests")
 FILE_TIMEOUT_S = 1800
 COUNT_KEYS = (
     "tests",
@@ -78,30 +91,99 @@ def files_of(files, tier):
 
 
 def asset_job_files(files):
-    """The files an assets job runs: the "assets" tier, and every CI-tier file that declares asset_tests."""
+    """The files an assets job runs: the "assets" tier, and every CI-tier file that declares asset_tests or
+    release_tests."""
     return sorted(
         p
         for p, entry in files.items()
-        if entry["tier"] == ASSET_JOB or (entry["tier"] in CI_TIERS and entry.get("asset_tests"))
+        if entry["tier"] == ASSET_JOB
+        or (entry["tier"] in CI_TIERS and (entry.get("asset_tests") or entry.get("release_tests")))
     )
 
 
-def tier_plan(tier, files):
+def test_functions(rel):
+    """The names of the functions defined in a test file of this checkout."""
+    with open(os.path.join(REPO, rel), encoding="utf-8") as f:
+        return {n.name for n in ast.walk(ast.parse(f.read())) if isinstance(n, ast.FunctionDef)}
+
+
+def check_named_tests(rel, entry):
+    """The names of pr_tests, nightly_tests and release_tests must be test functions of the file, and none may be the
+    start of another function's name: pytest selects and deselects by node-id prefix, so such a name would also catch
+    the other function."""
+    names = [n for key in PER_TEST_KEYS for n in entry.get(key, [])]
+    if not names:
+        return
+    defined = test_functions(rel)
+    for n in names:
+        if n not in defined:
+            sys.exit(
+                f"{rel}: {n} is named in tests/ci_tiers.toml but is not a function of the file"
+            )
+        clash = sorted(d for d in defined if d != n and d.startswith(n))
+        if clash:
+            sys.exit(f"{rel}: {n} is the start of {clash}: a node-id prefix would select those too")
+
+
+def level_selection(rel, entry, level):
+    """How a CI level runs one file: (run, select, deselect). run is False when the file does not run at this level;
+    select is the pytest arguments that choose its tests (the file, or node ids of its pr_tests); deselect is the node
+    ids to leave out (nightly_tests at pr, release_tests at every CI level)."""
+    check_named_tests(rel, entry)
+    deselect = [f"{rel}::{n}" for n in entry.get("release_tests", [])]
+    if entry["level"] in RUN_LEVELS[level]:
+        if level == "pr":
+            deselect += [f"{rel}::{n}" for n in entry.get("nightly_tests", [])]
+        return True, [rel], deselect
+    if level == "pr" and entry["level"] == "nightly" and entry.get("pr_tests"):
+        return True, [f"{rel}::{n}" for n in entry["pr_tests"]], deselect
+    return False, [], []
+
+
+def tier_plan(tier, files, level="nightly"):
     """What a run of `tier` does, as data: the files it runs (todo), the environment variables it adds (env), the
     pytest marker expression of each file's run (marker), and per file the declared skips (declared: asset_tests and
-    skipped_by_design) and the tests that must run (required: an assets job's asset_tests; none in a CI tier).
+    skipped_by_design), the tests that must run (required: an assets job's asset_tests and release_tests; none in a CI
+    tier), the pytest arguments that select its tests (select) and the node ids left out (deselect). A CI tier runs at
+    `level`; the assets job runs every test of its files.
     """
     assets = tier == ASSET_JOB
-    todo = asset_job_files(files) if assets else files_of(files, tier)
+    select, deselect = {}, {}
+    if assets:
+        todo = asset_job_files(files)
+        for rel in todo:
+            check_named_tests(rel, files[rel])
+            select[rel], deselect[rel] = [rel], []
+    else:
+        if level not in RUN_LEVELS:
+            sys.exit(f"level {level!r}: a CI tier runs at {' or '.join(RUN_LEVELS)}")
+        if tier == EXTERNAL and level != "nightly":
+            sys.exit("the external tier runs at the nightly level only")
+        todo = []
+        for rel in files_of(files, tier):
+            run, sel, desel = level_selection(rel, files[rel], level)
+            if run:
+                todo.append(rel)
+                select[rel], deselect[rel] = sel, desel
     return dict(
         todo=todo,
+        level=None if assets else level,
         env={"HCD_GATE_RUN": "1"} if assets else {},
         marker=None if assets else "not slow",
         declared={
             rel: files[rel].get("asset_tests", []) + files[rel].get("skipped_by_design", [])
             for rel in todo
         },
-        required={rel: list(files[rel].get("asset_tests", [])) if assets else [] for rel in todo},
+        required={
+            rel: (
+                list(files[rel].get("asset_tests", [])) + list(files[rel].get("release_tests", []))
+                if assets
+                else []
+            )
+            for rel in todo
+        },
+        select=select,
+        deselect=deselect,
     )
 
 
@@ -227,10 +309,11 @@ def check_installed_is(wheel):
     return len(want)
 
 
-def slow_tests(cmd_base, cwd, env, todo):
-    """The tests marked slow in the tier's files (deselected by the runs), from one collection-only pass."""
+def slow_tests(cmd_base, cwd, env, args):
+    """The tests marked slow among the tests a run selects (deselected by the runs), from one collection-only pass;
+    args are the selections and the --deselect options of every file of the run."""
     proc = subprocess.run(
-        cmd_base + ["--collect-only", "-q", "-m", "slow", *todo],
+        cmd_base + ["--collect-only", "-q", "-m", "slow", *args],
         cwd=cwd,
         env=env,
         capture_output=True,
@@ -242,12 +325,12 @@ def slow_tests(cmd_base, cwd, env, todo):
     return sorted(line.strip() for line in proc.stdout.splitlines() if "::" in line), ""
 
 
-def run_tier(tier, out, workdir=None, wheel=None):
+def run_tier(tier, out, workdir=None, wheel=None, level="nightly"):
     tiers, files = load_tiers()
-    plan = tier_plan(tier, files)
+    plan = tier_plan(tier, files, level)
     todo = plan["todo"]
     if not todo:
-        sys.exit(f"tier {tier!r} has no file")
+        sys.exit(f"tier {tier!r} has no file at this level")
     if tier == "wheel":
         if workdir is None or os.path.exists(workdir):
             sys.exit("--workdir must name a directory that does not exist yet")
@@ -285,7 +368,9 @@ def run_tier(tier, out, workdir=None, wheel=None):
         "-p",
         "no:cacheprovider",
     ]
-    slow, slow_error = slow_tests(cmd_base, cwd, env, todo) if plan["marker"] else ([], "")
+    every = [a for rel in todo for a in plan["select"][rel]]
+    every += [a for rel in todo for d in plan["deselect"][rel] for a in ("--deselect", d)]
+    slow, slow_error = slow_tests(cmd_base, cwd, env, every) if plan["marker"] else ([], "")
     results = []
     for rel in todo:
         slug = rel.replace("/", "__")
@@ -293,8 +378,13 @@ def run_tier(tier, out, workdir=None, wheel=None):
         t0 = time.time()
         try:
             marker = ["-m", plan["marker"]] if plan["marker"] else []
+            deselect = [a for d in plan["deselect"][rel] for a in ("--deselect", d)]
             proc = subprocess.run(
-                cmd_base + marker + ["-q", "-rA", f"--junitxml={xml}", rel],
+                cmd_base
+                + marker
+                + deselect
+                + ["-q", "-rA", f"--junitxml={xml}"]
+                + plan["select"][rel],
                 cwd=cwd,
                 env=env,
                 capture_output=True,
@@ -329,6 +419,8 @@ def run_tier(tier, out, workdir=None, wheel=None):
                 exit=rc,
                 seconds=round(time.time() - t0, 1),
                 declared_skips=declared,
+                selected=plan["select"][rel],
+                deselected=plan["deselect"][rel],
                 **(counts or {}),
             )
         )
@@ -337,6 +429,7 @@ def run_tier(tier, out, workdir=None, wheel=None):
     failed = [r["file"] for r in results if not r["ok"]]
     summary = dict(
         tier=tier,
+        level=plan["level"],
         python=sys.version.split()[0],
         hcd_analysis=origin,
         wheel=wheel,
@@ -348,11 +441,12 @@ def run_tier(tier, out, workdir=None, wheel=None):
         slow_not_run=slow,
         slow_listing_error=slow_error,
         not_run=not_run(files, ran=(ASSET_JOB,) if tier == ASSET_JOB else ()),
+        not_run_at_level=None if tier == ASSET_JOB else not_run_at_level(files, level),
     )
     with open(os.path.join(out, "summary.json"), "w") as f:
         json.dump(summary, f, indent=1)
     print(
-        f"\n{tier} tier: {len(results)} files, {len(failed)} failed; {totals['tests']} tests: "
+        f"\n{tier} tier{'' if plan['level'] is None else ', level ' + plan['level']}: {len(results)} files, {len(failed)} failed; {totals['tests']} tests: "
         f"{totals['passed']} passed, {totals['failures']} failed, {totals['errors']} errors, "
         f"{totals['skipped']} undeclared skips, {totals['bad_xfail']} undeclared expected failures, "
         f"{totals['asset_missing']} asset tests not run in an assets job; "
@@ -368,7 +462,14 @@ def run_tier(tier, out, workdir=None, wheel=None):
         print(f"  could not list the slow tests:\n{slow_error[-2000:]}")
     else:
         print(f"  NOT RUN here, marked slow ({len(slow)}): {', '.join(slow) or 'none'}")
+    for r in results:
+        if r["deselected"] or r["selected"] != [r["file"]]:
+            print(
+                f"  this level runs only part of {r['file']}: {' '.join(r['selected'])}; left out: {', '.join(r['deselected']) or 'none'}"
+            )
     print_not_run(summary["not_run"])
+    if summary["not_run_at_level"] is not None:
+        print_not_run_at_level(summary["not_run_at_level"], level)
     return 1 if failed or slow is None else 0
 
 
@@ -382,6 +483,38 @@ def not_run(files, ran=()):
     return out
 
 
+def not_run_at_level(files, level):
+    """{file level: [(file, reason)]} for the files that a CI level does not run (or runs only in part), and
+    [(file, test, why)] for the tests left out of files it runs."""
+    groups, tests = {}, []
+    for path, entry in sorted(files.items()):
+        lv = entry["level"]
+        if lv in RUN_LEVELS[level]:
+            tests += [(path, n, "nightly") for n in entry.get("nightly_tests", []) if level == "pr"]
+        elif level == "pr" and lv == "nightly" and entry.get("pr_tests"):
+            groups.setdefault("nightly (only its pr_tests run at pr)", []).append(
+                (path, entry.get("reason", ""))
+            )
+        else:
+            groups.setdefault(lv, []).append((path, entry.get("reason", "")))
+        tests += [(path, n, "release") for n in entry.get("release_tests", [])]
+    return dict(files=groups, tests=tests)
+
+
+def print_not_run_at_level(groups, level):
+    for lv, rows in groups["files"].items():
+        print(f"NOT RUN at level {level}: files of level {lv!r} ({len(rows)})")
+        if lv in ("release", "not run"):
+            for path, reason in rows:
+                print(f"  {path}: {reason}")
+    if groups["tests"]:
+        print(
+            f"NOT RUN at level {level}: tests left out of the files it runs ({len(groups['tests'])})"
+        )
+        for path, name, lv in groups["tests"]:
+            print(f"  {path}::{name} (level {lv})")
+
+
 def print_not_run(groups):
     for tier, rows in groups.items():
         print(f"NOT RUN in CI, tier {tier!r} ({len(rows)} files):")
@@ -391,20 +524,32 @@ def print_not_run(groups):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--tier", choices=CI_TIERS + (ASSET_JOB,))
+    ap.add_argument("--tier", choices=CI_TIERS + (EXTERNAL, ASSET_JOB))
+    ap.add_argument(
+        "--level",
+        choices=tuple(RUN_LEVELS),
+        help="a CI tier's level (default nightly: everything CI runs)",
+    )
     ap.add_argument("--workdir")
     ap.add_argument("--wheel", help="wheel tier: check that the installed package is this wheel")
     ap.add_argument("--out")
     ap.add_argument("--list-not-run", action="store_true")
     args = ap.parse_args(argv)
     if args.list_not_run:
-        print_not_run(not_run(load_tiers()[1]))
+        files = load_tiers()[1]
+        print_not_run(not_run(files))
+        if args.level:
+            print_not_run_at_level(not_run_at_level(files, args.level), args.level)
         return 0
     if args.tier is None or args.out is None:
         ap.error("--tier and --out are required")
     if args.wheel and args.tier != "wheel":
         ap.error("--wheel goes with --tier wheel")
-    return run_tier(args.tier, os.path.realpath(args.out), args.workdir, args.wheel)
+    if args.level and args.tier == ASSET_JOB:
+        ap.error("the assets job runs every test of its files: no --level")
+    return run_tier(
+        args.tier, os.path.realpath(args.out), args.workdir, args.wheel, args.level or "nightly"
+    )
 
 
 if __name__ == "__main__":

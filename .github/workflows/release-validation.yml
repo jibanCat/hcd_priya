@@ -1,0 +1,67 @@
+# Release validation, started by hand on the commit to be released (docs/release_checklist.md). It refuses to go on
+# unless the latest nightly run on this commit passed (tools/ci/nightly_gate.py reads the runs of nightly.yml with
+# this workflow's own token, read access to Actions only): nightly failures block a release. Then it runs what can run
+# here of the release checks: the build, the content scan in its release form (no list of known findings), a fresh
+# install of both wheels with the README's first example and the installation check. The tests of the release level
+# (tests/ci_tiers.toml) need the real assets, which no runner has: this workflow lists them; they run in the assets
+# job (tools/ci/run_test_tier.py --tier assets) where the assets are, and the record of that run is attached to the
+# release. Nothing here publishes anything.
+name: release validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    name: Release validation (nightly gate, release scans, release-level list)
+    runs-on: ubuntu-24.04
+    env:
+      JAX_PLATFORMS: cpu
+      MPLBACKEND: Agg
+      HCD_PINNED_STACK: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: The latest nightly run on this commit passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/ci/nightly_gate.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
+      - name: Build the sdist and the wheel (SOURCE_DATE_EPOCH set to the commit time)
+        run: |
+          python -m pip install build
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist .
+          sha256sum dist/*
+      - name: Check the distribution contents against the commit
+        run: python tools/ci/check_dist.py dist
+      - name: Scan the distribution for private or internal content (the release form, no list of known findings)
+        run: python tools/ci/check_dist_content.py dist --release
+      - name: Install the wheel and a synthetic model package into a fresh virtual environment
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          tools/ci/install_with_synthetic_models.sh "$RUNNER_TEMP/venv/bin/python" "$(ls dist/*.whl)[test]" \
+            "$RUNNER_TEMP/dist_models" -c tools/ci/constraints-devenv.txt
+          "$RUNNER_TEMP/venv/bin/python" -m pip check
+      - name: Fresh install of both wheels, then the README's first example and the installation check
+        env:
+          HCD_PRIYA_ALLOW_SYNTHETIC: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/fresh"
+          "$RUNNER_TEMP/fresh/bin/python" -m pip install -c tools/ci/constraints-devenv.txt \
+            "$(ls dist/*.whl)" "$(ls "$RUNNER_TEMP"/dist_models/*.whl)"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/fresh/bin/python" -I "$GITHUB_WORKSPACE/tools/ci/readme_first_example.py" "$GITHUB_WORKSPACE/README.md"
+          "$RUNNER_TEMP/fresh/bin/python" -I -m hcd_analysis.check_release --published
+      - name: List the release-level tests (they run with the real assets, in the assets job; not here)
+        run: python tools/ci/run_test_tier.py --list-not-run --level nightly
