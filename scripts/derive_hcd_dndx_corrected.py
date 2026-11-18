@@ -395,7 +395,9 @@ def main():
         f"deviance/dof={sd['deviance_dof']:.3f} "
         f"(vs {s['A']:.5f}/{s['gamma']:+.4f})"
     )
-    for arm in ("larger_side", "journal_fix"):
+    for arm in (
+        "larger_side",
+    ):  # the journal-fix arm is retired: POW10_T4 holds the journal values
         ac = sens[arm]["cum_uncorrected"]
         a3 = sens[arm]["K3"]["law"]["fit"]
         print(
@@ -622,13 +624,12 @@ def main():
         sources=dict(
             arxiv=LD.ARXIV,
             verified=dict(
-                POW10_T4="implementer ar5iv 2026-07-18 + both designers (v1 only)",
+                POW10_T4="journal Table 4 (ApJ 718, 392), reproduced by pyigm's SDSS-DR7 catalogue (fef47716)",
                 ZAFAR13_T3="implementer ar5iv 2026-07-18 + both designers (verbatim)",
                 PW09_T1="implementer ar5iv 2026-07-18 + Bayesian designer",
                 OMEARA13_wmean="implementer + both designers (verbatim)",
                 OMEARA13_T5_row="Bayesian designer ONLY (ar5iv truncates in-house)",
                 OMEARA13_T9="UNVERIFIED — EXCLUDED",
-                POW10_journal_fixes="UNVERIFIED (IOP paywall) — delta-widened default arm",
                 FUMAGALLI13="implementer + both designers (verbatim)",
             ),
         ),
@@ -702,14 +703,6 @@ def main():
             larger_side_cum=dict(
                 A=sens["larger_side"]["cum_uncorrected"]["A"],
                 gamma=sens["larger_side"]["cum_uncorrected"]["gamma"],
-            ),
-            journal_fix_cum=dict(
-                A=sens["journal_fix"]["cum_uncorrected"]["A"],
-                gamma=sens["journal_fix"]["cum_uncorrected"]["gamma"],
-            ),
-            journal_fix_K3=dict(
-                A=sens["journal_fix"]["K3"]["law"]["fit"]["A"],
-                gamma=sens["journal_fix"]["K3"]["law"]["fit"]["gamma"],
             ),
         ),
         cache_provenance=cache_provenance(inputs, sfc),

@@ -91,49 +91,45 @@ def symmetrize_log_errors(v, lo, hi, mode="mean"):
 
 
 # --------------------------------------------------------------------------- #
-#  POW10 Table 4 (arXiv:0912.0292 v1; ar5iv fetch, verified: implementer       #
-#  2026-07-18 + both designers)                                                #
+#  POW10 Table 4, as printed in the journal                                    #
 # --------------------------------------------------------------------------- #
-# Columns verbatim from Table 4 (the tau912>=2, S/N=2 sample; six z bins).
-# l(X) = m/dX exactly (self-check below); l(z)->l(X) conversion = l(z)*dz/dX (recomputed
-# and asserted below, fallback policy (d): conversions never inherited).
-# ERROR ORIENTATION: the printed magnitude pairs are stored as (lo, hi) with hi = the
-# LARGER member. Gehrels Poisson errors on the printed m reproduce every magnitude
-# (self-check below) and Gehrels upper > lower always, which resolves the disputed
-# z=4.23 orientation (+0.20 up / -0.16 down physically); the ar5iv render shows the
-# smaller member as the superscript uniformly in every row (a rendering artifact).
+# Prochaska, O'Meara & Worseck 2010, ApJ 718, 392, doi:10.1088/0004-637X/718/1/392, Table 4 "LLS Statistics", the
+# six "Redshift intervals" rows of the tau912>=2, S/N=2 sample (the table's default), every column as printed in the
+# journal (the article page, read 2026-11-17). Checked: pyigm's SDSS-DR7 LLS catalogue and its counting code
+# (github.com/pyigm/pyigm, commit fef47716146bdafbf073c43603a5e24511ff3e38; re-implemented in numpy) reproduce m,
+# Delta z, Delta X, l(z) and l(X) of every bin. The arXiv version (0912.0292v1, table tab:llssumm) differs in four
+# bins and is not used: [3.40,3.50] dz 12.9, dX 49.2, l(z) 2.17 +0.40; [3.50,3.65] dz 29.0, dX 111.7, l(z) 1.59;
+# [3.65,3.90] m 57, dz 27.9, dX 109.7, l(z) 2.05; [3.90,4.10] m 30, dz 10.4, dX 41.9, l(z) 2.89, l(X) 0.72.
+# l(X) = m/dX (self-check below); l(z)->l(X) conversion = l(z)*dz/dX (recomputed and asserted below, fallback policy
+# (d): conversions never inherited).
+# ERROR ORIENTATION: the printed magnitude pairs are stored as (lo, hi) with hi = the LARGER member. Gehrels Poisson
+# errors on the printed m reproduce every magnitude (self-check below) and the Poisson upper error is always the
+# larger, so the journal's print (the smaller member as the superscript in every row, as in arXiv v1) is read as
+# swapped: at z=4.23, +0.20 up and -0.16 down.
 POW10_T4 = dict(
     z_lo=np.array([3.30, 3.40, 3.50, 3.65, 3.90, 4.10]),
     z_hi=np.array([3.40, 3.50, 3.65, 3.90, 4.10, 4.40]),
     z_bar=np.array([3.35, 3.47, 3.58, 3.74, 3.97, 4.23]),
-    dX=np.array([25.7, 49.2, 111.7, 109.7, 41.9, 28.3]),
-    dz=np.array([6.8, 12.9, 29.0, 27.9, 10.4, 6.8]),
-    m=np.array([9, 28, 46, 57, 30, 22]),
-    lz=np.array([1.31, 2.17, 1.59, 2.05, 2.89, 3.22]),
-    lz_err_lo=np.array([0.43, 0.40, 0.23, 0.27, 0.52, 0.68]),
+    dX=np.array([25.7, 48.8, 111.1, 108.3, 41.3, 28.3]),
+    dz=np.array([6.8, 12.8, 28.8, 27.5, 10.2, 6.8]),
+    m=np.array([9, 28, 46, 56, 29, 22]),
+    lz=np.array([1.31, 2.18, 1.60, 2.04, 2.84, 3.22]),
+    lz_err_lo=np.array([0.43, 0.41, 0.23, 0.27, 0.52, 0.68]),
     lz_err_hi=np.array([0.60, 0.49, 0.27, 0.31, 0.63, 0.84]),
-    lx=np.array([0.35, 0.57, 0.41, 0.52, 0.72, 0.78]),
+    lx=np.array([0.35, 0.57, 0.41, 0.52, 0.70, 0.78]),
     lx_err_lo=np.array([0.11, 0.11, 0.06, 0.07, 0.13, 0.16]),
     lx_err_hi=np.array([0.16, 0.13, 0.07, 0.08, 0.16, 0.20]),
     estimand=(
         "cumulative l(X), tau912>=2 == N_HI>=10^17.5, INCLUDES subDLAs (SLLS) and "
         "DLAs (POW10 sec 2 verbatim)"
     ),
-    cite=f"arXiv:{ARXIV['POW10']} (POW10) Table 4, v1",
+    cite="ApJ 718, 392 (2010), Table 4 (journal), doi:10.1088/0004-637X/718/1/392 (POW10; "
+    f"arXiv:{ARXIV['POW10']})",
     cosmology=dict(omega_m=0.3, omega_l=0.7, h=0.72),
-    verified="implementer ar5iv fetch 2026-07-18 + both designers (v1 level only)",
-)
-
-# Journal-only fixes (IOP paywalled; sibling session's journal read, UNVERIFIED in-house).
-# Fallback policy (a): default arm keeps v1 values with the v1-journal delta added in
-# quadrature to that point's sigma; journal_fix=True adopts the journal read.
-POW10_JOURNAL_FIXES = dict(
-    lx_397=0.70,
-    m_397=29,
-    dX_397=41.3,  # journal: 0.70 (v1: 0.72) at z_bar=3.97
-    err_423_sym=0.18,  # journal symmetric read at z=4.23 (v1 mean 0.18)
-    delta_397=0.02,  # |0.72 - 0.70| quadrature widening, default arm
-    status="UNVERIFIED (IOP paywall; ar5iv serves v1; sibling journal read). PI decision 6.",
+    verified=(
+        "journal Table 4 (article page, 2026-11-17); m, dz, dX, l(z), l(X) of every bin reproduced from pyigm's "
+        "SDSS-DR7 catalogue (commit fef47716)"
+    ),
 )
 
 # O'Meara et al. 2013 (arXiv:1204.3093). Weighted mean over 2.0<z<2.5 (hybrid with
@@ -175,13 +171,11 @@ FUMAGALLI13 = dict(
 )
 
 
-def lls_compilation(journal_fix=False, omeara_variant="wmean"):
-    """The 8-point cumulative tau>=2 l(X) compilation (O'Meara + Fumagalli + 6 POW10),
-    with the unverified-point fallback switches.
+def lls_compilation(omeara_variant="wmean"):
+    """The 8-point cumulative tau>=2 l(X) compilation (O'Meara + Fumagalli + 6 POW10), with the unverified-point
+    fallback switch for O'Meara.
 
-    journal_fix=False (default): POW10 v1 values, with the v1-journal delta (0.02 at
-      z=3.97) added in quadrature to BOTH error sides of that point (bracket widening).
-    journal_fix=True: the sibling's journal read (0.70 at z=3.97; symmetric 0.18 at 4.23).
+    POW10: the journal Table 4 values (``POW10_T4``), as printed, with no widening.
     omeara_variant: "wmean" (0.29+/-0.05, hybrid weighted mean, verified in-house) or
       "table5" (0.28+/-0.06, self-consistent single row, designer-read only). "table9"
       raises (EXCLUDED, unverified). PI decision 3.
@@ -200,13 +194,6 @@ def lls_compilation(journal_fix=False, omeara_variant="wmean"):
     lx = np.asarray(p["lx"], float).copy()
     elo = np.asarray(p["lx_err_lo"], float).copy()
     ehi = np.asarray(p["lx_err_hi"], float).copy()
-    if journal_fix:
-        lx[4] = POW10_JOURNAL_FIXES["lx_397"]
-        elo[5] = ehi[5] = POW10_JOURNAL_FIXES["err_423_sym"]
-    else:
-        d = POW10_JOURNAL_FIXES["delta_397"]
-        elo[4] = np.hypot(elo[4], d)
-        ehi[4] = np.hypot(ehi[4], d)
 
     return dict(
         z_bar=np.concatenate([[om["z_bar"], FUMAGALLI13["z_bar"]], p["z_bar"]]),
@@ -223,12 +210,11 @@ def lls_compilation(journal_fix=False, omeara_variant="wmean"):
         cite=(
             f"arXiv:{ARXIV['OMEARA13']} / arXiv:{ARXIV['FUMAGALLI13']} / " f"arXiv:{ARXIV['POW10']}"
         ),
-        journal_fix=bool(journal_fix),
         omeara_variant=omeara_variant,
     )
 
 
-# The default compilation (v1 + delta-widening, O'Meara weighted mean).
+# The default compilation (POW10 journal Table 4, O'Meara weighted mean).
 ELL_X_CUMULATIVE_GE17P5_TAU2 = lls_compilation()
 
 
@@ -878,7 +864,6 @@ def run_fit_ordering(
     r_k1=None,
     r_k1_smooth=None,
     kernel_budget=None,
-    journal_fix=False,
     omeara_variant="wmean",
     larger_side=False,
     drop_z180=False,
@@ -944,7 +929,7 @@ def run_fit_ordering(
     )
 
     # (2) UNCORRECTED cumulative compilation (diagonal GLS == the shared WLS)
-    comp = lls_compilation(journal_fix=journal_fix, omeara_variant=omeara_variant)
+    comp = lls_compilation(omeara_variant=omeara_variant)
     sig_cum = symmetrize_log_errors(comp["lx"], comp["err_lo"], comp["err_hi"], mode=err_mode)
     cum_fit = gls_powerlaw_log(comp["z_bar"], comp["lx"], sig_cum)
     cum = dict(
@@ -980,7 +965,6 @@ def run_fit_ordering(
         cum_uncorrected=cum,
         K3=k3,
         inputs=dict(
-            journal_fix=journal_fix,
             omeara_variant=omeara_variant,
             larger_side=larger_side,
             drop_z180=drop_z180,
@@ -1043,13 +1027,13 @@ def run_fit_ordering(
         )
         out["K1b"] = k1b
 
-    # sensitivity arms (spec step 7): z=1.80 drop, larger-side errors, journal-fix toggle
+    # sensitivity arms (spec step 7): z=1.80 drop, larger-side errors. (The journal-fix toggle is retired: the POW10
+    # table holds the journal values, so there is no v1-journal difference left to test.)
     if include_sensitivity:
         out["sensitivity"] = dict(
             drop_z180=run_fit_ordering(
                 floor_factor,
                 kernel_budget=kernel_budget,
-                journal_fix=journal_fix,
                 omeara_variant=omeara_variant,
                 larger_side=larger_side,
                 drop_z180=True,
@@ -1058,17 +1042,8 @@ def run_fit_ordering(
             larger_side=run_fit_ordering(
                 floor_factor,
                 kernel_budget=kernel_budget,
-                journal_fix=journal_fix,
                 omeara_variant=omeara_variant,
                 larger_side=True,
-                include_sensitivity=False,
-            ),
-            journal_fix=run_fit_ordering(
-                floor_factor,
-                kernel_budget=kernel_budget,
-                journal_fix=not journal_fix,
-                omeara_variant=omeara_variant,
-                larger_side=larger_side,
                 include_sensitivity=False,
             ),
         )
