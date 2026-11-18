@@ -27,7 +27,7 @@ removed. It needs ``hcd_analysis`` installed.
 ``--synthetic``: writes a synthetic release (untrained networks; no real number) with the test suite's builder. Run it
 from a repository checkout, in an environment that has ``hcd_analysis``'s dependencies and ``pytest`` (the ``test``
 extra). The package version is the version that hcd-priya pins in ``pyproject.toml`` (beside this folder) with the
-local label ``+synthetic``, for example ``1.0.0+synthetic``: the pin accepts it, so the code installs with it, and a
+local label ``+synthetic``, for example ``1.2.0+synthetic``: the pin accepts it, so the code installs with it, and a
 version with a local label cannot be uploaded to the package index, so a synthetic build cannot be published by
 mistake.
 

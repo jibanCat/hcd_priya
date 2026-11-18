@@ -2170,9 +2170,8 @@ def _check_single_instrument_for_res(legs, sample_res):
     """Guard for the option-b f_res site (4-referee panel #8 / Bayesian #4): ``_legb_model`` samples ONE
     global ``f_res_amp``/``f_res_slope``, but spectral resolution is a per-INSTRUMENT systematic -- DESI
     and eBOSS spectrographs are physically independent (unlike the globally-shared intergalactic metals).
-    A single shared f_res across instruments would be pulled to a wrong compromise (the published resolution
-    errors of the two surveys correspond to about 0.022 for DESI and 0.044 for eBOSS) -> a residual k^2 tilt on
-    the under-corrected leg -> n_s bias on a JOINT fit. Until
+    A single shared f_res across instruments would be pulled to a wrong compromise between the two instruments'
+    resolution corrections -> a residual k^2 tilt on the under-corrected leg -> n_s bias on a JOINT fit. Until
     per-instrument sites (``f_res_amp_desi``/``f_res_amp_eboss``) are built, a multi-instrument ctx with
     ``sample_res`` must RAISE. The per-leg Gate-B cert is single-instrument, so this is a no-op there.
     ``sample_res=False`` is a no-op (golden-safe)."""

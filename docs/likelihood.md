@@ -526,7 +526,7 @@ A research (fold) model of your own, trained without the simulation your mock co
 
 **It is published with the model release, as a second file of the same record, and is not published yet.** Until
 then the example runs only on a model and a mock of your own. The download holds the items below, a `README.md`, a
-`LICENSE` (CC BY 4.0) and `SHA256SUMS`; its model is a fold model, not the release model.
+`LICENSE` and `SHA256SUMS`; its model is a fold model, not the release model.
 
 The example covers z 2.2 to 4.2: 11 redshifts with 11 wavenumbers each, 121 bins. z 2.2 is the lower edge of the
 grouped-validation domain of the model's multi-fidelity correction of the P1D (z 2.2 to 4.6; a domain edge, not a

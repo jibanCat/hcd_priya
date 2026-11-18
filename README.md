@@ -370,8 +370,8 @@ repository, and their release is planned but not yet available.
 `hcd-priya` requires. `hp.load_published()` finds the model in the installed package and loads it only against
 the sha256 that `hcd-priya` itself lists for that model version (`hcd_analysis/published_models.py`): for a
 published model the digest comes from the code package, never from the model package, so changed model files are
-refused, and so is a model version this version of the code does not list. That list holds the LF+MF release 1.0.0,
-the model to be published with this version of the code; it is not published yet.
+refused, and so is a model version this version of the code does not list. That list holds the model release that
+`pyproject.toml` pins, the LF+MF model to be published with this version of the code; it is not published yet.
 `hp.load_release(release_dir, sha256)` loads a release whose files you hold yourself. To check a model from a fresh
 install, run `python -I -m hcd_analysis.check_release --published`, or with `RELEASE_DIR SHA256` for a release
 directory (`-I` keeps a clone in the current directory out of the import path, so the installation is what is
