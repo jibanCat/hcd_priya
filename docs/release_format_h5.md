@@ -269,7 +269,14 @@ without `recipe.research` looks like a production member to every rule.
 
 The production and research rules apply from library version 1.0.0 (`hcd_analysis.__version__`), the first version
 that carries them. Every earlier version, 0.1.0 included (for example the release line at `372204f` and the frozen
-benchmark's `3496030`), predates them. Differences a user of an earlier version meets:
+benchmark's `3496030`), predates them.
+
+The rules look at what a bundle declares (its members' recipes, its w_c map, its lineage block), never at a version
+number: a bundle stores no version of this library, only the commit it was exported from. Version 0.2.0 was a
+development label and was never released; development code from the commit that introduced these rules on behaves
+as 1.0.0 does.
+
+Differences a user of an earlier version meets:
 
 - synthetic `h5/2` bundles written by an earlier version (recipe without `all_sims`, a made-up w_c map that does not
   count the cache's groups) are refused by the release loaders (`ALL_SIMS_NOT_TRUE`, and `WCMAP_NOT_FULL_CACHE` for
