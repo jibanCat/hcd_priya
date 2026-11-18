@@ -50,7 +50,11 @@ def test_official_reader_reads_safe_io_files(tmp_path):
 
 def test_safe_io_reads_official_files(tmp_path):
     p = str(tmp_path / "b.safetensors")
-    st_numpy.save_file(_arrays(), p, metadata={"format": S.FORMAT})
+    # The official writer takes arrays: from safetensors 0.8.0 it refuses a numpy scalar such as np.float64(1.5).
+    # The scalar is given to it as a 0-d array, the same dtype, shape () and bytes; safe_io's own writer still gets
+    # the numpy scalar in the test above.
+    arrays = {k: np.asarray(a) for k, a in _arrays().items()}
+    st_numpy.save_file(arrays, p, metadata={"format": S.FORMAT})
     out, meta = S.read_safetensors(p)
     assert meta == {"format": S.FORMAT}
     for k, a in _arrays().items():
