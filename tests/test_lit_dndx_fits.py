@@ -319,15 +319,12 @@ def test_telescoping_consistency_k3():
 def test_sensitivity_arms():
     res = LD.run_fit_ordering(floor_factor=_toy_floor_factor)
     arms = res["sensitivity"]
-    for k in ("drop_z180", "larger_side", "journal_fix"):
-        assert k in arms
+    # the journal-fix arm is retired: POW10_T4 holds the journal values (no v1-journal difference left)
+    assert sorted(arms) == ["drop_z180", "larger_side"]
     # z=1.80 drop: subDLA fit still healthy, gamma moves by a finite amount
     assert arms["drop_z180"]["subDLA"]["deviance_dof"] < 3.0
     assert arms["drop_z180"]["subDLA"]["gamma"] != res["subDLA"]["gamma"]
-    # larger-side errors and journal-fix arms perturb the cumulative law only mildly
+    # larger-side errors perturb the cumulative law only mildly
     assert (
         abs(arms["larger_side"]["cum_uncorrected"]["gamma"] - res["cum_uncorrected"]["gamma"]) < 0.2
-    )
-    assert (
-        abs(arms["journal_fix"]["cum_uncorrected"]["gamma"] - res["cum_uncorrected"]["gamma"]) < 0.2
     )

@@ -320,7 +320,7 @@ def arm_coordinates(meta_arm, w=None):
 
     D SEMANTICS BY ERA (2026-07-23, design pair): D = |lnB|_rms / lls_frac_sigma_ks (0.40) in
     BOTH eras — the truth boosts are alpha-space multiplicative in both, and in the mapped era
-    0.40 = g_LLS(z=3) x sigma_eps(0.5310) to <1e-4 relative (pinned-literal quantization of
+    0.40 = g_LLS(z=3) x sigma_eps(0.5305) to <1e-4 relative (pinned-literal quantization of
     the sigma_eps width-translation construction; domain-review-measured 0.399993), so 0.40
     is the correct pivot-linearized alpha-space width there too. The
     gate statistic keeps this D for cross-era comparability with the 108-fit history. The

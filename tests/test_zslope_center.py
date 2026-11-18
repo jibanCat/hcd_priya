@@ -124,7 +124,7 @@ def test_marginalized_explicit_mu_is_respected():
 def test_realfit_litwls_lls_slope_constant_and_guard():
     """The real-fit LLS forward z-slope is the literature slope γ_LLS=2.127 — KEPT under the
     corrected-law re-derivation (PI 2026-07-18 decision 1c: the corrected K1a free-gamma fit
-    2.137 is consistent, so the deployed LLS law is CONSTRAINED to 2.127 and the test-enforced
+    2.115 is consistent, so the deployed LLS law is CONSTRAINED to 2.127 and the test-enforced
     identity HCD_LLS_REALFIT_ZSLOPE == HCD_LIT_DNDX_LAW['LLS'][1] holds exactly). NOT the sim
     incidence slope 2.465 the closure carries, NOR the lit/sim RATIO slope. ABOVE the
     forward-z-slope guard floor (1.5) so _assert_forward_zslope_center PASSES it."""

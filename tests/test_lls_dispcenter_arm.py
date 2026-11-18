@@ -5,13 +5,13 @@ ALREADY threaded fail-loud through closure_legb._apply_truth_boosts (tests/test_
 part (b)), so the new pieces under test here are the runner's pure helpers:
 
   (a) latent_sigma_displacement -- the exact prior-sigma displacement the boost induces at the
-      prior median. alpha_lls's latent IS alpha (TruncatedNormal(mu, 0.287*mu, low=0), sampled
+      prior median. alpha_lls's latent IS alpha (TruncatedNormal(mu, 0.285*mu, low=0), sampled
       directly -- NOT the DLA softplus latent whose +0.408 went through softplus^-1), so the
-      displacement is (boost-1)*median/sigma: boost 1.287 at frac width 0.287 = +1.0000 exactly
-      at the prior center; the low=0 truncnorm median correction at mu/sigma ~ 3.48 is <1e-3.
+      displacement is (boost-1)*median/sigma: boost 1.285 at frac width 0.285 = +1.0000 exactly
+      at the prior center; the low=0 truncnorm median correction at mu/sigma ~ 3.51 is <1e-3.
 
-  (b) assert_deployed_lls_width / lls_prior_stamp -- the fail-loud deployed-width guard (0.287,
-      the 1x lit-anchored primary; a hedge2x ctx (0.574) or a KS ctx (0.40) must ABORT the
+  (b) assert_deployed_lls_width / lls_prior_stamp -- the fail-loud deployed-width guard (0.285,
+      the 1x lit-anchored primary; a hedge2x ctx (0.570) or a KS ctx (0.40) must ABORT the
       campaign, not silently rescale the displacement) and the meta prior stamp.
 
   (c) re-assert the lls_truth_boost threading contract in this campaign's own file (pivot
@@ -47,25 +47,25 @@ def _toy_truth_pack(nZg=5):
 def test_displacement_center_is_exactly_one_sigma():
     """boost = 1 + frac_sigma => (boost-1)*mu/sigma = frac/frac = 1, for ANY mu."""
     for mu in (0.02, 0.7, 3.1):
-        d = R.latent_sigma_displacement(mu, 0.287 * mu, 1.287)
+        d = R.latent_sigma_displacement(mu, 0.285 * mu, 1.285)
         np.testing.assert_allclose(d, 1.0, rtol=1e-12)
 
 
 def test_displacement_scales_linearly_in_boost():
     mu = 0.5
-    d = R.latent_sigma_displacement(mu, 0.287 * mu, 1.0 + 2 * 0.287)  # +2 fractional sigma
+    d = R.latent_sigma_displacement(mu, 0.285 * mu, 1.0 + 2 * 0.285)  # +2 fractional sigma
     np.testing.assert_allclose(d, 2.0, rtol=1e-12)
-    d = R.latent_sigma_displacement(mu, 0.287 * mu, 1.0 - 0.287)  # the minus-arm config flip
+    d = R.latent_sigma_displacement(mu, 0.285 * mu, 1.0 - 0.285)  # the minus-arm config flip
     np.testing.assert_allclose(d, -1.0, rtol=1e-12)
 
 
 def test_displacement_truncnorm_median_correction_is_negligible():
-    """low=0 truncation at mu/sigma = 1/0.287 ~ 3.48: the truncnorm median sits a hair ABOVE mu
+    """low=0 truncation at mu/sigma = 1/0.285 ~ 3.51: the truncnorm median sits a hair ABOVE mu
     (mass below 0 ~ 2.5e-4 folded up), so the median displacement is >= the center one but within
     1e-3 of +1."""
     mu = 0.7
-    d0 = R.latent_sigma_displacement(mu, 0.287 * mu, 1.287)
-    dm = R.latent_sigma_displacement(mu, 0.287 * mu, 1.287, low=0.0)
+    d0 = R.latent_sigma_displacement(mu, 0.285 * mu, 1.285)
+    dm = R.latent_sigma_displacement(mu, 0.285 * mu, 1.285, low=0.0)
     assert dm >= d0
     assert abs(dm - 1.0) < 1e-3
 
@@ -80,25 +80,25 @@ def test_displacement_unit_boost_is_zero():
 # --------------------------------------------------------------------------------------------- #
 def test_assert_deployed_lls_width_passes_at_0287():
     mu = 0.6153
-    R.assert_deployed_lls_width(mu, 0.287 * mu)  # no raise
+    R.assert_deployed_lls_width(mu, 0.285 * mu)  # no raise
 
 
 def test_assert_deployed_lls_width_rejects_hedge_and_ks_widths():
     mu = 0.6153
     with pytest.raises(AssertionError, match="LLS prior width"):
-        R.assert_deployed_lls_width(mu, 0.574 * mu)  # hedge2x ctx
+        R.assert_deployed_lls_width(mu, 0.570 * mu)  # hedge2x ctx
     with pytest.raises(AssertionError, match="LLS prior width"):
         R.assert_deployed_lls_width(mu, 0.40 * mu)  # KS ctx
 
 
 def test_default_boost_is_plus_one_fractional_sigma():
     np.testing.assert_allclose(R.DEFAULT_BOOST, 1.0 + R.LLS_FRAC_SIGMA_DEPLOYED, rtol=0, atol=0)
-    np.testing.assert_allclose(R.LLS_FRAC_SIGMA_DEPLOYED, 0.287, rtol=0, atol=0)
+    np.testing.assert_allclose(R.LLS_FRAC_SIGMA_DEPLOYED, 0.285, rtol=0, atol=0)
 
 
 def test_lls_prior_stamp_contents():
     mu = 0.55
-    st = R.lls_prior_stamp(mu, 0.287 * mu, 1.287)
+    st = R.lls_prior_stamp(mu, 0.285 * mu, 1.285)
     assert set(st) == {
         "alpha_lls_mu",
         "alpha_lls_sigma",
@@ -108,7 +108,7 @@ def test_lls_prior_stamp_contents():
         "latent_sigma_disp_median",
     }
     np.testing.assert_allclose(st["alpha_lls_mu"], mu, rtol=1e-12)
-    np.testing.assert_allclose(st["frac_sigma"], 0.287, rtol=1e-12)
+    np.testing.assert_allclose(st["frac_sigma"], 0.285, rtol=1e-12)
     np.testing.assert_allclose(st["latent_sigma_disp_center"], 1.0, rtol=1e-12)
     assert abs(st["latent_sigma_disp_median"] - 1.0) < 1e-3
     assert all(isinstance(v, float) for v in st.values())  # pkl/meta-safe scalars
@@ -144,10 +144,10 @@ def test_forward_stamp_carries_both_signatures():
 # --------------------------------------------------------------------------------------------- #
 def test_apply_truth_boosts_lls_key_threads():
     tp = _toy_truth_pack()
-    out = LB._apply_truth_boosts(tp, {"lls_truth_boost": 1.287})
-    np.testing.assert_allclose(out["alpha_hcd"][0], tp["alpha_hcd"][0] * 1.287, rtol=1e-12)
+    out = LB._apply_truth_boosts(tp, {"lls_truth_boost": 1.285})
+    np.testing.assert_allclose(out["alpha_hcd"][0], tp["alpha_hcd"][0] * 1.285, rtol=1e-12)
     np.testing.assert_allclose(
-        out["alpha_hcd_z"][:, 0], tp["alpha_hcd_z"][:, 0] * 1.287, rtol=1e-12
+        out["alpha_hcd_z"][:, 0], tp["alpha_hcd_z"][:, 0] * 1.285, rtol=1e-12
     )
     # subDLA + DLA columns/pivots, theta9, tau0, a_SiIII UNTOUCHED; input unmutated
     np.testing.assert_allclose(out["alpha_hcd"][1:], tp["alpha_hcd"][1:], rtol=0, atol=0)
@@ -160,4 +160,4 @@ def test_apply_truth_boosts_lls_key_threads():
 
 def test_apply_truth_boosts_unknown_lls_typo_raises():
     with pytest.raises(ValueError, match="unknown inject_spec key"):
-        LB._apply_truth_boosts(_toy_truth_pack(), {"lls_truthboost": 1.287})
+        LB._apply_truth_boosts(_toy_truth_pack(), {"lls_truthboost": 1.285})

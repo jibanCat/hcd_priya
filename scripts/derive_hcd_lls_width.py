@@ -9,8 +9,8 @@ served from the TOMBSTONE constants in hcd_analysis/emulator/lit_dndx.py (greppa
 fit for deployment), so this script's printed numbers stay byte-identical as the
 historical record of where the old 0.15/0.30 knobs came from. THE DEPLOYED WIDTH OF RECORD
 is now derived by scripts/derive_hcd_dndx_corrected.py on the corrected K1a points:
-sigma_LLS 1x = 0.287 (measurement 0.174 + kernel common-mode s_r3=0.227 in quadrature,
-PI decision 4), 2x hedge = 0.574; see inference.HCD_LLS_SURVEY_FRAC_SIGMA(+HEDGE2X).
+sigma_LLS 1x = 0.285 (measurement 0.171 + kernel common-mode s_r3=0.228 in quadrature,
+PI decision 4), 2x hedge = 0.570; see inference.HCD_LLS_SURVEY_FRAC_SIGMA(+HEDGE2X).
 
 The PI WIDTH RULE: set sigma_LLS to 1-2x the LITERATURE dN/dX MEASUREMENT error.
 1x = the fractional lit dN/dX measurement uncertainty for LLS (derived here), 2x = double.
@@ -29,7 +29,7 @@ sigma/mu = 0.160 (WLS norm err 0.086 chi2-inflated vs per-point scatter 0.160 ->
 0.160) -> the old clean 1x knob 0.15; 2x = 0.30. WLS gamma_LLS = +2.127, A = 0.0201 (the
 cumulative-estimand fit; the DEPLOYED corrected law is now (0.0184, 2.127) constrained).
 subDLA 1x = 0.102, DLA 1x = 0.094 (wrong-object subDLA; the repo keeps subDLA
-sigma/mu=0.40, DLA=0.50 broad). Deployed knobs of record: 0.287 / 0.574 (see above).
+sigma/mu=0.40, DLA=0.50 broad). Deployed knobs of record: 0.285 / 0.570 (see above).
 
 Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
      python scripts/derive_hcd_lls_width.py

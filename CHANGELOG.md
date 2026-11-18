@@ -145,6 +145,13 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   builds it with every warning treated as an error.
 
 ### Changed
+- The literature dN/dX compilation of the historical research inference (`hcd_analysis.emulator.lit_dndx`) uses
+  Table 4 of Prochaska, O'Meara and Worseck (2010) as printed in the journal (ApJ 718, 392), checked against the
+  survey's catalogue in pyigm, in place of the arXiv v1 table, which differed in four bins. Its switch for the
+  v1-journal difference and that sensitivity arm are removed. The derivation record
+  `hcd_analysis/emulator/hcd_lit_dndx_corrected.json` is regenerated and the research prior constants that follow
+  from it move by 0.1 to 0.7 per cent (the KS exponent width by 1.9 per cent). The predictor, the release
+  likelihood, the example and the figures do not use these constants and are unchanged.
 - The `hcd` command needs an explicit `--config` file and refuses to run without one. Keys the file leaves out
   still take the built-in values of `hcd_analysis.config`, and keys it does not know are ignored.
 - The install name is `hcd-priya`; the import name stays `hcd_analysis`.

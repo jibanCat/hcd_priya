@@ -80,7 +80,7 @@ def test_case1_lls_law_reproduced_by_recorded_constrained_estimator(J):
     )  # recomputation: rounding only
     assert fit["gamma"] == g_dep == 2.127
     # the free-gamma fit recorded in the JSON is the consistency evidence for the
-    # constraint (PI decision 1c): free gamma 2.137 within a small fraction of its sigma
+    # constraint (PI decision 1c): free gamma 2.115 within a small fraction of its sigma
     free = ad["free_fit_evidence"]
     assert abs(free["gamma"] - 2.127) < 0.5 * free["sigma_gamma"]
 
@@ -215,7 +215,7 @@ def test_case4_telescoping_k3_closure_and_k1a_expected_pulls(J):
     # adopted (constrained K1a) pulls: recorded expected-values, PI-accepted tension
     pull = np.asarray(J["adopted_law"]["telescoping"]["pull"], float)
     z = np.asarray(J["adopted_law"]["telescoping"]["z"], float)
-    exp = np.array([0.87, 1.70, 2.39, 2.10])  # the recorded 2026-07-18 values
+    exp = np.array([0.85, 1.71, 2.43, 2.16])  # recorded 2026-11-18 (POW10 journal Table 4)
     np.testing.assert_allclose(pull, exp, rtol=0, atol=0.05)
     hi = pull[z >= 3.0]
     assert np.all(
@@ -360,19 +360,21 @@ def test_case8_g3_tripwire_human_blessed_literal_pins():
     (regenerated with ZERO numeric drift; the only content change vs the 2026-07-18 original is
     the lit_over_sim.LLS 'deployed'→'pre_swap' key rename + created/git_commit), re-blessed
     2026-11 when cache_provenance.path became the repository-relative cache path (no numeric
-    change). Any future JSON regeneration MUST re-bless these literals deliberately."""
+    change), and re-blessed 2026-11-18 when the POW10 Table 4 values became the journal's (the
+    record regenerated; the K1a r(3) unchanged, the bracket endpoints moved -0.18 and -0.35 per
+    cent). Any future JSON regeneration MUST re-bless these literals deliberately."""
     # (1) the committed artifact bytes
     with open(_JSON, "rb") as fh:
         sha = hashlib.sha256(fh.read()).hexdigest()
-    assert sha == "ad00e26311017fbe398adceb13665f3ffed9c7a309e7b97ef7889558fefd63d0"
+    assert sha == "24d8ad00033a339ccc8047ac6dd690554b8dd5234fe63bbd73affc5a96a4d0a5"
     # (2) the live payload agrees with the literal (the live sha checks must agree)
     p = INF.hcd_prior_constants_payload()
     assert p["derivation_json_sha256"] == sha
     # (3) the adopted kernel correction at the z=3 pivot (K1a r(3), bit-level)
     assert p["adopted_kernel_r3"] == 0.8884262008450887
     # (4) the K1a/K2 alpha_LLS(z3) bracket endpoints (adopted-center + far minus arm, bit-level)
-    assert p["bracket_alpha_lls_z3"]["K1a"] == 0.1721593679289494
-    assert p["bracket_alpha_lls_z3"]["K2"] == 0.0953902830189703
+    assert p["bracket_alpha_lls_z3"]["K1a"] == 0.1718476229397975
+    assert p["bracket_alpha_lls_z3"]["K2"] == 0.09506101129494846
 
 
 def test_case8_signature_is_sha256_and_tracks_constants(monkeypatch):

@@ -18,7 +18,7 @@ DEFECT LINEAGE:
     around a deterministic reference, so the deployed KS centre curve IS that reference
     (closure_legb._ks_dndx_reference) -- native dN/dX, NO inverse map, NO saturation possible,
     no refusal. The W2-era "exporter still writes the LEGACY KS surface" tripwire has FLIPPED:
-    the KS row is now pinned AS the mapped reference (alpha-space pivot 0.393235480, moved from
+    the KS row is now pinned AS the mapped reference (alpha-space pivot 0.392363763, moved from
     the legacy postmap 0.4302804), and an alpha-space Gaussian width for KS is a REFUSED key.
 
 Everything here is built in tmp_path from a tiny synthetic z grid + the (blind-safe) prior-geometry
@@ -52,7 +52,7 @@ REPO = _REPO_ROOT
 # --- tiny synthetic inputs: 6 z nodes, real Xbar(z) magnitudes = EXACT evaluations of the frozen
 # deg-2 Xbar polynomial (f3_layers 'xbar_poly_deg2_coeffs' [0.04156166, 0.07087752, 0.04491599])
 # so build_npz_payload's polyfit recovery is exact and the z=3 node carries the true pivot Xbar
-# (the deployed LLS centre lands on 0.172112 / the mapped KS pivot on 0.393235, and the pivot
+# (the deployed LLS centre lands on 0.171659 / the mapped KS pivot on 0.392364, and the pivot
 # guards fire on genuine values). Prior geometry only -- no data, no posterior, no cosmology.
 # The grid RUNS TO z=4.6 on purpose: v3 correctly REFUSED here at the legacy KS prior (centre
 # out-of-simplex at z>=~4.45); under the v4 native-dN/dX KS the full grid must BUILD, with the
@@ -75,8 +75,9 @@ SD_CLOSURE = np.array([0.028217793996552160, 0.02487326388888889, 0.002204835069
 
 # saturation fingerprint of the retired approximate inverse: mu = -log(1e-12) = 27.631021
 SATURATION_MU = 27.631021
-# the W2-pinned mapped KS alpha-space LLS pivot centre (legacy postmap was 0.4302804016838828)
-KS_MAPPED_PIVOT = 0.393235480
+# the mapped KS alpha-space LLS pivot centre (W2: 0.393235480; re-pinned 2026-11-18 with the POW10 journal Table 4
+# values; legacy postmap was 0.4302804016838828)
+KS_MAPPED_PIVOT = 0.392363763
 KS_LEGACY_PIVOT = 0.4302804016838828
 
 
@@ -244,7 +245,7 @@ def test_alpha_pivot_keys_say_deployed_or_closure(npz):
 
     KS SEMANTICS (v4, FLIPPED from the W2-era tripwire): the deployed KS prior IS the
     dN/dX-mapped parameterization and this exporter now ships the MAPPED surface, so the KS
-    row is pinned AT the mapped pivot centre 0.393235480 (a derived deterministic through
+    row is pinned AT the mapped pivot centre 0.392363763 (a derived deterministic through
     w_c_corrected), asserted to DIFFER from the legacy alpha-postmap centre 0.4302804 the
     v1/v2 artifacts shipped -- and the mapped survey may NOT ship an alpha-space sigma."""
     sur = [str(s) for s in npz["survey_order"]]
@@ -264,7 +265,7 @@ def test_alpha_pivot_keys_say_deployed_or_closure(npz):
             assert f"deployed_alpha_pivot_sigma_{sv}" in npz.files
             # the deployed LLS centre is the corrected lit law x boost, NOT closure x boost.
             assert (
-                abs(mu[0] - 0.17211216067355312 * b) < 1e-12
+                abs(mu[0] - 0.17165878476633895 * b) < 1e-12
             ), f"{sv} deployed LLS centre {mu[0]!r}"
             assert abs(mu[0] - MU_CLOSURE[0] * b) > 1e-3, (
                 f"{sv} deployed LLS centre equals closure x boost -- that is the construction the "
@@ -276,7 +277,7 @@ def test_alpha_pivot_keys_say_deployed_or_closure(npz):
             # THE v4 PIN: the mapped pivot centre (W2 value), NOT the legacy postmap centre.
             assert (
                 abs(mu[0] - KS_MAPPED_PIVOT) < 1e-6
-            ), f"KS mapped pivot {mu[0]!r} != W2-pinned {KS_MAPPED_PIVOT}"
+            ), f"KS mapped pivot {mu[0]!r} != the pinned {KS_MAPPED_PIVOT}"
             assert abs(mu[0] - KS_LEGACY_PIVOT) > 0.03, (
                 "the KS row equals the LEGACY alpha-postmap centre 0.4302804 -- the exporter "
                 "regressed to the pre-v4 legacy surface (v1/v2 artifacts)"
@@ -328,8 +329,8 @@ def test_ks_band_is_pivot_amplitude_band(npz):
     eps = float(np.asarray(npz["ks_sigma_eps"]))
     msub = float(np.asarray(npz["ks_sigma_msub"]))
     raw0 = float(np.asarray(npz["ks_dla_raw_mu0"]))
-    assert eps == float(INF.KS_DNDX_SIGMA_EPS) == 0.5310
-    assert float(np.asarray(npz["ks_sigma_kappa"])) == float(INF.KS_DNDX_SIGMA_KAPPA) == 0.6681
+    assert eps == float(INF.KS_DNDX_SIGMA_EPS) == 0.5305
+    assert float(np.asarray(npz["ks_sigma_kappa"])) == float(INF.KS_DNDX_SIGMA_KAPPA) == 0.6553
     assert msub == float(INF.KS_DNDX_SIGMA_MSUB)
     sp0 = float(jax.nn.softplus(raw0))
     np.testing.assert_array_equal(hi[:, 0], np.exp(+eps) * c[:, 0])

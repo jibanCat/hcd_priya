@@ -240,18 +240,34 @@ def test_fumagalli_conversion():
 # --------------------------------------------------------------------------- #
 #  Fallback switches (unverified points; spec sec 2 fallback policy)           #
 # --------------------------------------------------------------------------- #
-def test_journal_fix_switch():
-    """Default arm = v1 values with the v1-journal delta added in quadrature at z=3.97
-    (bracket widening, not silent trust); journal_fix=True arm = the sibling's journal read."""
-    v1 = LD.lls_compilation(journal_fix=False)
-    jf = LD.lls_compilation(journal_fix=True)
-    i397 = int(np.argmin(np.abs(np.asarray(v1["z_bar"]) - 3.97)))
-    assert v1["lx"][i397] == pytest.approx(0.72)
-    assert jf["lx"][i397] == pytest.approx(0.70)
-    # delta-widening: default-arm sigma at 3.97 exceeds the raw v1 sigma
-    raw_hi = LD.POW10_T4["lx_err_hi"][4]
-    assert v1["err_hi"][i397] > raw_hi
-    assert v1["err_hi"][i397] == pytest.approx(np.hypot(raw_hi, 0.02), rel=1e-6)
+def test_pow10_table_is_the_journal_table4():
+    """POW10_T4 holds Table 4 of the journal (ApJ 718, 392; the six redshift intervals of the S/N = 2 sample), restated
+    here from the article as printed: Delta X, Delta z, m, l(z) with its errors, l(X) with its errors. The errors are
+    stored as (smaller, larger), the orientation rule. The arXiv v1 values it replaced (four bins) are not used, and the
+    compilation takes the table as it is: no widening, no switch."""
+    journal = dict(
+        dX=[25.7, 48.8, 111.1, 108.3, 41.3, 28.3],
+        dz=[6.8, 12.8, 28.8, 27.5, 10.2, 6.8],
+        m=[9, 28, 46, 56, 29, 22],
+        lz=[1.31, 2.18, 1.60, 2.04, 2.84, 3.22],
+        lz_err_lo=[0.43, 0.41, 0.23, 0.27, 0.52, 0.68],
+        lz_err_hi=[0.60, 0.49, 0.27, 0.31, 0.63, 0.84],
+        lx=[0.35, 0.57, 0.41, 0.52, 0.70, 0.78],
+        lx_err_lo=[0.11, 0.11, 0.06, 0.07, 0.13, 0.16],
+        lx_err_hi=[0.16, 0.13, 0.07, 0.08, 0.16, 0.20],
+    )
+    for key, want in journal.items():
+        np.testing.assert_array_equal(np.asarray(LD.POW10_T4[key]), np.asarray(want), err_msg=key)
+    assert "ApJ 718, 392" in LD.POW10_T4["cite"] and "journal" in LD.POW10_T4["cite"]
+    assert not hasattr(LD, "POW10_JOURNAL_FIXES")
+    comp = LD.lls_compilation()
+    assert "journal_fix" not in comp
+    pow10 = [i for i, s in enumerate(comp["source"]) if s.startswith("POW10")]
+    np.testing.assert_array_equal(np.asarray(comp["lx"])[pow10], journal["lx"])
+    np.testing.assert_array_equal(np.asarray(comp["err_lo"])[pow10], journal["lx_err_lo"])
+    np.testing.assert_array_equal(np.asarray(comp["err_hi"])[pow10], journal["lx_err_hi"])
+    with pytest.raises(TypeError):
+        LD.lls_compilation(journal_fix=True)
 
 
 def test_omeara_variant_switch():

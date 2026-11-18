@@ -7,8 +7,8 @@ test_dla_selfdraw_arm.py forward_stamp-stub convention):
 
   * assert_prior_state: the K1a constant-swap TRIPWIRE — required --expect-lls-boost /
     --expect-lls-frac-sigma must equal the DEPLOYED inference constants; the deployed LLS
-    center must equal the post-correction K1a values EXACTLY (lit/sim 0.995, slope 0.764,
-    widened base sigma 0.287 / hedge 0.574, realfit z-slope 2.127); returns the 5-constant
+    center must equal the post-correction K1a values EXACTLY (lit/sim 0.992, slope 0.764,
+    widened base sigma 0.285 / hedge 0.570, realfit z-slope 2.127); returns the 5-constant
     stamp dict the analyzer re-asserts.
   * assert_ks_forward: the KS parity block (prod_forward_config("KS") + NORC + echelle
     k_max 0.065 live (NOT the 0.045 NORC auto-cap) + metals OFF + dla_forward_frac == 0.0,
@@ -48,8 +48,8 @@ def test_prior_state_passes_on_deployed_constants():
     # the 5 prior constants stamped into meta (analyzer re-asserts homogeneity)
     assert stamp["lls_survey_boost_ks"] == 2.5
     assert stamp["lls_frac_sigma_ks"] == 0.40
-    assert stamp["lit_over_sim_lls"] == 0.995
-    assert stamp["lls_base_frac_sigma"] == 0.287
+    assert stamp["lit_over_sim_lls"] == 0.992
+    assert stamp["lls_base_frac_sigma"] == 0.285
     assert stamp["lls_realfit_zslope"] == 2.127
     assert stamp["hcd_prior_signature"] == INF.hcd_prior_signature()
 

@@ -22,7 +22,7 @@ is what a free class amplitude in the likelihood absorbs; a shape change is not.
 The reading of the ``--headline`` thresholds (default 50 and 200), over every class and input:
 
     negligible  every |a - 1| < 0.05, every s < 0.05 and every clean change < 1%
-    modest      every |a - 1| <= 0.29 and every s <= 0.10   (0.29: the DESI/eBOSS LLS fractional prior width, 0.287)
+    modest      every |a - 1| <= 0.29 and every s <= 0.10   (0.29: the DESI/eBOSS LLS fractional prior width, 0.285)
     important   otherwise
 
 The per-class readings apply the same thresholds to a and s only (the clean change belongs to no class). a weights the

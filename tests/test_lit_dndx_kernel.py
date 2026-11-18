@@ -229,7 +229,7 @@ def test_emitted_json_kernel_reproducibility(inputs):
     ad = j["adopted_law"]
     assert ad["kernel"] == "K1a"
     assert ad["gamma"] == 2.127
-    assert ad["free_fit_evidence"]["gamma"] == pytest.approx(2.137, abs=0.01)
+    assert ad["free_fit_evidence"]["gamma"] == pytest.approx(2.115, abs=0.01)
     assert abs(ad["free_fit_evidence"]["gamma"] - ad["gamma"]) < 0.5 * max(
         ad["free_fit_evidence"]["sigma_gamma"], 1e-9
     ), "constraint only justified if free gamma is consistent with 2.127"

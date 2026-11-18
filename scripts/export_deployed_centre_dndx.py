@@ -44,8 +44,8 @@ deployed curve uses) and directly through `alpha_to_dndx_exact` on the explicitl
 z-resolved alpha -- and asserts they agree to within 1e-12 on the frozen zgrid/Xbar/pivot
 inputs; (b) round-trips the KS native-dN/dX centre through the FORWARD occupancy map
 (w_c_corrected -> alpha -> alpha_to_dndx_exact -> back) and asserts machine-precision
-agreement (<1e-12 relative); (c) pins the MAPPED KS alpha-space pivot centre to the W2 value
-0.393235480 +- 1e-6. If any fails, the export refuses to write rather than shipping a curve
+agreement (<1e-12 relative); (c) pins the MAPPED KS alpha-space pivot centre to the pinned value
+0.392363763 +- 1e-6. If any fails, the export refuses to write rather than shipping a curve
 the paper would overlay wrongly.
 
 KEY DISCIPLINE (defect fix 2026-07-21): every array is either a CLOSURE or a DEPLOYED quantity and
@@ -112,10 +112,10 @@ RUN_CMD = (
     "python scripts/export_deployed_centre_dndx.py"
 )
 
-# The W2-pinned MAPPED KS alpha-space LLS pivot centre (the z=3 LLS occupancy weight of the
-# dN/dX-premap 2.5x lit-law reference through the exact occupancy map; sites at 0). The legacy
+# The pinned (W2 2026-07-22; re-pinned 2026-11-18) MAPPED KS alpha-space LLS pivot centre (the z=3 LLS
+# occupancy weight of the dN/dX-premap 2.5x lit-law reference through the exact occupancy map; sites at 0). The legacy
 # alpha-postmap centre was 0.4302804016838828 -- the mapped migration MOVED it here.
-KS_MAPPED_PIVOT_TARGET = 0.393235480
+KS_MAPPED_PIVOT_TARGET = 0.392363763
 KS_MAPPED_PIVOT_TOL = 1e-6
 
 
@@ -273,7 +273,7 @@ def verify_npz_payload(payload, surveys=SURVEYS):
                     lo1[:, 0], np.exp(-eps) * got[:, 0]
                 ), f"deployed_lo1_dndx_{sv}[:, LLS] != exp(-ks_sigma_eps) x centre"
                 # (3) the labelled alpha-space MAPPED pivot must reproduce from the shipped
-                #     reference through the forward occupancy map, and pin the W2 value.
+                #     reference through the forward occupancy map, and pin the pinned value.
                 ref_piv = np.asarray(payload["ks_dndx_ref_pivot"], float)
                 xb_piv = float(np.asarray(payload["ks_xbar_pivot"]))
                 a_piv = np.asarray(
@@ -286,7 +286,7 @@ def verify_npz_payload(payload, surveys=SURVEYS):
                     f"{np.max(np.abs(a_piv - got_mu)):.3e}"
                 )
                 assert abs(float(got_mu[0]) - KS_MAPPED_PIVOT_TARGET) < KS_MAPPED_PIVOT_TOL, (
-                    f"mapped KS LLS pivot centre {float(got_mu[0])!r} != the W2-pinned "
+                    f"mapped KS LLS pivot centre {float(got_mu[0])!r} != the pinned "
                     f"{KS_MAPPED_PIVOT_TARGET} +- {KS_MAPPED_PIVOT_TOL}"
                 )
                 # (4) NO alpha-space Gaussian width may ship for the mapped survey: the deployed
@@ -331,10 +331,10 @@ NOTE = (
     "DEPLOYED-SURVEY prior centre in dN/dX on the frozen f3_layers zgrid. v4: the KS survey is "
     "NATIVE dN/dX (parameterization dndx_mapped_v2, W2 2026-07-22) -- deployed_center_dndx_KS IS "
     "the deterministic reference the deployed KS prior samples around (LLS column = 2.5 x the "
-    "corrected lit law 0.01840092 x (1+z)^2.127; sub/DLA columns = the exact inverse of the "
+    "corrected lit law 0.01834683 x (1+z)^2.127; sub/DLA columns = the exact inverse of the "
     "boost-1.0 deployed centre triple), with NO inverse map and NO possible saturation; its "
-    "hi1/lo1 edges are pivot-AMPLITUDE bands only (exp(+-0.5310) LLS, exp(+-0.4130) subDLA, "
-    "softplus amplitude ratio DLA) -- the exponent widths (kappa 0.6681, t_sub, t_dla) add "
+    "hi1/lo1 edges are pivot-AMPLITUDE bands only (exp(+-0.5305) LLS, exp(+-0.4130) subDLA, "
+    "softplus amplitude ratio DLA) -- the exponent widths (kappa 0.6553, t_sub, t_dla) add "
     "z-dependent spread NOT shown, mirroring how the legacy export showed the pivot-amplitude "
     "band only. DESI/eBOSS keep the legacy alpha-space construction through the EXACT "
     "alpha->dN/dX inverse alpha_to_dndx_exact (v3, readout defect B 2026-07-22; pre-v3 layers "
@@ -384,11 +384,11 @@ def build_npz_payload(
     deterministic reference the sampler deviates around, built by the IDENTICAL code path the
     deployed ctx uses (closure_legb._ks_dndx_reference): sub/DLA components = exact inverse of
     the boost-1.0 deployed centre triple; LLS component REPLACED by the dndx-premap boosted lit
-    law 2.5 x 0.01840092 x (1+z)^2.127. No inverse map, no saturation, no refusal possible.
+    law 2.5 x 0.01834683 x (1+z)^2.127. No inverse map, no saturation, no refusal possible.
     Edges are pivot-amplitude bands (exp(+-sigma_eps) LLS / exp(+-sigma_msub) subDLA / softplus
     amplitude ratio DLA); the exponent widths add z-dependent spread NOT shown. The KS
     alpha-space pivot (deployed_alpha_pivot_mu_KS) is the DERIVED forward-mapped triple
-    (LLS 0.393235, moved from the legacy postmap 0.430280), NOT a sampled Gaussian centre, and
+    (LLS 0.392364, moved from the legacy postmap 0.430280), NOT a sampled Gaussian centre, and
     NO alpha-space sigma exists (verify_npz_payload refuses one).
 
     ``xbar_cf`` = the deg-2 Xbar(z) polynomial coefficients (np.polyval order) the mapped
@@ -454,13 +454,13 @@ def build_npz_payload(
                 f"w_c_corrected -> alpha_to_dndx_exact at machine precision (max rel {rt:.3e}). "
                 f"Refusing to ship a KS layer the forward model would not reproduce."
             )
-            # MAPPED alpha-space pivot (derived): guard band + the W2 value pin.
+            # MAPPED alpha-space pivot (derived): guard band + the pinned value pin.
             a_piv = np.asarray(
                 w_c_corrected(jnp.asarray(ref_piv), jnp.asarray(float(xbar_piv)), jnp.asarray(zp))
             )[..., 1:]
             INF.assert_ks_mapped_pivot(float(a_piv[0]), f"deployed-centre export v4 {sv}")
             assert abs(float(a_piv[0]) - KS_MAPPED_PIVOT_TARGET) < KS_MAPPED_PIVOT_TOL, (
-                f"mapped KS LLS pivot centre {float(a_piv[0])!r} != the W2-pinned "
+                f"mapped KS LLS pivot centre {float(a_piv[0])!r} != the pinned "
                 f"{KS_MAPPED_PIVOT_TARGET} +- {KS_MAPPED_PIVOT_TOL} (legacy was 0.4302804)"
             )
             # Pivot-AMPLITUDE +-1 sigma edges (the tilt widths kappa/t_sub/t_dla add z-dependent
@@ -677,16 +677,16 @@ def main():
     print(
         f"[self-check] KS mapped alpha-space pivot = "
         f"{float(payload['deployed_alpha_pivot_mu_KS'][0]):.9f} "
-        f"(W2 pin {KS_MAPPED_PIVOT_TARGET} +- {KS_MAPPED_PIVOT_TOL}; legacy postmap was "
+        f"(pin {KS_MAPPED_PIVOT_TARGET} +- {KS_MAPPED_PIVOT_TOL}; legacy postmap was "
         f"0.430280402)"
     )
 
     # Acceptance targets: eBOSS/DESI from the frozen prior_geometry_table (unchanged, 1e-12);
-    # KS = the W2-pinned MAPPED pivot (v4 -- the legacy 0.4302804 target is retired with the
+    # KS = the pinned MAPPED pivot (v4 -- the legacy 0.4302804 target is retired with the
     # alpha-postmap parameterization).
     TARGET = {
-        "eBOSS": (0.17211216067355312, 1e-12),
-        "DESI": (0.17211216067355312, 1e-12),
+        "eBOSS": (0.17165878476633895, 1e-12),
+        "DESI": (0.17165878476633895, 1e-12),
         "KS": (KS_MAPPED_PIVOT_TARGET, KS_MAPPED_PIVOT_TOL),
     }
     for sv in SURVEYS:
@@ -868,17 +868,17 @@ def main():
                 "curve; no inverse map, no saturation possible, no "
                 "ks_valid truncation needed (the paper may keep its "
                 "z<=3.70 display choice as presentation). LLS column = "
-                "2.5 x lit law A=0.01840092, gamma=2.127 (dndx_premap "
+                "2.5 x lit law A=0.01834683, gamma=2.127 (dndx_premap "
                 "boost); sub/DLA columns = exact inverse of the "
                 "boost-1.0 deployed centre triple (bit-identical to the "
                 "DESI/eBOSS sub/DLA columns)"
             ),
             "deployed_hi1_dndx_KS": (
                 "pivot-AMPLITUDE +1 sigma edge: exp(+KS_DNDX_SIGMA_EPS="
-                "0.5310) x centre on LLS (z-independent log-amplitude "
+                "0.5305) x centre on LLS (z-independent log-amplitude "
                 "shift), exp(+KS_DNDX_SIGMA_MSUB=0.4130) on subDLA, "
                 "softplus amplitude ratio on DLA. The tilt widths "
-                "(sigma_kappa=0.6681 LLS exponent, t_sub, t_dla) add "
+                "(sigma_kappa=0.6553 LLS exponent, t_sub, t_dla) add "
                 "z-DEPENDENT spread NOT shown in this band -- mirroring "
                 "how the legacy export showed the pivot-amplitude band "
                 "only. lo1 = the same with exp(-.)"
@@ -887,7 +887,7 @@ def main():
                 "the MAPPED alpha-space pivot triple (z=3 occupancy "
                 "weights of the reference through w_c_corrected; a "
                 "DERIVED deterministic, not a sampled Gaussian "
-                "centre). LLS = 0.393235 -- MOVED from the legacy "
+                "centre). LLS = 0.392364 -- MOVED from the legacy "
                 "alpha-postmap 0.430280 (v1/v2 artifacts). There is "
                 "NO deployed_alpha_pivot_sigma_KS: the mapped prior "
                 "has no alpha-space Gaussian width (widths are "
@@ -920,7 +920,7 @@ def main():
                 "ordered by survey_order (NOT class_order). For KS "
                 "(0.40) this alpha-space fractional width is the "
                 "SOURCE of the mapped log-amplitude width (sigma_eps "
-                "= 0.40/g_LLS = 0.5310), NOT the deployed width "
+                "= 0.40/g_LLS = 0.5305), NOT the deployed width "
                 "itself"
             ),
             "subDLA_DLA_identity": (
@@ -946,13 +946,13 @@ def main():
             "is RETIRED, and the ks_valid truncation is NO LONGER NEEDED for the KS centre "
             "(the paper may keep its z<=3.70 display choice as a presentation decision)",
             "KS alpha-space pivot centre MOVED 0.4302804 (legacy alpha-postmap, v1/v2) -> "
-            "0.3932355 (mapped, derived): deployed_alpha_pivot_mu_KS is now the forward-mapped "
+            "0.3923638 (mapped, derived): deployed_alpha_pivot_mu_KS is now the forward-mapped "
             "pivot triple; deployed_alpha_pivot_sigma_KS and "
             "deployed_dla_softplus_quantiles_KS are REMOVED (no alpha-space width exists for "
             "the mapped prior; see ks_sigma_* / ks_dla_amp_quantiles)",
             "deployed_hi1/lo1_dndx_KS band semantics: pivot-AMPLITUDE bands "
-            "(exp(+-0.5310) LLS, exp(+-0.4130) subDLA, softplus amplitude ratio DLA); the "
-            "exponent/tilt widths (sigma_kappa=0.6681, t_sub, t_dla) add z-dependent spread "
+            "(exp(+-0.5305) LLS, exp(+-0.4130) subDLA, softplus amplitude ratio DLA); the "
+            "exponent/tilt widths (sigma_kappa=0.6553, t_sub, t_dla) add z-dependent spread "
             "NOT shown -- mirroring the legacy pivot-amplitude-band-only convention",
             "ADDED parameterization_by_survey + the ks_* key block (ks_dndx_ref_pivot, "
             "ks_xbar_pivot, ks_lit_dndx_law_lls, ks_sigma_eps/kappa/msub, ks_dla_raw_mu0, "
@@ -990,7 +990,7 @@ def main():
             "(b) round-tripped the KS native-dN/dX centre through the FORWARD map "
             "(w_c_corrected -> alpha -> alpha_to_dndx_exact -> back) and asserted "
             "machine precision (<1e-12 relative); (c) pinned the MAPPED KS "
-            "alpha-space pivot to the W2 value 0.393235480 +- 1e-6 "
+            "alpha-space pivot to the pinned value 0.392363763 +- 1e-6 "
             "(assert_ks_mapped_pivot band + the exact pin); (d) asserted the "
             "deployed subDLA/DLA dN/dX centres agree with the closure ones to <1e-2 "
             "relative AND across surveys to <1e-12 (the KS reference inverts the "

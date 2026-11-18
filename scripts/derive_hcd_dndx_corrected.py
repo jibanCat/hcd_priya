@@ -24,7 +24,7 @@ over a physically consistent simulation; the absolute incidence stays anchored t
 observations." (PI, 2026-07-18)
 DEPLOYED LLS LAW (PI decision 1c): the K1a-corrected points refit with gamma CONSTRAINED
 to the deployed z-slope 2.127 (amplitude-only GLS, same covariance treatment); the
-free-gamma K1a fit (~2.137) is recorded as the consistency evidence justifying the
+free-gamma K1a fit (~2.115) is recorded as the consistency evidence justifying the
 constraint. The full decision table (all kernels) stays in the JSON for the record.
 
 Env:
@@ -378,7 +378,7 @@ def main():
     lit_over_sim = lit_over_sim_refit(inputs, kernels, s, d, cum_law)
     print(
         "\n[LIT_OVER_SIM REFIT] (plot_dndx_vs_literature.py:95-108 construction, "
-        "corrected laws; PRE-SWAP (1.06, 1.00, 1.34) / slopes (0.95, 0.15, 0.40); deployed now (0.995, 1.00, 1.34)/(0.764, 0.15, 0.40)):"
+        "corrected laws; PRE-SWAP (1.06, 1.00, 1.34) / slopes (0.95, 0.15, 0.40); deployed now (0.992, 1.00, 1.34)/(0.764, 0.15, 0.40)):"
     )
     for cls, v in lit_over_sim.items():
         if cls == "note":
@@ -395,7 +395,9 @@ def main():
         f"deviance/dof={sd['deviance_dof']:.3f} "
         f"(vs {s['A']:.5f}/{s['gamma']:+.4f})"
     )
-    for arm in ("larger_side", "journal_fix"):
+    for arm in (
+        "larger_side",
+    ):  # the journal-fix arm is retired: POW10_T4 holds the journal values
         ac = sens[arm]["cum_uncorrected"]
         a3 = sens[arm]["K3"]["law"]["fit"]
         print(
@@ -622,13 +624,12 @@ def main():
         sources=dict(
             arxiv=LD.ARXIV,
             verified=dict(
-                POW10_T4="implementer ar5iv 2026-07-18 + both designers (v1 only)",
+                POW10_T4="journal Table 4 (ApJ 718, 392), reproduced by pyigm's SDSS-DR7 catalogue (fef47716)",
                 ZAFAR13_T3="implementer ar5iv 2026-07-18 + both designers (verbatim)",
                 PW09_T1="implementer ar5iv 2026-07-18 + Bayesian designer",
                 OMEARA13_wmean="implementer + both designers (verbatim)",
                 OMEARA13_T5_row="Bayesian designer ONLY (ar5iv truncates in-house)",
                 OMEARA13_T9="UNVERIFIED — EXCLUDED",
-                POW10_journal_fixes="UNVERIFIED (IOP paywall) — delta-widened default arm",
                 FUMAGALLI13="implementer + both designers (verbatim)",
             ),
         ),
@@ -702,14 +703,6 @@ def main():
             larger_side_cum=dict(
                 A=sens["larger_side"]["cum_uncorrected"]["A"],
                 gamma=sens["larger_side"]["cum_uncorrected"]["gamma"],
-            ),
-            journal_fix_cum=dict(
-                A=sens["journal_fix"]["cum_uncorrected"]["A"],
-                gamma=sens["journal_fix"]["cum_uncorrected"]["gamma"],
-            ),
-            journal_fix_K3=dict(
-                A=sens["journal_fix"]["K3"]["law"]["fit"]["A"],
-                gamma=sens["journal_fix"]["K3"]["law"]["fit"]["gamma"],
             ),
         ),
         cache_provenance=cache_provenance(inputs, sfc),

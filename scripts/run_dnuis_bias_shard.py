@@ -27,7 +27,7 @@ Arms (→ inject_spec):
 PER-SURVEY lls_truth_boost (the effective LLS the mock TRUTH carries vs the forward's per-survey pin
 center). The forward pin is HCD_LLS_SURVEY_BOOST×lit_over_sim (DESI 1.0×, KS 2.5×; inference.py). The
 truth boost must sit OFF the pin center to be a real test:
-  desi  = 1.06  (HISTORICAL PIN: the pre-2026-07-18 HCD_LIT_OVER_SIM[0]; deployed slot is now 0.995 — a live read would null the arm; ~0.2σ off the DESI
+  desi  = 1.06  (HISTORICAL PIN: the pre-2026-07-18 HCD_LIT_OVER_SIM[0]; deployed slot is now 0.992 — a live read would null the arm; ~0.2σ off the DESI
                  pin, σ/μ=0.30)
   ks    = 3.50  (= 2.5×1.4: the KS pin CENTER is 2.5×, so a boost of EXACTLY 2.5 would be a near-null
                  test; we put the truth ~1σ ABOVE the pin (KS σ/μ=0.40 ⇒ ×1.4) — a wrong-pin-center
@@ -70,7 +70,7 @@ RES_INSTR_BASIS = os.path.join(
 
 # Per-survey TRUTH LLS boost (lit/sim effective LLS the mock truth carries vs the forward pin).
 # The arm must put the TRUTH OFF the forward's per-survey pin center, else it is a near-null test.
-#   desi  = 1.06 (HISTORICAL PIN, pre-2026-07-18 lit/sim ratio; deployed HCD_LIT_OVER_SIM[0]=0.995): the DESI pin
+#   desi  = 1.06 (HISTORICAL PIN, pre-2026-07-18 lit/sim ratio; deployed HCD_LIT_OVER_SIM[0]=0.992): the DESI pin
 #           center is 1.0× cosmic (HCD_LLS_SURVEY_BOOST["DESI"]=1.0), so 1.06 sits ~0.2σ above the
 #           DESI pin (σ/μ=0.30) — a mild realistic mis-center.
 #   ks    = 2.5×1.4 = 3.50: the KS pin CENTER is 2.5× cosmic. A truth boost of EXACTLY 2.5 would
@@ -81,7 +81,7 @@ RES_INSTR_BASIS = os.path.join(
 #           deliberate STRESS offset (eBOSS is low-k/cosmic, otherwise carries no LLS excess).
 LLS_TRUTH_BOOST = {
     # HISTORICAL PIN (2026-07-18 supersession): this arm was DESIGNED as the 1.06 offset when
-    # HCD_LIT_OVER_SIM[0] was 1.06; the corrected-law swap moved that constant to 0.995, and a
+    # HCD_LIT_OVER_SIM[0] was 1.06; the corrected-law swap moved that constant to 0.995 (0.992 since 2026-11-18), and a
     # live read would silently turn the offset arm into a ~null arm under an offset-arm label.
     # The 1.06 literal preserves the arm's design; re-runs remain comparable to the recorded
     # campaign. (Review meta finding 5.)

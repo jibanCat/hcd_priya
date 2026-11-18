@@ -12,14 +12,14 @@ The truth boost rides the SAME run_legb inject_spec contract as the DLA arm
 ({"lls_truth_boost": boost} -> apply_lls_truth_boost, scaling pivot alpha_hcd[0] AND every
 z-resolved alpha_hcd_z[:,0] row identically -- verified the exact analog of the DLA hook).
 
-BOOST = 1.287 = +1 prior-sigma in FRACTIONAL terms at the deployed DESI LLS width sigma/mu =
-0.287 (HCD_LLS_SURVEY_FRAC_SIGMA["DESI"], the 1x lit-anchored primary; asserted below, so a
-hedge2x (0.574) or KS (0.40) ctx aborts rather than silently rescaling the displacement).
+BOOST = 1.285 = +1 prior-sigma in FRACTIONAL terms at the deployed DESI LLS width sigma/mu =
+0.285 (HCD_LLS_SURVEY_FRAC_SIGMA["DESI"], the 1x lit-anchored primary; asserted below, so a
+hedge2x (0.570) or KS (0.40) ctx aborts rather than silently rescaling the displacement).
 Latent-sigma displacement (the DLA campaign's +0.408 analog): alpha_lls's latent IS alpha
-(TruncatedNormal(mu, 0.287*mu, low=0), sampled directly -- no softplus), so the displacement at
-the prior center is (boost-1)*mu/sigma = 0.287/0.287 = +1.0000 exactly; the low=0 truncnorm
+(TruncatedNormal(mu, 0.285*mu, low=0), sampled directly -- no softplus), so the displacement at
+the prior center is (boost-1)*mu/sigma = 0.285/0.285 = +1.0000 exactly; the low=0 truncnorm
 median correction at mu/sigma ~ 3.48 is < 1e-3 (both stamped into meta["prior"]). ONE side only
-(+1 sigma) per the PI commission; a MINUS arm is a config flip: --boost 0.713 (= 1 - 0.287,
+(+1 sigma) per the PI commission; a MINUS arm is a config flip: --boost 0.715 (= 1 - 0.285,
 displacement -1 sigma).
 
 Both arms fit under the final production likelihood (reduced DESI covariance,
@@ -39,8 +39,8 @@ import hcd_analysis.emulator.inference as INF
 from hcd_analysis.emulator.closure_legb import run_legb
 from scripts.run_dnuis_bias_shard import build_arm_ctx
 
-LLS_FRAC_SIGMA_DEPLOYED = 0.287  # deployed DESI LLS sigma/mu (inference.HCD_LLS_SURVEY_FRAC_SIGMA)
-DEFAULT_BOOST = 1.0 + LLS_FRAC_SIGMA_DEPLOYED  # 1.287 = +1 prior-sigma fractional displacement
+LLS_FRAC_SIGMA_DEPLOYED = 0.285  # deployed DESI LLS sigma/mu (inference.HCD_LLS_SURVEY_FRAC_SIGMA)
+DEFAULT_BOOST = 1.0 + LLS_FRAC_SIGMA_DEPLOYED  # 1.285 = +1 prior-sigma fractional displacement
 
 
 def latent_sigma_displacement(mu, sigma, boost, low=None):
@@ -61,8 +61,8 @@ def latent_sigma_displacement(mu, sigma, boost, low=None):
 
 
 def assert_deployed_lls_width(mu, sigma, expect=LLS_FRAC_SIGMA_DEPLOYED, tol=1e-6):
-    """Fail LOUD unless sigma/mu is the deployed DESI LLS fractional width (0.287). A hedge2x
-    ctx (0.574) or a KS ctx (0.40) would silently rescale the latent displacement the campaign
+    """Fail LOUD unless sigma/mu is the deployed DESI LLS fractional width (0.285). A hedge2x
+    ctx (0.570) or a KS ctx (0.40) would silently rescale the latent displacement the campaign
     quotes -- abort instead."""
     ratio = float(sigma) / float(mu)
     assert abs(ratio - expect) <= tol, (
@@ -117,10 +117,10 @@ def main():
         "--boost",
         type=float,
         default=DEFAULT_BOOST,
-        help="truth alpha_LLS multiplier (pivot + z-resolved column). 1.287 = +1 "
-        "prior-sigma in fractional terms at the deployed DESI width 0.287 "
+        help="truth alpha_LLS multiplier (pivot + z-resolved column). 1.285 = +1 "
+        "prior-sigma in fractional terms at the deployed DESI width 0.285 "
         "(latent displacement +1.0000 at the prior center; stamped into meta). "
-        "MINUS arm = 0.713 (a config flip, not new code).",
+        "MINUS arm = 0.715 (a config flip, not new code).",
     )
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--smoke", action="store_true")
@@ -158,7 +158,7 @@ def main():
         "data_likelihood.DESI_DLA_COV_REDUCE"
     )
     assert float(L.dla_forward_frac) == 1.0, "DESI alpha_DLA mean model must be live (frac 1.0)"
-    # The LLS-axis guard: the deployed DESI pin width (0.287) is what calibrates boost -> +1 sigma.
+    # The LLS-axis guard: the deployed DESI pin width (0.285) is what calibrates boost -> +1 sigma.
     mu_lls, sig_lls = float(ctx.alpha_hcd_mu[0]), float(ctx.alpha_hcd_sigma[0])
     assert_deployed_lls_width(mu_lls, sig_lls)
     prior = lls_prior_stamp(mu_lls, sig_lls, a.boost)

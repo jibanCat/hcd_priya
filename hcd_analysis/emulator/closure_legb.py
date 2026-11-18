@@ -896,7 +896,7 @@ def _survey_alpha_prior(w_c_med, Xbar_z3, survey):
     if survey is not None:
         # FAIL-LOUD (adversarial backfill F1, 2026-07-19): direct [] indexing after the membership
         # guard — the old .get(survey, fallback) silently handed an unknown survey string the
-        # closure width HCD_PRIOR_FRAC_SIGMA[0]=0.15 (1.9x tighter than the deployed DESI 0.287)
+        # closure width HCD_PRIOR_FRAC_SIGMA[0]=0.15 (1.9x tighter than the deployed DESI 0.285)
         # on a real-data path. hcd_incidence_prior (line above) guards its own lookups too.
         assert_known_survey(survey, "_survey_alpha_prior")
         _boost = HCD_LLS_SURVEY_BOOST[survey]
@@ -943,7 +943,7 @@ def _ks_dndx_reference(alpha_mu, xbar_cf, z_global, *, delta_map=None):
     Construction (the signed PI decision; constants in inference.py):
       1. BOOST-1.0 deployed centre triple: alpha_ref_b1(z) = mu_piv·((1+z)/4)^s with
          mu_piv = [hcd_lls_realfit_alpha_center(Xbar_z3, boost=1.0), alpha_mu[1], alpha_mu[2]]
-         (= [0.17211216, 0.06218316, 0.00440967]) and s = (HCD_LLS_REALFIT_ZSLOPE,
+         (= [0.17165878, 0.06218316, 0.00440967]) and s = (HCD_LLS_REALFIT_ZSLOPE,
          HCD_INCIDENCE_SLOPE[1], HCD_INCIDENCE_SLOPE[2]). THIS TRIPLE IS THE PINNED INVERSION
          SOURCE (KS_HEADROOM_SOURCE): the deployed KS BOOSTED (2.5×) triple is NOT invertible
          above z≈4.49; the boost-1.0 triple inverts everywhere (max sum(alpha) 0.519).
@@ -958,7 +958,7 @@ def _ks_dndx_reference(alpha_mu, xbar_cf, z_global, *, delta_map=None):
     GUARDS (fired per build): assert_hcd_pivot_z3 on the boost-1.0 UNMAPPED pivot input at
     boost=1.0 (the all-z-median construction tripwire keeps its ORIGINAL pre-map semantics —
     see assert_ks_mapped_pivot's docstring for the division of labour) and
-    assert_ks_mapped_pivot on the MAPPED pivot centre (band (0.326, 0.476)).
+    assert_ks_mapped_pivot on the MAPPED pivot centre (band (0.326, 0.475)).
 
     ``alpha_mu`` is the (3,) deployed KS alpha-space prior centre (its subDLA/DLA slots are the
     survey-agnostic centres the boost-1.0 triple reuses); ``xbar_cf`` from hcd_xbar_polyfit.
@@ -1247,9 +1247,9 @@ def build_legb_ctx(
         d, z_pivot=HCD_Z_PIVOT
     )  # (3,) z=3 structural w_c, Xbar(z=3)
     # survey=None (closure/SBC) → cosmic-average LLS pin; survey="DESI"/"KS"/… (real fit)
-    # → the per-survey LLS center+width pin (DESI 1.0×/σ0.287, KS 2.5×/σ0.40; PI re-determination
+    # → the per-survey LLS center+width pin (DESI 1.0×/σ0.285, KS 2.5×/σ0.40; PI re-determination
     # 2026-06-17, width re-derived 2026-07-18). The PI WIDTH RULE 1× value is the corrected lit
-    # measurement + kernel-common-mode error (σ_LLS=0.287); the 2× cosmic-variance hedge is
+    # measurement + kernel-common-mode error (σ_LLS=0.285); the 2× cosmic-variance hedge is
     # HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X (toggle here if a hedge ctx is needed).
     # The whole survey block (center swap + width rule + pivot guard + litWLS zslope center)
     # lives in the SHARED helper _survey_alpha_prior (extracted 2026-07-20, PI decision C2, so
