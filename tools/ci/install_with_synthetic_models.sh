@@ -4,8 +4,8 @@
 #   tools/ci/install_with_synthetic_models.sh PYTHON WHEEL[extra] MODELS_DIR [pip install options ...]
 #
 # hcd-priya requires hcd-priya-models. CI and development environments never need the real models: this script
-# builds the model package with a synthetic bundle (untrained networks, version 0+synthetic, which a package index
-# refuses) and installs both wheels. The steps, and why they are in this order:
+# builds the model package with a synthetic bundle (untrained networks; the version hcd-priya pins, with the label
+# +synthetic, which the pin accepts and a package index refuses) and installs both wheels. The steps, and why they are in this order:
 #   1. every requirement of the wheel except the model package (the synthetic bundle is written with hcd_analysis
 #      itself and the test suite's builder, so the wheel's requirements come first; pass the extra "test");
 #   2. the model wheel, built into MODELS_DIR, unless one is already there (a second environment reuses it);

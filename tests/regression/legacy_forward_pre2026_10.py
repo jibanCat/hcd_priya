@@ -553,7 +553,6 @@ def predict_P_obs_on_leg(
     #       comparison-alpha builder (never hand-build alpha from a z-median w_c), AND
     #   (b) pass require_zresolved=True (the comparison core _data_loglik_legcore DEFAULTS it True, so the
     #       loglik / SBC re-scoring layer is SAFE-BY-DEFAULT: a z-flat alpha there RAISES, not broadcasts).
-    # See [[feedback-diagnostic-deployment-consistency]].
     if require_zresolved and alpha_hcd.ndim != 2:
         # explicit raise (NOT assert): this guard is load-bearing now that the comparison core
         # _data_loglik_legcore defaults require_zresolved=True, so it must survive `python -O`

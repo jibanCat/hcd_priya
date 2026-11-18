@@ -66,7 +66,8 @@ PARAM_LIMITS = np.array(
 # emulator edge error, not a likelihood/HCD effect). So NUTS samples the IGM params (herei, heref,
 # alphaq) only over their ORIGINAL PRIYA ranges — NO retrain (the emulator box is unchanged; we
 # just do not FIT at its corners). n_s is KEPT extended to 1.05 (PI 2026-06-08: the real n_s may
-# exceed 0.995, eBOSS ~1.009) with the C_emu step-inflation above 0.995 covering the sparse n_s
+# exceed 0.995: the eBOSS fit of Fernandez, Bird and Ho 2024, arXiv:2309.03943, gives n_P = 1.009) with the C_emu
+# step-inflation above 0.995 covering the sparse n_s
 # ridge; Ap/hub/omegamh2/hireionz/bhfeedback are identical between the two boxes.
 SAMPLING_LIMITS = np.array(
     [

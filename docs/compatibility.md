@@ -46,9 +46,8 @@ Every test file also has a level in `tests/ci_tiers.toml`, which says when it ru
 Within a file, single tests can differ from the file's level; `tests/ci_tiers.toml` names them. Nightly failures
 block a release: the release validation workflow (`.github/workflows/release-validation.yml`, started by hand) and
 the publishing workflow refuse to go on unless the latest nightly run on the commit to be released passed. A daily
-run is recorded under the commit of `main` it started from, together with its leg on the release stack's branch
-while that branch is open, so a failure of either leg blocks a release of that commit; a commit that no daily run
-tested passes only after a nightly run started on it by hand (or by a push to the release stack's branch).
+run is recorded under the commit of `main` it started from, so a failure blocks a release of that commit; a commit
+that no daily run tested passes only after a nightly run started on it by hand.
 
 Floating-point results are compared with stored reference arrays at stated tolerances, so a verdict does not
 depend on the last bits of the runner CPU's arithmetic: the tolerances are larger than the differences measured

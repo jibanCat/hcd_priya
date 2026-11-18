@@ -38,8 +38,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   from the installed model package, only against the sha256 listed in `hcd_analysis/published_models.py`.
   With no argument it loads the LF+MF model; a name is compared without case and punctuation. The examples write
   the nine parameters out; `example_params` gives the midpoint of the training range of each parameter and prints
-  that statement and the values when it is called. No model is published yet, so the list is empty; tests
-  and CI use a model package built with a synthetic bundle.
+  that statement and the values when it is called. The list holds the LF+MF release 1.0.0 (to be published with this
+  version), and `pyproject.toml` pins `hcd-priya-models` to exactly that version; tests and CI use a model package
+  built with a synthetic bundle, whose version is the pinned one with the label `+synthetic`.
 - **Three figures with their scripts and data** ([`docs/model_figures.md`](docs/model_figures.md)): the model's
   incidence dN/dX and its column-density distribution against the DLA measurements of Ho, Bird and Garnett (2021),
   the column-density distribution also against three measurements below the DLA threshold (Zafar et al. 2013;

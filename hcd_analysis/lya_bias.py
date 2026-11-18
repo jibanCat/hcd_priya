@@ -48,7 +48,7 @@ Tests in ``tests/test_lya_bias.py`` cover:
 1. Projection integral converges to a known closed form on a power-law P_lin.
 2. CAMB loader returns the right units.
 3. Synthetic linear forest with planted b_F → recover at 5 % level.
-4. Real-data sanity: the recovered b_F at z ≈ 2.3 lies in
+4. PRIYA-spectra sanity: the recovered b_F at z ≈ 2.3 lies in
    [-0.25, -0.12] (Slosar+2011 / du Mas des Bourboux+2020 envelope).
 """
 

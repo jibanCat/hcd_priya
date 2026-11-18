@@ -1,26 +1,20 @@
 # The nightly level (tests/ci_tiers.toml defines the tiers and levels). In short: every day this tests the default
-# branch and, for now, the release stack's branch; a release of a commit needs a passed run on that exact commit.
+# branch; a release of a commit needs a passed run on that exact commit.
 # - What runs: the pr tests and the nightly tests of the wheel and source tiers, and the external tests of the
 #   nightly level, with the build, the content scans, a fresh install and the README's first example, as in
 #   tests.yml; on the supported pinned stack and on two newer-dependency stacks.
-# - When: once a day on the default branch; on every push to the release stack's branch; by hand on any branch. The
-#   release stack's branch is ci/joss-stack-optb, the branch of pull request #23 (the release stack). TEMPORARY: its
-#   two entries below (the push trigger and the daily matrix entry) are removed when #23 merges.
+# - When: once a day on the default branch, and by hand on any branch.
 # - A failure fails the run, visibly (no issue is opened: that would need a write permission).
 # - A release is refused unless the latest run of this workflow on the release commit passed (tools/ci/nightly_gate.py,
 #   run first in .github/workflows/release-validation.yml and publish.yml).
-# - GitHub starts scheduled runs only from the default branch (main). So the daily run also checks out the release
-#   stack's branch, as extra jobs. GitHub files every job of that run under the commit of main that started it, so a
-#   failure of any of its jobs blocks a release of that commit of main. A commit of the release stack's branch passes
-#   the gate only when a run was started on that exact commit, by a push to the branch or by hand; a push starts this
-#   workflow only once this file is on that branch.
+# - GitHub starts scheduled runs only from the default branch (main) and files every job of a run under the commit it
+#   started from, so a failure of any job blocks a release of that commit. A commit that no daily run tested (one of
+#   another branch) passes the gate only after a run started on that exact commit by hand.
 name: nightly
 
 on:
   schedule:
     - cron: "23 6 * * *"  # once a day, 06:23 UTC
-  push:
-    branches: [ci/joss-stack-optb]  # the release stack's branch (see the header)
   workflow_dispatch:
 
 permissions:
@@ -33,16 +27,11 @@ defaults:
 
 jobs:
   nightly:
-    # GitHub expressions have no if/else: `A && B || C` gives B when A is true, else C. Here the job's name gets
-    # " on <branch>" only on the release stack's branch leg (matrix.ref set); every other job keeps the stack's label.
-    name: ${{ matrix.stack.label }}${{ matrix.ref != '' && format(' on {0}', matrix.ref) || '' }}
+    name: ${{ matrix.stack.label }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        # The branch: the one that started the run ("") and, on the daily schedule, also the release stack's branch
-        # (see the header). The same `A && B || C` form.
-        ref: ${{ fromJSON(github.event_name == 'schedule' && '["", "ci/joss-stack-optb"]' || '[""]') }}
         # Stacks: see tests/ci_tiers.toml. Only the pinned stack is a supported environment (docs/compatibility.md).
         # The others show how newer versions behave; their failures stay visible (no continue-on-error) and do not
         # make them supported.
@@ -66,7 +55,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.ref }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -84,7 +72,7 @@ jobs:
       - name: Scan the distribution for private or internal content
         run: python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt
       # hcd-priya requires the model package hcd-priya-models. CI never needs the real models: the script builds the
-      # model package with a synthetic bundle (untrained networks; version 0+synthetic) and installs both wheels.
+      # model package with a synthetic bundle (untrained networks; the pinned version with the label +synthetic) and installs both wheels.
       - name: Install the wheel and a synthetic model package into a fresh virtual environment
         id: install
         run: |
@@ -139,7 +127,6 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
-          # the same form: "-stack-branch" only on that branch's leg, so the two legs' results do not share a name
-          name: results-py${{ matrix.stack.python }}-${{ matrix.stack.deps }}${{ matrix.ref != '' && '-stack-branch' || '' }}
+          name: results-py${{ matrix.stack.python }}-${{ matrix.stack.deps }}
           path: ${{ runner.temp }}/results
           retention-days: 14

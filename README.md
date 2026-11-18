@@ -117,24 +117,26 @@ print("flags that are set (read them before you use the numbers):", sorted(n for
 ```
 
 With the trained LF+MF model this prints (the model has 172 wavenumbers; no spectrum value is shown here). The
-stand-in model of today's install has another number of wavenumbers, and its predictions carry one more flag,
-`synthetic_build`:
+stand-in model of today's install has another number of wavenumbers, carries no incidence record (so neither
+incidence flag), and its predictions carry the flag `synthetic_build`:
 
 ```text
 model: LF+MF
 classes, in the order of P_class: ('clean', 'LLS', 'subDLA', 'DLA')
 shape of pred.P_class, the P1D in km/s of each class: (4, 172)
 shape of pred.k, the wavenumbers in s/km: (172,)
-flags that are set (read them before you use the numbers): ['k_downweighted', 'mf_applied']
+flags that are set (read them before you use the numbers): ['incidence_heldout_error_available', 'incidence_mf_applied', 'k_downweighted', 'mf_applied']
 ```
 
-The two flags say that the multi-fidelity correction was applied, and that some of the model's own wavenumbers lie
-below 1e-3 s/km, where training gave less weight.
+The four flags say that the multi-fidelity correction was applied to the class spectra (`mf_applied`) and to the
+incidence (`incidence_mf_applied`), that the release carries the held-out error of the incidence
+(`incidence_heldout_error_available`), and that some of the model's own wavenumbers lie below 1e-3 s/km, where
+training gave less weight (`k_downweighted`).
 
 - **What "LF+MF" is.** The emulator trained on the low-fidelity (low-resolution) PRIYA simulations, with the
-  multi-fidelity correction that calibrates its class spectra to the high-resolution simulations. The validation of
-  that correction is under review and its results are not public yet
-  ([`docs/models_and_data.md`](docs/models_and_data.md)). It is the model this package publishes, and
+  multi-fidelity correction that calibrates its class spectra to the high-resolution simulations
+  ([`docs/models_and_data.md`](docs/models_and_data.md); which validation summaries are public is listed under
+  "Status" below). It is the model this package publishes, and
   `hp.load_published()` loads it without a name.
 - **Where the model comes from.** The trained model is in a companion package, `hcd-priya-models`, which `hcd-priya`
   requires. Nothing is downloaded when you load it. **Neither package is published yet**: [Install](#install) says
@@ -368,11 +370,13 @@ repository, and their release is planned but not yet available.
 `hcd-priya` requires. `hp.load_published()` finds the model in the installed package and loads it only against
 the sha256 that `hcd-priya` itself lists for that model version (`hcd_analysis/published_models.py`): for a
 published model the digest comes from the code package, never from the model package, so changed model files are
-refused, and so is a model version this version of the code does not list. No model is published yet, and that list is empty.
+refused, and so is a model version this version of the code does not list. That list holds the LF+MF release 1.0.0,
+the model to be published with this version of the code; it is not published yet.
 `hp.load_release(release_dir, sha256)` loads a release whose files you hold yourself. To check a model from a fresh
 install, run `python -I -m hcd_analysis.check_release --published`, or with `RELEASE_DIR SHA256` for a release
 directory (`-I` keeps a clone in the current directory out of the import path, so the installation is what is
-tested).
+tested); add `--reference FILE` to compare the numbers with the reference predictions published beside the release
+(without it the last line reads `PASSED (no reference compared)`).
 
 The details are in [`docs/models_and_data.md`](docs/models_and_data.md): what is and is not distributed, the release
 format (HDF5 + JSON, no pickle), the LF+MF correction, and the environment variables of the observed P1D files that
@@ -399,9 +403,12 @@ the research code reads.
   [`docs/bugs_found.md`](docs/bugs_found.md),
   [`docs/data_layout.md`](docs/data_layout.md) and
   [`docs/p1d_definition.md`](docs/p1d_definition.md).
-- The validation results (held-out LOSO error, coverage and the Fisher checks)
-  are not public yet; the closure gates belong to the research path and are not
-  part of this release.
+- The public validation summaries, all on simulations or mocks: the held-out errors of dN/dX and the CDDF that the
+  model carries (`pred.dndx_err`, `pred.cddf_err`); the emulator-covariance check on the example's mock and the
+  interpolation checks ([`docs/likelihood.md`](docs/likelihood.md)); the comparison with the template of Rogers et
+  al. (2018) ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)). The full validation of the class spectra
+  (held-out LOSO error, coverage and the Fisher checks) is not public, and no result from real data is in this
+  release; the closure gates belong to the research path and are not part of it.
 
 ---
 
@@ -428,22 +435,32 @@ JAX_PLATFORMS=cpu python tools/ci/run_test_tier.py --tier source --level pr --ou
 python tools/ci/run_test_tier.py --list-not-run --level pr
 ```
 
-Status: research code under active development. The validation results are not public yet.
+Status: research code under active development. The public validation summaries are listed above, all on
+simulations or mocks; no result from real data is in this release.
 
 ---
 
 ## Repository map
 
 ```
-hcd_analysis/            catalog/P1D/CDDF pipeline (catalog.py, p1d.py, cddf.py, hcd_template.py, ...)
-hcd_analysis/emulator/   the JAX/Equinox emulator + likelihood + inference (see its own README)
-hcd_analysis/cli/run.py  the `hcd` command-line entry point
-config/default.yaml      default pipeline config
-scripts/                 install, SLURM batch, cache build, LOSO sweep, plotting
-notebooks/tutorials/     five starter notebooks for new students
-tests/                   science-claim regression tests
-docs/                    analysis.md, bugs_found.md, data_layout.md, handover, ...
-figures/analysis/        all analysis + validation figures
-checkpoints/             trained emulator bundles (final_fold0.*) + error_vector.npz; gitignored, not in this repo (see docs/models_and_data.md)
+hcd_analysis/predictor.py     the public predictor: load a model, predict per-class P1D, w_c, dN/dX and the CDDF
+hcd_analysis/likelihood.py    the Gaussian P1D likelihood and the reading and writing of data sets
+hcd_analysis/check_release.py checking an installed model release (python -I -m hcd_analysis.check_release)
+hcd_analysis/                 the catalogue, P1D and CDDF pipeline (catalog.py, p1d.py, cddf.py, ...)
+hcd_analysis/emulator/        the JAX/Equinox emulator and its research inference (see its own README)
+hcd_analysis/cli/run.py       the `hcd` command-line entry point
+examples/                     the mock-recovery example (examples/mock_recovery.py)
+model_package/                the companion package hcd-priya-models (the trained models; data only)
+config/default.yaml           default pipeline config
+scripts/                      install, SLURM batch, cache build, LOSO sweep, plotting (research; tests/DEFERRED.md
+                              lists the ones that do not run as they stand)
+notebooks/tutorials/          five starter notebooks for new students
+tests/                        the test suite; tests/ci_tiers.toml says when CI runs each file
+tools/ci/                     the CI tools: the test-tier runner, the distribution checks and content scan
+docs/                         the documentation (index.md; likelihood.md, models_and_data.md, release_checklist.md, ...)
+figures/analysis/             historical research outputs made before the 2026-10 k-coordinate fix; they validate no
+                              release model
+checkpoints/                  the production ensemble's manifests (the trained files themselves are not in git; see
+                              docs/models_and_data.md)
 hcd_analysis/_emulator_data/  the 1.1 GB τ₀ cache; gitignored, not in this repo (see docs/models_and_data.md)
 ```

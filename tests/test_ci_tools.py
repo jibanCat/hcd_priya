@@ -14,8 +14,7 @@ What is covered:
 Most inputs are small synthetic archives, junit reports and run lists; the workflow, tier and level tests read the
 real files of this checkout.
 
-Terms: see the header of tests/ci_tiers.toml. The release stack's branch ci/joss-stack-optb (pull request #23) is named
-in nightly.yml only until #23 merges.
+Terms: see the header of tests/ci_tiers.toml.
 
 Run: pytest tests/test_ci_tools.py (CI runs it at the pr level, in the source tier; the workflow tests need PyYAML).
 """
@@ -658,7 +657,7 @@ def test_only_the_pinned_job_declares_the_pinned_stack():
 # The `with` inputs each action may take: an input such as setup-python's pip-install would install packages
 # outside the pinned steps.
 ACTION_INPUTS = {
-    "actions/checkout@v4": {"persist-credentials", "ref"},
+    "actions/checkout@v4": {"persist-credentials"},
     "actions/setup-python@v5": {"python-version"},
     "actions/upload-artifact@v4": {"name", "path", "retention-days"},
 }
@@ -679,12 +678,10 @@ def test_every_action_takes_only_its_known_inputs():
                         f"{flow} job {name}: {step['uses']} is given the inputs "
                         f"{sorted(given - ACTION_INPUTS[step['uses']])}, which ACTION_INPUTS does not allow"
                     )
-                    # only nightly.yml checks out a branch by name ("ref": the release stack's branch on the daily
-                    # schedule); the other workflows test the commit that started them
-                    if flow != "nightly.yml":
-                        assert (
-                            "ref" not in given
-                        ), f"{flow} job {name}: only nightly.yml may check out another branch (ref)"
+                    # no workflow checks out another branch (ref): each tests the commit that started it
+                    assert (
+                        "ref" not in given
+                    ), f"{flow} job {name}: a workflow may not check out another branch"
 
 
 def test_the_docs_build_is_pinned_and_treats_warnings_as_errors():
@@ -970,8 +967,6 @@ def _steps_comparable(job):
         text = text.replace(a, b)
     steps = json.loads(text)
     for step in steps:
-        # the branch to check out: only nightly.yml names one
-        (step.get("with") or {}).pop("ref", None)
         # the name of the uploaded results differs by workflow and job; it is not compared
         if step.get("uses") == "actions/upload-artifact@v4":
             step["with"]["name"] = "NAME"
@@ -980,11 +975,11 @@ def _steps_comparable(job):
 
 def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_steps_at_the_nightly_level():
     """tests.yml (pull requests, pushes to main) runs the pr level on the pinned stack; nightly.yml runs the same
-    steps at the nightly level on the three stacks, plus the external tests of that level, once a day (and on the
-    release stack's branch while it is open), on each push to that branch and by hand. Why the same steps: if the two
-    workflows drifted apart, a green pull request would no longer predict a green nightly run.
+    steps at the nightly level on the three stacks, plus the external tests of that level, once a day on the default
+    branch and by hand. Why the same steps: if the two workflows drifted apart, a green pull request would no longer
+    predict a green nightly run.
 
-    It checks, in this order: 1. the levels each workflow passes; 2. nightly.yml's triggers, permissions and branch;
+    It checks, in this order: 1. the levels each workflow passes; 2. nightly.yml's triggers and permissions;
     3. its external step; 4. the two pr jobs against each other; 5. the nightly job against the pr jobs.
     """
     # 1. the levels each workflow passes (and 5. ends with nightly.yml's count)
@@ -994,25 +989,20 @@ def test_the_pr_workflow_runs_the_pr_level_and_the_nightly_workflow_the_same_ste
     assert (
         text.count("--level pr") == 3 and "--level nightly" not in text
     ), "tests.yml must pass the pr level three times and never the nightly level"
-    # 2. nightly.yml's triggers, permissions and branch
+    # 2. nightly.yml's triggers and permissions
     flow = _workflow("nightly.yml")
     # YAML 1.1 reads the workflow key `on` as the boolean True, so the parsed dict may hold it under either name
     on = flow.get("on", flow.get(True))
     assert set(on) == {
         "schedule",
-        "push",
         "workflow_dispatch",
-    }, f"nightly.yml must start on a schedule, a push and by hand, not {sorted(on)}"
-    # TEMPORARY: the release stack's branch; remove with #23, here and in nightly.yml (see its header)
-    assert len(on["schedule"]) == 1 and on["push"] == {
-        "branches": ["ci/joss-stack-optb"]
-    }, "nightly.yml: one daily schedule, and a push trigger on the release stack's branch only"
+    }, f"nightly.yml must start on a schedule and by hand only, not {sorted(on)}"
+    assert len(on["schedule"]) == 1, "nightly.yml: one daily schedule"
     assert flow["permissions"] == {"contents": "read"}, "nightly.yml may only read the repository"
     job = flow["jobs"]["nightly"]
-    assert (
-        "ci/joss-stack-optb" in job["strategy"]["matrix"]["ref"]
-        and "schedule" in job["strategy"]["matrix"]["ref"]
-    ), "nightly.yml: the daily schedule must also check out the release stack's branch"
+    assert set(job["strategy"]["matrix"]) == {
+        "stack"
+    }, "nightly.yml: the matrix holds the stacks only (no branch: it tests the commit that started it)"
     # 3. the external step: the one step nightly.yml has beyond the pr jobs. Its tests need an extra package,
     # safetensors (tests/external), which the step installs first.
     nightly_steps = _steps_comparable(job)

@@ -234,8 +234,8 @@ programming, here are some starting points by topic.
   absorbers as a probe of stellar feedback", MNRAS 445, 2313;
   [arXiv:1405.3994](https://arxiv.org/abs/1405.3994)) —
   hydrodynamic prediction of DLA bias and the f(N_HI) shape.
-  Sections 2.5 and 4.3 (DLA bias) are what feed the scale-dependent-bias TODO tracked in the project
-  handoffs (in the maintainers' private notes).
+  Sections 2.5 and 4.3 (DLA bias) are the background for a scale-dependent DLA bias, which this
+  repository does not model.
 - **Font-Ribera, Miralda-Escudé et al. 2012** (JCAP 11, 059;
   [arXiv:1209.4596](https://arxiv.org/abs/1209.4596)) — the BOSS DLA-Lyα
   cross correlation that the project's clustering pipeline mirrors.
@@ -300,8 +300,6 @@ programming, here are some starting points by topic.
 
 | Topic | File |
 |---|---|
-| Project state, current TODOs | the maintainers' private notes (latest session handoff) |
-| Older audit context (CDDF / fast-mode / per-class templates) | the maintainers' private notes (archived handovers) |
 | Bug history (the seven bugs the audit caught) | `docs/bugs_found.md` |
 | Why fast-mode NHI estimation works | `docs/fast_mode_physics.md` |
 | Mask choice rationale | `docs/masking_strategy.md` |
@@ -355,6 +353,4 @@ The four observables you've now learned to read — `catalog`,
 the HCD emulator under construction.  The next milestone is **phase 1
 of the emulator work**: building a single in-repo HDF5 cache that stacks
 the per-(sim, snap) observables across all 1076 outputs onto a shared
-k-grid and NHI-grid.  See the project handoffs in the maintainers' private notes for the
-overall project state and the next planning thread for the emulator
-design.
+k-grid and NHI-grid.

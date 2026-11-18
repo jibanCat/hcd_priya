@@ -24,9 +24,9 @@
 6. **System = connected tau region** — an absorption system is defined as a
    contiguous set of pixels where `tau > tau_threshold`. The post-audit
    production default is **`tau_threshold = 100`** (`config/default.yaml`),
-   which together with `b = 30 km/s` corresponds to log10(NHI) ≳ 16.85 — well
-   below the LLS edge. The downstream `min_log_nhi = 17.2` filter then
-   discards sub-LLS detections.
+   a line-centre optical depth that `b = 30 km/s` lines reach at
+   log10(NHI) ≈ 15.6 (`docs/tau_threshold.md`), well below the LLS edge. The
+   downstream `min_log_nhi = 17.2` filter then discards sub-LLS detections.
 
 7. **Merging criterion** — two adjacent blobs are merged into one system if
    the gap between them is < `merge_dv_kms` (default: 100 km/s) in velocity
@@ -55,8 +55,9 @@
 11. **No mean flux rescaling** — we do not rescale tau to match observed mean
     flux. If rescaling is needed, apply it externally before running this pipeline.
 
-12. **k units** — k is in s/km (inverse velocity). Conversion to h/Mpc:
-    k [h/Mpc] = k [s/km] × H(z)/h × 1000.
+12. **k units** — k is in s/km (inverse velocity). Conversion to h/Mpc, with
+    H(z) in km/s/Mpc: k [h/Mpc] = k [s/km] × H(z) / ((1+z) h), that is
+    k [s/km] × 100 E(z) / (1+z) (`hcd_analysis.emulator.kcoord`).
 
 13. **Box boundary** — sightlines are periodic (from MP-Gadget). No windowing
     is applied to the FFT.
@@ -79,8 +80,11 @@
 16. **Masking** — production uses the PRIYA recipe only: `max(τ) > 10⁶`
     threshold, contiguous mask around `argmax(τ)`, expand outward while
     `τ > 0.25 + τ_eff`, fill with `τ_eff`. LLS / subDLA are **not** spatially
-    masked; their residual P1D contribution is recovered via the Rogers+2018
-    α template in post-processing (`hcd_analysis/hcd_template.py`).
+    masked: their contribution is in the per-class spectra the emulator is
+    trained on (each sightline in the class of its highest-NHI system), and
+    the predictor mixes the classes with the fractions w_c (`hp.add_hcd`). The
+    Rogers et al. (2018) template (`hcd_analysis/hcd_template.py`) is not
+    part of the predictor.
     The pre-audit τ-space per-class mask is deprecated (over-masked the
     forest at k > 0.03 — bug #3). See `docs/masking_strategy.md`.
 

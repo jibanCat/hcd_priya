@@ -387,7 +387,9 @@ def test_the_script_names_the_five_items_of_the_download_each_with_a_sha256():
     assert len({sha for _, sha in ex.DOWNLOAD.values()}) == 5
     assert ex.DOWNLOAD_FORMAT == "hcd_priya.example_download/1"
     assert ex.DOWNLOAD_ENV == "HCD_PRIYA_EXAMPLE_DOWNLOAD"
-    assert "NOT PUBLISHED YET" in ex.__doc__ and "not the release model" in ex.__doc__
+    doc = " ".join(ex.__doc__.split())
+    assert "published with the model release" in doc and "(not yet published)" in doc
+    assert "not the release model" in doc
 
 
 def test_the_download_gives_the_model_the_mock_and_the_reference_and_part_three_draws_the_reference(
@@ -601,7 +603,9 @@ def test_the_docs_list_the_items_of_the_download_with_the_sha256_written_in_the_
     text = open(os.path.join(REPO, "docs", "likelihood.md"), encoding="utf-8").read()
     rows = re.findall(r"(?m)^\| `([a-z_]+)` \| `([^`]+)` \| .* \| `([0-9a-f]{64})` \|$", text)
     assert {name: (place.rstrip("/"), sha) for name, place, sha in rows} == ex.DOWNLOAD
-    assert "**It is not published yet.**" in text and ex.DOWNLOAD_ENV in text
+    said = " ".join(text.split())
+    assert "published with the model release" in said and "is not published yet" in said
+    assert ex.DOWNLOAD_ENV in text
     assert ex.DOWNLOAD_FORMAT in text and ex.DOWNLOAD_MANIFEST in text
 
 

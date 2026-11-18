@@ -80,14 +80,13 @@ the likelihood (`inference.log_lik_multiz`) is ready to pass to a gradient sampl
 NUTS (the No-U-Turn Sampler, a Hamiltonian Monte Carlo variant). The specific sampler libraries
 (numpyro/blackjax, or a PRIYA-style Cobaya adapter) are wiring details covered in §8.
 
-Note that the sampler and Cobaya wrappers are still forthcoming (not yet shipped). For now the
-differentiable likelihood is called directly, which is sufficient for real inference.
+This research path ships no sampler wrapper: its differentiable likelihood is called directly. The release's
+supported inference is the Gaussian likelihood of `hcd_analysis.likelihood` with the mock-recovery example
+(`docs/likelihood.md`); no fit to real data is part of this release.
 
 This README serves both as a reproduction, install and quickstart guide and as a tour of the
 pre-2026-10 validation evidence (Historical (pre-2026-10 FixedMeanHead MF, outputs at the wrong k; validates no release MF)). The full verdicts of that
-validation (the held-out error, the coverage and the cosmology-bias gate) are kept in the private notes
-repository and linked from each demo below; its headline document is
-`2026-06-14-validation-loso-emulator-lf-mf.md` (in the maintainers' private notes).
+validation (the held-out error, the coverage and the cosmology-bias gate) are not public.
 
 ### Where to go
 
@@ -359,9 +358,7 @@ What each piece does:
   path.
 - `JAX_PLATFORMS=cpu` and `CUDA_VISIBLE_DEVICES=""` pin execution to the CPU, which is deterministic
   and avoids GPU surprises.
-- The JAX/Equinox traps we have already encountered are logged in
-  `jax-traps-log.md` (in the maintainers' private notes) (for example trap #29: sanitise `jnp.interp` y-data before
-  the call, not after).
+- One JAX trap we have met: sanitise the y-data of `jnp.interp` before the call, not after.
 
 This yields a working float64 JAX runtime that can `import` the package.
 
@@ -572,9 +569,7 @@ Reading it:
   Peiris et al. 2018, MNRAS 474, 3032, [arXiv:1706.08532](https://arxiv.org/abs/1706.08532); the
   4-class form is also what PRIYA-on-KODIAQ-SQUAD uses,
   [arXiv:2509.18271](https://arxiv.org/abs/2509.18271)). Unlike the fixed Rogers kernel, ours
-  carries the θ, τ₀ sensitivity and preserves the global-⟨F⟩ normalisation. See
-  `2026-06-04-phase-c-walkthrough.md` (in the maintainers' private notes) §6 and
-  `[[hcd-template-rogers-normalization]]`.
+  carries the θ, τ₀ sensitivity and preserves the global-⟨F⟩ normalisation.
 
 The figure below shows an example fold-0 prediction (dashed) over the cache truth (solid), per
 class. The top panels are the spectra and the bottom panels are the fractional residual
@@ -587,9 +582,8 @@ k ≤ 0.06 s/km.
 
 ***(a) What the figure shows.*** Historical (pre-2026-10): a fold-0 example prediction (dashed) vs the cache (solid), per HCD
 class. Inside the analysis band the residual was ~1–2% (median ≈ 0.7%); the grey region (above the
-top stored mode) is not used. The rigorous all-folds error lives in the notes validation doc
-(`2026-06-14-validation-loso-emulator-lf-mf.md` §2), which resolves the held-out error per
-wavenumber k (the rigorous "where in k does the error live" answer). Demo C below shows the
+top stored mode) is not used. The all-folds error per wavenumber k is part of the historical
+validation, which is not public. Demo C below shows the
 bottom line for cosmology: the per-fold A_p/n_s bias.
 
 ***(b) Why an older plot looked ±20%.*** The previous version of this plot showed the
@@ -680,8 +674,7 @@ The following points have repeatedly cost time, and are worth reviewing before d
 
 - k is angular, `k = 2π/λ_v` in s/km, the community-wide convention (Croft et al., McDonald et al.,
   Palanque-Delabrouille et al., Rogers et al., PRIYA, DESI). `cache["kfkms"] = 2π·rfftfreq/dv`; pass
-  it to the Rogers templates directly, with no extra `/2π`. See
-  `[[hcd-template-rogers-normalization]]`.
+  it to the Rogers templates directly, with no extra `/2π`.
 - x64 is mandatory (see §1); the structural identities break under float32.
 - PRIYA's n_s and A_p are forest-pivot quantities, defined at `k = 0.78 Mpc⁻¹` rather than the CMB
   pivot 0.05 Mpc⁻¹. Do not confuse `PARAM_LIMITS[ns/Ap]` with the CMB `n_s, A_s`.
@@ -729,11 +722,8 @@ that is harmless to cosmology and covered by the error model). Right: the eBOSS-
 0 divergences throughout.*
 
 To reproduce, the closure and SBC machinery is `hcd_analysis/emulator/closure_diagnostics.py`
-(PIT-ECDF bands, rank tests, coverage). The coverage figure is built by
-`make_coverage_summary.py` (in the maintainers' private notes) from the
-closure-chain outputs (`checkpoints/stepA/`). The full writeup is in notes
-`2026-06-14-validation-loso-emulator-lf-mf.md` (in the maintainers' private notes) (validation summary) and the
-closure plan `2026-06-04-phase-c-t4-closure-plan.md` (in the maintainers' private notes).
+(PIT-ECDF bands, rank tests, coverage), run on the closure-chain outputs (`checkpoints/stepA/`). The full
+writeup is not public.
 
 ---
 
@@ -823,8 +813,8 @@ PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
 #   scripts/diag_emu_bias_allfolds_mf.py   → figures/analysis/04_emulator/emu_bias_allfolds_mf.txt
 ```
 
-The historical (pre-2026-10) writeup, with the acceptance gate, the per-fold numbers and the MF-forward G-gates, is in
-notes `2026-06-14-validation-loso-emulator-lf-mf.md` (in the maintainers' private notes) §2b.
+The historical (pre-2026-10) writeup, with the acceptance gate, the per-fold numbers and the MF-forward G-gates, is
+not public.
 
 ---
 
@@ -861,7 +851,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
 
 HeadA's own prediction-versus-truth accuracy is in
 `figures/analysis/04_emulator/head_a_dndx_pred_vs_true.png` and `head_a_fnhi_pred_vs_true.png`. The
-background on the dN/dX → w_c → α maps is in module `dndx_wc.py` and `[[phase2c-hcd-redesign]]`.
+background on the dN/dX → w_c → α maps is in module `dndx_wc.py`.
 
 ---
 
@@ -923,11 +913,8 @@ Two points follow for the real fit. First, the accuracy of the external LLS-inci
 matters, because a wrong centre is the systematic described above. Second, the genuine
 degeneracy-breaker is the high-k KS leg together with the damping-wing high-k Voigt deficit (the
 low-k excess is the confusion, the high-k deficit is the cure), not a tighter incidence prior. The
-full derivation, the correlation matrix and the factorisation corr × prior-dominance are in
-notes `2026-06-14-hcd-cosmology-degeneracy.md` (in the maintainers' private notes), with the related figures
-`degeneracy_prior_center_law.png` and `degeneracy_snr_amplitude_vs_ztilt.png` in the notes
-`04_emulator/`. All three correlation/projection figures are reproduced by
-`scripts/diag_hcd_cosmo_degeneracy_ref.py`.
+full derivation, the correlation matrix and the factorisation corr × prior-dominance are not public; the
+correlation and projection figures are reproduced by `scripts/diag_hcd_cosmo_degeneracy_ref.py`.
 
 ---
 
@@ -954,9 +941,7 @@ Before 2026-10 the closures these tools drove checked the architecture that the 
 ensemble inherits; the ensemble-level production SBC is the final inference-calibration gate of that research
 path; neither it nor a fit to real data is part of this release.
 
-See `2026-06-04-phase-c-t4-closure-plan.md` (in the maintainers' private notes) for the closure/SBC harness
-(Phase-C T4, in progress) and `2026-06-04-phase-c-checkpoint-review.md` (in the maintainers' private notes) for the
-latest 4-agent review status.
+The plan of the closure/SBC harness (Phase-C T4) and its review status are not public.
 
 ---
 
@@ -1040,10 +1025,8 @@ where `samples` is the `(N, P)` GetDist sample matrix and `names` its column nam
 `--no-blind`, documented in-code as the danger path to be used only after freeze and the authorized
 unblind.
 
-Per the project's privacy policy the actual unblinding is run by the PI. The eBOSS+KS unblinding
-notebook lives in the private notes repository, not here:
-`2026-06-15-unblind_eboss_ks.ipynb` (in the maintainers' private notes). DESI cosmology results are private,
-and no unblinded numbers are reproduced in this public README.
+Per the project's privacy policy the actual unblinding is run by the PI, outside this repository. No real-data
+result is reproduced in this public README.
 
 To unblind (PI, once, post-freeze):
 1. confirm the production SBC passed and the analysis is frozen;

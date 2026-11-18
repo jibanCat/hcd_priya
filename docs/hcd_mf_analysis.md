@@ -86,9 +86,8 @@ For each LF sim, resample sightlines (using `catalog.skewer_idx`)
 with replacement.  The analytical CLT form
 `σ(dN/dX) = std(counts_per_sightline) / √n_sightlines / dX_per_sightline`
 gives cosmic-variance error bars per sim — typically 0.3–0.7 %.
-Then slice the 60 sims to the 10 nearest the eBOSS PRIYA best-fit
-(A_p=1.7e-9, n_s=1.0; Fernandez+2024 after PRIYA post-publication
-extension to n_s up to ~1.05).
+Then slice the 60 sims to the 10 nearest the eBOSS fit of Fernandez,
+Bird and Ho (2024, arXiv:2309.03943, Table 3: A_p = 1.7e-9, n_s = 1.0).
 
 ![Per-sim cosmic-variance bootstrap + fiducial slice](../figures/analysis/04_hcd_mf/bootstrap_dndx_per_sim.png)
 
@@ -442,7 +441,7 @@ absorption-path scaling, so `dN/dX = n_DLA / (n_sky · dX_per_sightline)`
 falls.  At high A_p, counts grow faster than (1+z)² and dN/dX rises
 (matching PW09 / N12 / Ho21).
 
-The observed universe sits at A_p ≈ 1.7e-9, just above the turnover,
+The observed universe sits at A_p ≈ 1.7e-9 (the eBOSS fit of Fernandez et al. 2024), just above the turnover,
 giving the gentle 1.5–2× rise in observed dN/dX between z = 2 and z = 5.
 
 **Emulator implication**: dN/dX(DLA) has a non-trivial ridge structure

@@ -235,8 +235,8 @@ Summary headlines:
   quantities to 1.5–4.3 %.
 - **Physical finding**: dN/dX(DLA) has an A_p threshold at
   ≈ 1.6 × 10⁻⁹ below which the ratio *falls* with z (16/60 LF sims).
-  The real universe sits just above, consistent with the gentle obs
-  rise.
+  The real universe sits just above (the eBOSS fit of Fernandez, Bird
+  and Ho 2024, arXiv:2309.03943), consistent with the gentle obs rise.
 
 ## 8. Other TODOs
 

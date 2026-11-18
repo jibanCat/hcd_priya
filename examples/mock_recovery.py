@@ -16,8 +16,9 @@
 
 **The example download** (``--download DIR``, or the environment variable ``HCD_PRIYA_EXAMPLE_DOWNLOAD``) is one
 directory with the mock, the model that goes with it and the stored reference; ``DOWNLOAD`` below names its items and
-the sha256 each must have. IT IS NOT PUBLISHED YET. The model in it is a fold model: it was trained without the
-simulation the mock was made from, so the recovery is a held-out one. It is not the release model. Without the
+the sha256 each must have. It is published with the model release, as a second file of the same record
+(not yet published). The model in it is a fold model: it was trained without the simulation the mock was made
+from, so the recovery is a held-out one. It is not the release model. Without the
 download the example runs on a model and a mock of your own (the second and third command lines below), and then
 has no stored reference.
 
@@ -106,7 +107,7 @@ DOWNLOAD = {
     "mf_record": ("mf_record", "e639c4b187eface66e5e99bad1efe5645e409fe916f353cd0ef2f88d97bc2fa5"),
     "incidence_record": (
         "incidence_record",
-        "094522ca1a44f153f6661df5e7eed8211ce836c6864f779021271c109e2eb02f",
+        "4e5e6bbcab6171e6c2a22e3f8a284ff96b0638b3d450812365768dea0cc3797a",
     ),
     "reference": (
         "reference.json",

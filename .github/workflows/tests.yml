@@ -69,7 +69,7 @@ jobs:
       - name: Scan the distribution for private or internal content
         run: python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt
       # hcd-priya requires the model package hcd-priya-models. CI never needs the real models: the script builds the
-      # model package with a synthetic bundle (untrained networks; version 0+synthetic) and installs both wheels.
+      # model package with a synthetic bundle (untrained networks; the pinned version with the label +synthetic) and installs both wheels.
       - name: Install the wheel and a synthetic model package into a fresh virtual environment
         id: install
         run: |
@@ -155,7 +155,7 @@ jobs:
       - name: Scan the distribution for private or internal content
         run: python tools/ci/check_dist_content.py dist --known tools/ci/dist_content_known.txt
       # hcd-priya requires the model package hcd-priya-models. CI never needs the real models: the script builds the
-      # model package with a synthetic bundle (untrained networks; version 0+synthetic) and installs both wheels.
+      # model package with a synthetic bundle (untrained networks; the pinned version with the label +synthetic) and installs both wheels.
       - name: Install the wheel and a synthetic model package into a fresh virtual environment
         id: install
         run: |

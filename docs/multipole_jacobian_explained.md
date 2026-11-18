@@ -279,7 +279,7 @@ and the matching catalog).
    non-linear scale-dependent bias (Bird+2014 §5.2) — a separate
    PR.
 
-2. **χ²/dof ≈ 279** on the real-data fit is large.  The reported
+2. **χ²/dof ≈ 279** on the fit to the PRIYA spectra is large.  The reported
    `b_DLA_err = 0.414` is rescaled by `√(χ²/dof)` so it absorbs
    model-mismatch inflation; the formal Poisson-only error would
    have been `~ 0.02`.  (The earlier number `χ²/dof ≈ 363` came
