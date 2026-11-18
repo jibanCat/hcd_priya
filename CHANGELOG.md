@@ -11,8 +11,21 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   reuse.
 - An LF+MF prediction above z 4.6, the upper edge of the frozen grouped-validation domain (z 2.2-4.6; the held-out validation is reported separately), is now
   flagged `mf_z_above_validated` (values unchanged; the record format is unchanged).
+- The module docstring of `hcd_analysis.cddf` and `docs/cddf_model.md` derived the absorption path of a box as
+  (1+z) L H_0 / c, a factor 1+z short; they now give (1+z)^2 L_com H_0 / c, which the code computes (text only).
 
 ### Added
+- **Science tests without a model**, at the pr level: the wavenumber convention of the native modes, the mean-flux
+  law, the refusal of wavenumbers in h/Mpc above the modes, the statistics of the Gaussian likelihood over seeded
+  draws, the interpolation error, the decode of the incidence outputs, the normalisation of the CDDF, the CDDF
+  against dN/dX on counts, and the parameter boxes against the published PRIYA ranges
+  (`tests/test_science_conventions.py`, `tests/test_science_cddf.py`, `tests/test_science_parameter_boxes.py`).
+  `docs/likelihood.md` states that wavenumbers must be in s/km.
+- **Science tests of a trained model**, at the release level, in the assets job: golden values (relative 1e-12 on
+  the pinned stack, 1e-6 otherwise), positive class spectra, the total P1D rising with A_p below k = 0.015 s/km,
+  fractions and incidence inside their ranges, the CDDF against dN/dX within the held-out errors
+  (`tests/test_science_model.py`; golden files from `tools/ci/make_science_golden.py`), and the same counts on the
+  LF training cache (`tests/test_science_training_cache.py`).
 - **Release format `hcd_priya.h5/2`** for emulator bundles: HDF5 + JSON, pickle-free, with a lineage block that ties
   a bundle to its training cache, catalogues and code. The release loader refuses a bundle whose lineage it cannot
   establish ([`docs/release_format_h5.md`](docs/release_format_h5.md)).

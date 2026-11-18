@@ -430,6 +430,12 @@ raises `LikelihoodInputError`. Such points lie far outside every box of the exam
 an optional factor on the model vector, the truth of a mock and a free-form provenance. `write_p1d_data` writes one
 as a strict JSON file with one covariance block per redshift, and `read_p1d_data` reads it only against its sha256.
 
+**The wavenumbers must be in s/km.** They carry no unit, so the likelihood cannot tell s/km from h/Mpc. It refuses
+a data set with a bin above the model's highest mode, which lies between about 0.06 s/km (at z 5.4) and 0.1 s/km
+(at z 2.0), and that catches most data in h/Mpc; but a data set in h/Mpc whose bins all lie below about 0.1 may
+pass undetected. Convert such data to s/km first: k [s/km] = k [h/Mpc] (1 + z) / (100 E(z)), with
+E(z) = H(z) / H_0.
+
 ```python
 import numpy as np
 from hcd_analysis.likelihood import GaussianP1DLikelihood, P1DData

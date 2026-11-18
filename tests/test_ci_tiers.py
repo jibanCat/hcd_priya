@@ -39,9 +39,10 @@ PER_TEST = {"pr_tests": "nightly", "nightly_tests": "pr", "release_tests": None}
 # scientific result against something independent of the code under test: a closed formula, a second implementation,
 # a known identity, or a stored reference from another code path. The five areas (the likelihood, the covariance,
 # normalisation, the predictor's reconstruction and the incidence model) come from an audit of the pr level
-# (2026-11-17; written up in the pull request that added the levels, #28). The last group is one test the audit kept
-# at pr for another reason (the exact inverse of the training encoding); PR_INVARIANT_FILES is a whole file it kept
-# (the truth-recovery tests of the multi-fidelity correction).
+# (2026-11-17; written up in the pull request that added the levels, #28). The group "the science tests" holds the
+# units, statistics, CDDF and parameter-box checks added after that audit for the gaps it found. The last group is
+# one test the audit kept at pr for another reason (the exact inverse of the training encoding);
+# PR_INVARIANT_FILES is a whole file it kept (the truth-recovery tests of the multi-fidelity correction).
 # The list is written by hand on purpose: renaming one of these tests, or moving it to nightly, release or out of CI,
 # makes test_the_scientific_invariants_of_the_pr_level_run_at_pr fail until someone updates the list deliberately. A
 # test runs at pr when its file is at pr and does not name it in nightly_tests, or its file is at nightly and names it
@@ -221,6 +222,52 @@ PR_INVARIANTS = {
             "test_alpha_roundtrip_at_corrected_laws_remeasured_tolerance",
         ),
     ],
+    "the science tests": [
+        (
+            "tests/test_science_conventions.py",
+            "test_the_native_modes_follow_the_box_convention_in_s_per_km",
+        ),
+        (
+            "tests/test_science_conventions.py",
+            "test_the_priya_mean_flux_law_at_the_default_and_at_the_pivot",
+        ),
+        (
+            "tests/test_science_conventions.py",
+            "test_wavenumbers_in_h_per_mpc_above_the_modes_are_refused_and_in_s_per_km_accepted",
+        ),
+        (
+            "tests/test_science_conventions.py",
+            "test_the_gaussian_likelihood_has_gaussian_statistics_at_the_true_model",
+        ),
+        (
+            "tests/test_science_conventions.py",
+            "test_interpolation_is_exact_for_a_line_and_has_the_analytic_error_for_a_quadratic",
+        ),
+        (
+            "tests/test_science_cddf.py",
+            "test_the_predictor_decodes_the_incidence_with_the_inverse_of_the_training_encoding",
+        ),
+        (
+            "tests/test_science_cddf.py",
+            "test_the_incidence_decode_gives_a_known_answer_written_by_hand",
+        ),
+        (
+            "tests/test_science_cddf.py",
+            "test_the_cddf_is_absorbers_per_unit_column_density_per_unit_absorption_distance",
+        ),
+        (
+            "tests/test_science_cddf.py",
+            "test_the_cddf_recovers_a_known_power_law_within_poisson_errors",
+        ),
+        (
+            "tests/test_science_cddf.py",
+            "test_on_counts_the_cddf_of_a_class_is_its_dndx_up_to_the_bin_across_20_3",
+        ),
+        (
+            "tests/test_science_parameter_boxes.py",
+            "test_the_parameter_boxes_are_the_published_priya_ranges_and_consistent",
+        ),
+    ],
     "kept at pr by the audit": [
         ("tests/test_emulator_data.py", "test_reconstruction_roundtrip"),
     ],
@@ -228,7 +275,7 @@ PR_INVARIANTS = {
 # kept at pr by the audit, the whole file
 PR_INVARIANT_FILES = {"tests/test_mf_modes.py"}
 # the number of tests PR_INVARIANTS lists (the files of PR_INVARIANT_FILES not counted)
-N_PR_INVARIANTS = 72
+N_PR_INVARIANTS = 83
 
 
 def _doc():

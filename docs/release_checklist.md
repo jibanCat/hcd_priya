@@ -24,6 +24,10 @@ code release (see the last section).
       schedule exists on `main`) needs a nightly run started on it by hand first.
 - [ ] The release-level tests (`tests/ci_tiers.toml`) ran with the real assets on the release commit (`python
       tools/ci/run_test_tier.py --tier assets`), and the record of that run is attached to the release.
+      The science tests of the model need `HCD_SCIENCE_MODEL_CONFIG` (a JSON naming the release to be published by
+      its directory and anchor), `HCD_SCIENCE_GOLDEN` (a golden file made from that release with
+      `tools/ci/make_science_golden.py`) and `HCD_PINNED_STACK=1`; the training-cache test needs
+      `HCD_SCIENCE_LF_CACHE` and `HCD_SCIENCE_LF_CACHE_SHA256`.
 - [ ] The older-libhdf5 job passes.
 - [ ] The documentation builds on Read the Docs, with warnings treated as errors.
 - [ ] The bit-level digest replay passes with the supported pinned stack on the kind of CPU the digests were
