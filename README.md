@@ -166,7 +166,9 @@ What goes in and what comes out:
   `pred.P_class` is the power spectrum of `F / mean(F) - 1`, with `mean(F)` the mean flux of the whole sample, in
   km/s ([`docs/p1d_definition.md`](docs/p1d_definition.md); that page writes k in the other common convention, one
   over the wavelength). A spectrum in that other convention has a k smaller by a factor of 2 pi and the same P at
-  the corresponding k: only k is converted, never P.
+  the corresponding k: only k is converted, never P. Wavenumbers given to the likelihood must be in s/km too: a
+  data set in h/Mpc with a bin at or above about 0.1 is refused, but one whose bins all lie below that may pass
+  undetected ([`docs/likelihood.md`](docs/likelihood.md)).
 - **Read `pred.flags` before using the numbers**: a parameter outside the training box, or an LF+MF prediction
   above z 4.6, is returned and flagged, not refused.
 

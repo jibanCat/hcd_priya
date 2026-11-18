@@ -21,14 +21,17 @@ For a flat ΛCDM cosmology:
 For a simulation box at redshift z, the total absorption path per sightline is:
     Delta_X = (H_0 / H(z)) * (1+z)^2 * Delta_z_box
 
-where Delta_z_box is the redshift interval spanned by the box:
-    Delta_z_box ≈ H(z) * L_phys / c  (narrow box)
-              = H(z) * (box_kpc/h / 1000 / h) / (1+z) / c_kms  km/s / (km/s)
+where Delta_z_box is the redshift interval spanned by the box. A photon crosses the proper length L_com / (1+z) of a
+box of comoving length L_com in Delta_t = L_com / ((1+z) c), while the redshift changes by (1+z) H(z) Delta_t:
+    Delta_z_box = H(z) * L_com / c  (narrow box)
 
-This simplifies to:
-    Delta_X = (1+z)^2 * L_phys_Mpc * H_0_kms / c_kms
-            = (1+z)^2 * (box/1000/h) / (1+z) * H_0/c  (dimensionless)
-            = (1+z) * (box/1000/h) * H_0/c
+This gives (with L_com in Mpc and H_0 = 100 h km/s/Mpc, h cancels):
+    Delta_X = (1+z)^2 * L_com * H_0 / c
+            = (1+z)^2 * (box_kpc_h / 1000 / h) * (100 h) / c_kms
+            = (1+z)^2 * (box in Mpc/h) * 100 / c_kms  (dimensionless)
+
+as ``absorption_path_per_sightline`` computes. (An earlier version of this text wrote (1+z) * L * H_0 / c, which
+misses a factor 1+z; see docs/bugs_found.md section 7.)
 
 We measure CDDF from the simulation directly:
     f(N_HI) = n_absorbers(N_HI in bin) / (dN_HI * n_sightlines * Delta_X)

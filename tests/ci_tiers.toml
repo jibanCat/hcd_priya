@@ -177,6 +177,11 @@ release = "only with the real assets, before a release (the assets job); listed 
 "tests/test_runtime_data.py" = { tier = "wheel", level = "pr" }
 "tests/test_safe_h5.py" = { tier = "wheel", level = "pr" }
 "tests/test_safe_io.py" = { tier = "wheel", level = "pr" }
+"tests/test_science_cddf.py" = { tier = "wheel", level = "pr" }
+"tests/test_science_conventions.py" = { tier = "wheel", level = "pr" }
+"tests/test_science_model.py" = { tier = "assets", level = "release", reason = "needs a trained model, named by HCD_SCIENCE_MODEL_CONFIG, and for its golden-value test the golden file made from that model, named by HCD_SCIENCE_GOLDEN; every test skips without them, so an assets job must set both variables" }
+"tests/test_science_parameter_boxes.py" = { tier = "source", level = "pr" }
+"tests/test_science_training_cache.py" = { tier = "assets", level = "release", reason = "needs the LF training cache, named by HCD_SCIENCE_LF_CACHE with its sha256 in HCD_SCIENCE_LF_CACHE_SHA256; the test skips without it, so an assets job must set both variables" }
 "tests/test_seed_determinism.py" = { tier = "source", level = "nightly" }
 "tests/test_splice_tau0_cache.py" = { tier = "source", level = "nightly" }
 "tests/test_tau0_bands.py" = { tier = "wheel", level = "nightly" }
