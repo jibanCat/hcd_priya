@@ -32,7 +32,7 @@ The sha256 of the 18 data rows alone (`grep -v '^#' lls_lz_literature.dat | sha2
 ## What the figure draws
 
 The file keeps all 18 rows. The figure draws five samples (`LLS_DRAWN` in `scripts/figures/fig_dndx_vs_ho21.py`),
-12 rows, so that no absorber is counted twice:
+12 rows, chosen so that no drawn row contains another:
 
 | Drawn | Rows | Marker |
 |---|---|---|
@@ -45,12 +45,16 @@ The file keeps all 18 rows. The figure draws five samples (`LLS_DRAWN` in `scrip
 - **Left out, and why** (see "Rows that share data" below): `omeara13_t5_wfc3`, `omeara13_t5_acs` and
   `ribaudo11_t5_r2` are inside `omeara13_t5_comb`; the three rows of `ribaudo11_t7_rp10` count the SDSS-DR7 absorbers
   of `prochaska10_t4`.
-- **The errors of `prochaska10_t4` and `omeara13_t5_comb` are drawn as a Poisson interval:** the larger error
-  upward, that is with `err_lo` and `err_hi` swapped (the rule for the errors, under Format). For the combined
-  O'Meara row the two printed errors are equal, so nothing changes. The file keeps the print. The script refuses a
-  row of these two samples whose printed plus error is the larger one.
+- **The errors of `prochaska10_t4` are drawn swapped,** the larger error upward, as in the Poisson interval of a
+  count: `err_lo` and `err_hi` exchanged (the rule for the errors, under Format). The script refuses a row of it whose
+  printed plus error is the larger one. **The combined O'Meara row `omeara13_t5_comb` is drawn as printed
+  (symmetric),** 0.92 +- 0.18; the Poisson interval of its printed m = 32 and Delta z = 34.8 would be 0.16 below and
+  0.19 above. The file keeps the print.
 - **`fumagalli20_dr16` has its own marker,** a hollow circle: its absorbers were classified as tau >~ 2, and the
-  paper says its catalogue may include some just below tau = 2 (the source entry below).
+  paper says its catalogue may include some just below tau = 2 (the source entry below). **It is not independent of
+  `prochaska10_t4`:** its SDSS DR16 spectra share 344 quasars with the SDSS-DR7 survey ("Rows that share data"), and
+  its bin 3.3 to 3.6 overlaps the bins 3.3 to 3.65 of `prochaska10_t4`; at z = 3.45 its point overlaps theirs in the
+  figure.
 - **Each row is drawn at the centre of its redshift bin,** with a horizontal bar over the bin, as l(X) in the
   cosmology of the model line (above); the factors Delta z / Delta X of the drawn rows are in the side file
   `docs/figures/dndx_vs_ho21.json`.
@@ -78,8 +82,9 @@ smaller one, the reverse of a Poisson interval of a count: for `prochaska10_t4` 
 (the check of these rows below) gives lower errors 0.43, 0.41, 0.23, 0.27, 0.52, 0.68 and upper errors 0.60, 0.49,
 0.27, 0.31, 0.63, 0.84, which are the printed '+' and '-' values; for the two O'Meara rows the Poisson interval of the
 printed m and Delta z gives 0.23 and 0.29, 0.39 and 0.61. The file keeps the print. A figure that draws the Poisson
-interval swaps `err_lo` and `err_hi` in these rows; one that draws the print does not. The figure draws the Poisson
-interval ("What the figure draws").
+interval swaps `err_lo` and `err_hi` in these rows; one that draws the print does not. The figure swaps them in the
+rows of `prochaska10_t4`; of the O'Meara rows it draws only the combined one, whose printed errors are equal ("What the
+figure draws").
 
 ## The sources
 

@@ -44,15 +44,18 @@ factors go into the side file. The bands are not converted: each design point is
 
 **The LLS measurements.** Each count is of every absorber above the Lyman limit threshold, tau_912 >= 2, which is
 N_HI >= 10^17.5 cm^-2: subDLAs and DLAs above it are included. The table holds 18 published rows of l(z) = dN/dz
-from six papers (PROVENANCE.md beside it). Five samples are drawn, ``LLS_DRAWN``, so that no absorber is counted
-twice: the rows left out are contained in a drawn one or count the same absorbers (the comment above
-``LLS_DRAWN``). Each row is drawn at the centre of its redshift bin, with a horizontal bar over the bin, as l(X) =
-l(z) Delta z / Delta X over the bin, with Delta X in the cosmology of the line (an l(z) needs no cosmology of its
+from six papers (PROVENANCE.md beside it). Five samples are drawn, ``LLS_DRAWN``, chosen so that no drawn row
+contains another: the rows left out are contained in a drawn one or count its absorbers (the comment above
+``LLS_DRAWN``). The drawn samples are not all independent: Fumagalli, Fotopoulou and Thomson (2020) use SDSS DR16
+spectra that share 344 quasars with the SDSS DR7 sample of Prochaska, O'Meara and Worseck (2010), whose bins overlap
+theirs in redshift. Each row is drawn at the centre of its redshift bin, with a horizontal bar over the bin, as l(X)
+= l(z) Delta z / Delta X over the bin, with Delta X in the cosmology of the line (an l(z) needs no cosmology of its
 own); its errors take the same factor, which goes into the side file. In the rows of Prochaska, O'Meara and Worseck
-(2010) and of O'Meara et al. (2013) the error printed with the plus sign is the smaller one, the reverse of the
-Poisson interval of a count: these rows are drawn with the Poisson interval, the larger error upward. The file
-keeps the print. Fumagalli, Fotopoulou and Thomson (2020) classify their absorbers as tau >~ 2, and say that their
-catalogue may include some just below tau = 2: their point has its own marker.
+(2010) the error printed with the plus sign is the smaller one, the reverse of the Poisson interval of a count: the
+figure swaps the two, the larger error upward. The combined row of O'Meara et al. (2013) is drawn as printed
+(symmetric). The file keeps the print. Fumagalli, Fotopoulou and Thomson (2020) classify their absorbers as tau >~
+2, and say that their catalogue may include some just below tau = 2: their point has its own marker. At z = 3.45
+it overlaps a point of Prochaska, O'Meara and Worseck (2010).
 
 **The count above 10^17.5.** The dashed line is the sum over the bins of the model's column-density distribution
 ``pred.cddf`` (f(N_HI), per unit N_HI and per unit X, at the bin centres ``pred.log_nhi``) of f times the width in
@@ -94,19 +97,22 @@ CUMULATIVE_COLUMN = 3
 LLS_FILE = ("lls_incidence", "lls_lz_literature.dat")
 MEASUREMENT_SOURCE_LLS = (
     "Prochaska, O'Meara and Worseck (2010), doi:10.1088/0004-637X/718/1/392; O'Meara et al. (2013), "
-    "doi:10.1088/0004-637X/765/2/137; Fumagalli et al. (2013), doi:10.1088/0004-637X/775/1/78; Crighton et al. "
+    "doi:10.1088/0004-637X/765/2/137, whose combined row includes a bin of Ribaudo, Lehner and Howk (2011), "
+    "doi:10.1088/0004-637X/736/1/42; Fumagalli et al. (2013), doi:10.1088/0004-637X/775/1/78; Crighton et al. "
     "(2019), doi:10.1093/mnras/sty2762; Fumagalli, Fotopoulou and Thomson (2020), doi:10.1093/mnras/staa2388; "
     "values copied from the papers' tables and text: docs/figures/data/lls_incidence/PROVENANCE.md"
 )
-# The samples drawn, by their key in the table: (label, marker, drawn with the Poisson interval). No absorber is
-# counted twice. Left out: the WFC3 and the ACS row of O'Meara et al. (2013) and the row of Ribaudo, Lehner and
-# Howk (2011) below z = 2.6, which are inside the combined row of O'Meara et al. (2013) that is drawn; and the rows
-# of Ribaudo, Lehner and Howk (2011) above z = 3.5, which count the absorbers of the SDSS-DR7 survey of Prochaska,
-# O'Meara and Worseck (2010). "Poisson": the printed plus error of these rows is the smaller one, and the figure
-# draws the Poisson interval of the count, the larger error upward (the module docstring).
+# The samples drawn, by their key in the table: (label, marker, swap_printed_errors). No drawn row contains another.
+# Left out: the WFC3 and the ACS row of O'Meara et al. (2013) and the row of Ribaudo, Lehner and Howk (2011) below
+# z = 2.6, which are inside the combined row of O'Meara et al. (2013) that is drawn; and the rows of Ribaudo, Lehner
+# and Howk (2011) above z = 3.5, which count the absorbers of the SDSS-DR7 survey of Prochaska, O'Meara and Worseck
+# (2010). Drawn although not independent of it: fumagalli20_dr16 (SDSS DR16) shares 344 quasars with prochaska10_t4
+# (SDSS DR7) (PROVENANCE.md beside the table, "Rows that share data"). swap_printed_errors: the printed plus error
+# of these rows is the smaller one, the reverse of the Poisson interval of a count, so the figure swaps the two, the
+# larger error upward (the module docstring); the combined O'Meara row, with equal errors, is drawn as printed.
 LLS_DRAWN = {
     "prochaska10_t4": ("Prochaska, O'Meara and Worseck (2010)", "^", True),
-    "omeara13_t5_comb": ("O'Meara et al. (2013)", "s", True),
+    "omeara13_t5_comb": ("O'Meara et al. (2013) with Ribaudo, Lehner and Howk (2011)", "s", False),
     "fumagalli13_nc": ("Fumagalli et al. (2013)", "D", False),
     "crighton19_corr": ("Crighton et al. (2019)", "v", False),
     "fumagalli20_dr16": ("Fumagalli, Fotopoulou and Thomson (2020)", "o", False),
@@ -212,8 +218,9 @@ def read_lls(path: str):
 
 def lls_points(rows):
     """The rows of the samples drawn, per sample: (z_lo, z_hi, l(X), error below, error above, factor), with l(X) =
-    factor * l(z) and factor = Delta z / Delta X(line) over the bin. A sample drawn with the Poisson interval takes
-    the larger printed error upward; one whose printed plus error is already the larger is refused.
+    factor * l(z) and factor = Delta z / Delta X(line) over the bin. A sample whose printed errors are swapped
+    (``swap_printed_errors`` in ``LLS_DRAWN``) takes the larger one upward; a row of it whose printed plus error is
+    already the larger is refused.
     """
     points = {source: [] for source in LLS_DRAWN}
     for source, z_lo, z_hi, value, err_lo, err_hi in rows:
@@ -223,7 +230,8 @@ def lls_points(rows):
         if LLS_DRAWN[source][2]:
             if err_hi > err_lo:
                 raise SystemExit(
-                    f"{source}: the printed plus error is the larger; there is nothing to reverse"
+                    f"{source}, z {z_lo} to {z_hi}: the printed plus error ({err_hi}) is already the larger (minus "
+                    f"{err_lo}), so there is nothing to swap; set its swap_printed_errors to False in LLS_DRAWN"
                 )
             below, above = err_hi, err_lo
         factor = (z_hi - z_lo) / C.absorption_distance(z_lo, z_hi, C.OMEGA_M_LINE)
@@ -317,7 +325,7 @@ def main(argv=None) -> int:
         for i in sorted(all_refused):
             print(f"   design point {i} refused: {all_refused[i]}")
     C.style(plt)
-    fig, ax = plt.subplots(figsize=(7.4, 5.2), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(8.0, 5.2), constrained_layout=True)
     z = np.array(REDSHIFTS)
     drew_error = False
     for name, col, colour, width, span in CLASSES:
@@ -401,11 +409,15 @@ def main(argv=None) -> int:
         counts="every absorber with tau_912 >= 2 (N_HI >= 10^17.5), per unit redshift as published; drawn per unit "
         "X: l(X) = l(z) Delta z / Delta X(line) over each row's redshift bin, errors times the same factor",
         drawn={source: LLS_DRAWN[source][0] for source in LLS_DRAWN},
-        not_drawn="the other rows of the table: contained in a drawn row, or counting the same absorbers",
-        poisson_interval=[source for source in LLS_DRAWN if LLS_DRAWN[source][2]],
-        poisson_interval_means="drawn with the larger printed error upward; the table keeps the print",
+        not_drawn="the other rows of the table: each is contained in a drawn row or counts its absorbers (no drawn "
+        "row contains another)",
+        not_independent="fumagalli20_dr16 (SDSS DR16) shares 344 quasars with prochaska10_t4 (SDSS DR7)",
+        swapped_printed_errors=[source for source in LLS_DRAWN if LLS_DRAWN[source][2]],
+        swapped_printed_errors_means="the larger printed error drawn upward, the Poisson interval of the count; the "
+        "table keeps the print; the combined O'Meara row, whose two printed errors are equal, is drawn as printed",
         own_marker={
-            "fumagalli20_dr16": "classified as tau >~ 2; may include systems just below tau = 2 (the paper)"
+            "fumagalli20_dr16": "classified as tau >~ 2; may include systems just below tau = 2 (the paper); at "
+            "z = 3.45 it overlaps a point of prochaska10_t4"
         },
     )
     facts["cosmology"] = dict(

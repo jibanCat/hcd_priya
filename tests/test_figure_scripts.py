@@ -167,8 +167,30 @@ def test_the_lls_subdla_provenance_names_each_file_with_its_digest_and_its_sourc
         "3498694e59701b72c738e5eef950c62b73683c1e",
         "Omega_m = 0.3",  # the cosmology of each, and the conversion
         "Delta X(own Omega_m) / Delta X(line Omega_m)",
+        "1307.0602v2",  # the Zafar file compared with the paper's table, and the digest of the source read
+        "ad3866f8002f9826702477775e01cb4faf7d0553a6450833b083b411ff79ba35",
     ):
         assert needed in text, needed
+
+
+def test_the_zafar_file_is_the_papers_table():
+    """zafar_2013.txt against the table of the combined sub-DLA sample of Zafar et al. (2013) (arXiv 1307.0602v2,
+    lines 267 to 272), restated from the paper: per log N_HI range, log f with its printed plus and minus errors. The
+    file gives the middle of each range and its half width, then log f, the plus error and the minus error.
+    """
+    table = [  # (log N_HI range, log f, plus, minus)
+        ((19.00, 19.30), -20.43, 0.09, 0.10),
+        ((19.30, 19.60), -20.75, 0.09, 0.10),
+        ((19.60, 19.90), -21.15, 0.09, 0.13),
+        ((19.90, 20.10), -21.30, 0.09, 0.12),
+        ((20.10, 20.30), -21.61, 0.11, 0.16),
+    ]
+    data = np.loadtxt(os.path.join(DATA, "lls_subdla", "zafar_2013.txt"))
+    assert data.shape == (5, 5)
+    for row, ((a, b), log_f, plus, minus) in zip(data, table):
+        np.testing.assert_allclose(
+            row, [(a + b) / 2, (b - a) / 2, log_f, plus, minus], rtol=0, atol=1e-12
+        )
 
 
 def test_the_two_built_tables_are_the_papers_published_values():
@@ -227,6 +249,14 @@ def test_the_conversion_to_the_line_cosmology():
         < 1.0
         < C.to_line_cosmology(z1, z2, C.OMEGA_M_LINE - 0.05)
     )
+    # each measurement's Omega_m and redshift range as its PROVENANCE.md gives them, written out here so that a
+    # change of either constant is also a change of this test
+    assert C.OMEGA_M_OF == {"ho21": 0.279, "zafar13": 0.3, "omeara07": 0.3, "prochaska10": 0.3}
+    assert C.Z_RANGE_OF == {
+        "zafar13": (1.51, 5.00),
+        "omeara07": (1.68, 4.47),
+        "prochaska10": (3.3, 4.4),
+    }
 
 
 def test_the_lls_incidence_provenance_names_the_file_its_sources_and_what_is_drawn():
@@ -256,11 +286,14 @@ def test_the_lls_incidence_provenance_names_the_file_its_sources_and_what_is_dra
         "N_HI >= 10^17.5",
         "What the figure draws",
         "Poisson interval",
+        "no drawn row contains another",
+        "344 quasars",
+        "drawn as printed (symmetric)",
         "may include some just below tau = 2",
         "How to reproduce the table",
         "no value in the file comes from anywhere else",
     ):
-        assert needed in text, needed
+        assert needed in " ".join(text.split()), needed  # line breaks read as spaces
 
 
 def test_the_lls_incidence_rows_drawn_are_the_papers_published_values():
@@ -295,9 +328,11 @@ def test_the_lls_incidence_rows_drawn_are_the_papers_published_values():
 
 
 def test_the_lls_incidence_rows_left_out_share_absorbers_with_rows_drawn():
-    """Each absorber is counted once: the rows not drawn are the WFC3 and ACS rows of O'Meara et al. (2013) and the
+    """No drawn row contains another: the rows not drawn are the WFC3 and ACS rows of O'Meara et al. (2013) and the
     row of Ribaudo et al. (2011) below z 2.6 (inside the combined O'Meara row, whose bin covers theirs), and the rows
-    of Ribaudo et al. (2011) above z 3.5 (the SDSS-DR7 absorbers of Prochaska et al. 2010)."""
+    of Ribaudo et al. (2011) above z 3.5 (the SDSS-DR7 absorbers of Prochaska et al. 2010). The combined O'Meara row
+    is labelled with Ribaudo et al. too, and only the rows of Prochaska et al. (2010) have their printed errors
+    swapped."""
     fig = _script("fig_dndx_vs_ho21")
     rows = fig.read_lls(os.path.join(DATA, *fig.LLS_FILE))
     left_out = sorted({row[0] for row in rows} - set(fig.LLS_DRAWN))
@@ -307,7 +342,8 @@ def test_the_lls_incidence_rows_left_out_share_absorbers_with_rows_drawn():
         "ribaudo11_t5_r2",
         "ribaudo11_t7_rp10",
     ]
-    assert [fig.LLS_DRAWN[s][2] for s in fig.LLS_DRAWN] == [True, True, False, False, False]
+    assert [fig.LLS_DRAWN[s][2] for s in fig.LLS_DRAWN] == [True, False, False, False, False]
+    assert fig.LLS_DRAWN["omeara13_t5_comb"][0].endswith("with Ribaudo, Lehner and Howk (2011)")
     assert fig.LLS_HOLLOW == {"fumagalli20_dr16"}
     markers = [fig.LLS_DRAWN[s][1] for s in fig.LLS_DRAWN]
     assert len(set(markers)) == len(markers) and "o" not in markers[:-1]
@@ -319,10 +355,10 @@ def test_the_lls_incidence_rows_left_out_share_absorbers_with_rows_drawn():
         assert label.startswith(r"$\tau \gtrsim 2$" if own else r"$N_\mathrm{HI} \geq 10^{17.5}$")
 
 
-def test_the_lls_incidence_rows_are_drawn_per_unit_x_with_the_poisson_interval():
+def test_the_lls_incidence_rows_are_drawn_per_unit_x_with_the_larger_error_upward():
     """l(X) = l(z) Delta z / Delta X(line) over each row's bin, the errors times the same factor (Delta X checked
-    against a trapezoid sum on a fine grid); the larger error upward in the two samples drawn with the Poisson
-    interval, as printed in the others."""
+    against a trapezoid sum on a fine grid); in the rows of Prochaska et al. (2010) the printed errors swapped, the
+    larger upward; in the others as printed (the combined O'Meara row has two equal errors)."""
     fig = _script("fig_dndx_vs_ho21")
     rows = fig.read_lls(os.path.join(DATA, *fig.LLS_FILE))
     points = fig.lls_points(rows)
@@ -349,6 +385,9 @@ def test_the_lls_incidence_rows_are_drawn_per_unit_x_with_the_poisson_interval()
     # the swap moved something: in every row of Prochaska et al. (2010) the error drawn upward is the larger
     p = points["prochaska10_t4"]
     assert np.all(p[:, 4] > p[:, 3])
+    # and the combined O'Meara row is drawn as printed: two equal errors
+    (p,) = points["omeara13_t5_comb"]
+    assert p[3] == p[4] == p[5] * 0.18
 
 
 def test_the_lls_reader_refuses_what_it_cannot_draw(tmp_path):
@@ -361,9 +400,9 @@ def test_the_lls_reader_refuses_what_it_cannot_draw(tmp_path):
     short.write_text("3.0\t3.5\t0.5\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="eight tab-separated fields"):
         fig.read_lls(str(short))
-    # a sample drawn with the Poisson interval whose printed plus error is already the larger: nothing to reverse
+    # a row of a sample whose printed errors are swapped, with the printed plus error already the larger
     rows = [("prochaska10_t4", 3.3, 3.4, 1.0, 0.2, 0.3)]
-    with pytest.raises(SystemExit, match="nothing to reverse"):
+    with pytest.raises(SystemExit, match="z 3.3 to 3.4: .* nothing to swap"):
         fig.lls_points(rows)
     with pytest.raises(SystemExit, match="no row of"):
         fig.lls_points([("prochaska10_t4", 3.3, 3.4, 1.0, 0.3, 0.2)])
@@ -640,7 +679,7 @@ def test_the_cddf_figure_runs_on_a_model_with_an_incidence_record(
     # record what is drawn as points: the measurements must be drawn times their cosmology factors
     from matplotlib.axes import Axes
 
-    drawn_points, real_errorbar = {}, Axes.errorbar
+    drawn_points, drawn_regions, real_errorbar, real_fill = {}, [], Axes.errorbar, Axes.fill
 
     def spy(self, x, y, *a, **k):
         drawn_points.setdefault(k.get("label"), []).append(
@@ -648,7 +687,12 @@ def test_the_cddf_figure_runs_on_a_model_with_an_incidence_record(
         )
         return real_errorbar(self, x, y, *a, **k)
 
+    def spy_fill(self, x, y, *a, **k):
+        drawn_regions.append((np.asarray(x), np.asarray(y), k.get("label")))
+        return real_fill(self, x, y, *a, **k)
+
     monkeypatch.setattr(Axes, "errorbar", spy)
+    monkeypatch.setattr(Axes, "fill", spy_fill)
     out = str(tmp_path / "cddf.png")
     assert cddf.main(_args(release) + ["--design", design, "--out", out]) == 0
     facts = _facts(out)
@@ -659,11 +703,30 @@ def test_the_cddf_figure_runs_on_a_model_with_an_incidence_record(
         assert panel["ho21_factor"] == C.to_line_cosmology(*cddf.HO21_Z_RANGE[name], 0.279)
     for name, label in cddf.LLS_SUBDLA.items():
         assert cosmo["factors_below_dla"][label]["factor"] == cddf.factor_of(name)
-    k = facts["panels"][0]["ho21_factor"]
-    logn, f, f_lo, f_hi = cddf.read_ho21_cddf(os.path.join(DATA, "ho21", moved[0][1]))
-    y, yerr = drawn_points["Ho, Bird and Garnett (2021), 68 per cent interval"][0]
-    assert np.allclose(y, k * f, rtol=1e-12, atol=0.0)
-    assert np.allclose(yerr, [k * (f - f_lo), k * (f_hi - f)], rtol=1e-12, atol=0.0)
+    # every drawn measurement is its file times its factor: Ho et al. and Zafar et al. in each panel, the O'Meara
+    # points and the Prochaska region in the panel 3 < z < 4
+    ho21 = drawn_points["Ho, Bird and Garnett (2021), 68 per cent interval"]
+    assert len(ho21) == 3
+    for (y, yerr), panel, (_, name, _) in zip(ho21, facts["panels"], moved):
+        k = panel["ho21_factor"]
+        logn, f, f_lo, f_hi = cddf.read_ho21_cddf(os.path.join(DATA, "ho21", name))
+        assert np.allclose(y, k * f, rtol=1e-12, atol=0.0)
+        assert np.allclose(yerr, [k * (f - f_lo), k * (f_hi - f)], rtol=1e-12, atol=0.0)
+    name = "zafar_2013.txt"
+    _, _, f, f_lo, f_hi = cddf.read_zafar13(os.path.join(DATA, "lls_subdla", name))
+    k = cddf.factor_of(name)
+    assert len(drawn_points[cddf.LLS_SUBDLA[name]]) == 3 and k != 1.0
+    for y, yerr in drawn_points[cddf.LLS_SUBDLA[name]]:
+        assert np.allclose(y, k * f, rtol=1e-12, atol=0.0)
+        assert np.allclose(yerr, [k * (f - f_lo), k * (f_hi - f)], rtol=1e-12, atol=0.0)
+    name = "prochaska2010_lls_region.dat"
+    logn, f = cddf.read_prochaska10(os.path.join(DATA, "lls_subdla", name))
+    ((x, y, label),) = drawn_regions
+    assert label == cddf.LLS_SUBDLA[name] and np.array_equal(x, logn)
+    assert (
+        np.allclose(y, cddf.factor_of(name) * f, rtol=1e-12, atol=0.0)
+        and cddf.factor_of(name) != 1.0
+    )
     name = "omeara2007_fn_all19p0.dat"
     _, _, _, f, f_lo, f_hi = cddf.read_omeara07(os.path.join(DATA, "lls_subdla", name))
     y, yerr = drawn_points[cddf.LLS_SUBDLA[name]][0]
@@ -787,8 +850,17 @@ def test_the_dndx_figure_runs_on_a_model_with_an_incidence_record(
     # the LLS points: l(X) with the factors of the side file, the Poisson interval where it is drawn
     lls = facts["lls_measurements"]
     assert lls["drawn"] == {source: v[0] for source, v in dndx.LLS_DRAWN.items()}
-    assert lls["poisson_interval"] == ["prochaska10_t4", "omeara13_t5_comb"]
-    assert "fumagalli20_dr16" in lls["own_marker"]
+    assert lls["swapped_printed_errors"] == ["prochaska10_t4"]
+    assert "344 quasars" in lls["not_independent"] and "fumagalli20_dr16" in lls["own_marker"]
+    # the drawn DLA points of Ho et al.: the table times the factor of each bin
+    zm, value, lo68, hi68 = dndx.read_ho21_dndx(os.path.join(DATA, "ho21", "dndx_all.txt"))
+    k = np.array([row["factor"] for row in facts["cosmology"]["factors_ho21"]])
+    x, y, _, yerr = drawn_points["DLA, Ho, Bird and Garnett (2021), 68 per cent interval"]
+    assert np.array_equal(x, zm) and np.all(k != 1.0)
+    np.testing.assert_allclose(y, k * value, rtol=1e-12, atol=0)
+    np.testing.assert_allclose(
+        np.asarray(yerr), [k * (value - lo68), k * (hi68 - value)], rtol=1e-12, atol=0
+    )
     factors = facts["cosmology"]["factors_lls"]
     assert len(factors) == 12
     points = dndx.lls_points(dndx.read_lls(os.path.join(DATA, *dndx.LLS_FILE)))

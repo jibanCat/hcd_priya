@@ -6,9 +6,14 @@ data file; a script refuses a file whose digest differs.
 ## Where the measurements are
 
 Every published measurement the figures draw is a plain text file under `docs/figures/data/`, readable with numpy
-alone. Each folder has a `PROVENANCE.md` that names the paper, the table and lines the values come from, and how the
-file was made. The values are as published: f(N_HI, X) and dN/dX are per unit absorption distance X in each paper's
-own cosmology, and l(z) per unit redshift; the figure scripts convert them to the cosmology of the model line.
+alone (the LLS table also has a text column: read its numbers with `usecols`, its source keys with
+`np.genfromtxt(path, usecols=7, dtype=str)`). Each folder has a `PROVENANCE.md` that names the paper and where the
+values come from: for the files in `lls_subdla/` and `lls_incidence/`, the table and lines of the paper (the file of
+Zafar et al. 2013 comes from a data collection and was compared with its table); for the files in `ho21/`, the data
+collection of the paper's authors, whose rows the paper's first author confirmed. The values are as published:
+f(N_HI, X) and dN/dX are per unit absorption distance X in each paper's own cosmology (for Ho, Bird and Garnett 2021
+inferred from their public code), and l(z) per unit redshift; the figure scripts convert them to the cosmology of the
+model line.
 
 ```text
 docs/figures/data/

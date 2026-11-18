@@ -23,7 +23,16 @@ the other two are built from the published tables of their papers.
 - **Citation** (from the Crossref record of the DOI, read on 2026-11-17): Zafar, T., Peroux, C., Popping, A., et al.
   2013, "The ESO UVES advanced data products quasar sample. II. Cosmological evolution of the neutral gas mass
   density", A&A 556, A141, [doi:10.1051/0004-6361/201321154](https://doi.org/10.1051/0004-6361/201321154)
-  (arXiv:1307.0602). Its log f and errors are those of the paper's f(N) table.
+  (arXiv:1307.0602).
+- **Compared with the paper** (2026-11-17): the arXiv e-print 1307.0602v2 (the latest version; the gzipped tar
+  fetched from https://arxiv.org/e-print/1307.0602v2 has sha256
+  `5e0a4999653979340a5d29664ebd22008247240f3f5d7c7b36ab0022d9f691dc`; the file read, `uvespaperII.tex`, sha256
+  `ad3866f8002f9826702477775e01cb4faf7d0553a6450833b083b411ff79ba35`), the table `fnresults`, "Summary of the column
+  density distribution of the combined sub-DLA sample", lines 267 to 272. The five rows of the file equal it: log f
+  -20.43, -20.75, -21.15, -21.30, -21.61; upper errors (column 3) 0.09, 0.09, 0.09, 0.09, 0.11; lower errors (column 4)
+  0.10, 0.10, 0.13, 0.12, 0.16, as printed v^{+a}_{-b}. Column 0 is the middle of the table's log N_HI range (19.00 to
+  19.30, 19.30 to 19.60, 19.60 to 19.90, 19.90 to 20.10, 20.10 to 20.30) and column 1 its half width; the table's
+  mean log N_HI (19.13, 19.42, 19.75, 20.06, 20.06) is not used. The journal version was not compared.
 - **Licence:** neither repository has a licence file (no licence file in the origin, and no licence file in the
   fork). The file is redistributed here by decision of the project lead (2026-11-16).
 
@@ -83,7 +92,7 @@ By decision of the project lead (2026-11-17), the figure now draws files built f
 
 f(N_HI, X) is a count per unit absorption distance X, and each survey computed its Delta X in its own cosmology. All
 three are flat with Omega_m = 0.3, as each paper states: Zafar et al. (2013), section 1, last paragraph (arXiv
-`uvespaperII.tex` line 85); O'Meara et al. (2007), end of section 1 (line 215); Prochaska, O'Meara and Worseck
+`uvespaperII.tex` line 85, the file named above); O'Meara et al. (2007), end of section 1 (line 215); Prochaska, O'Meara and Worseck
 (2010), section 1, last paragraph (line 329). The figure draws them, like the DLA points, in the cosmology of the
 model line: flat, with Omega_m = omegamh2 / hub^2 of the parameters it is drawn at (0.143 / 0.70^2 = 0.2918). Each
 measurement's values and limits (its error bars, and the region's corners) are multiplied by the same factor,
@@ -122,5 +131,5 @@ read, not run; a test restates each mapping in numpy and compares. The two built
 The subDLA points of Zafar et al. (z 1.51 to 5.00) in every panel; the points of O'Meara et al. (mean z 3.1) and the
 region of Prochaska, O'Meara and Worseck (z ~ 3.7) in the panel 3 < z < 4 only. The model is drawn at one snapshot
 per panel; these measurements are at other redshifts or over wider ones, and the simulations and the surveys define
-and find absorbers differently. The collection holds no dN/dX of subDLAs or LLS, so the dN/dX figure keeps its DLA
-points only.
+and find absorbers differently. The dN/dX figure draws no file of this folder: its LLS points come from
+`../lls_incidence/` (`PROVENANCE.md` there).

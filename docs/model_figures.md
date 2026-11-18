@@ -37,8 +37,11 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
   width in N_HI of the bin's part above 10^17.5. The bins are 0.2 wide in log10 N_HI, so 10^17.5 falls inside the
   bin from 10^17.4 to 10^17.6: that bin counts from 10^17.5 to its upper edge with f taken constant within it. This
   partial bin holds 7.2 to 8.4 per cent of the sum; a power law within it, with the slope between its two
-  neighbours, would make the sum 1.0 to 1.3 per cent smaller. The bin from 10^22.8 to 10^23 has no value at z = 2.2,
-  2.4 and 3.2 (no simulation pair has absorbers there at that redshift) and is left out of the sum there. As a
+  neighbours, would make the sum 1.0 to 1.3 per cent smaller. Two bins of the distribution have no value at z = 2.2:
+  the bin from 10^22.8 to 10^23, which has none also at 2.4 and 3.2 (no simulation pair has absorbers there at that
+  redshift) and is left out of the sum there, where it has a value it holds less than 1e-5 of the count; and the
+  bin from 10^17.0 to 10^17.2, which has none at any redshift (it lies below the catalogue's column-density threshold)
+  and lies below 10^17.5 and below the LLS class, so it enters neither the count nor the cross-check. As a
   cross-check the same count formed from the class lines (the LLS line less the distribution's part from 10^17.2 to
   10^17.5, plus the subDLA and the DLA line) agrees with it: their ratio is 0.9998 to 1.0020 over the snapshots (in
   the side file). The partial bin enters both sums in the same way, so the cross-check does not test that choice.
@@ -76,15 +79,19 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
   its catalogue may include some just below tau = 2. The values are copied from the papers' tables and text into
   `docs/figures/data/lls_incidence/lls_lz_literature.dat`, unconverted;
   `docs/figures/data/lls_incidence/PROVENANCE.md` gives each paper, DOI, table and line, and how to rebuild the
-  file. The file has six more rows, which share absorbers with the rows drawn and are left out so that no absorber
-  is counted twice.
+  file. The file has six more rows, each contained in a drawn row or counting its absorbers; they are left out, so
+  that no drawn row contains another. The drawn samples are not all independent: the SDSS DR16 sample of Fumagalli,
+  Fotopoulou and Thomson (2020) shares 344 quasars with the SDSS DR7 sample of Prochaska, O'Meara and Worseck (2010),
+  whose bins overlap it in redshift; at z = 3.45 the two points overlap in the figure.
 - **The LLS points in the cosmology of the line.** Each paper gives l(z) = dN/dz, which needs no cosmology. The
   figure draws l(X) = l(z) Delta z / Delta X over the row's redshift bin, with Delta X in the cosmology of the line
   (Omega_m = 0.2918); the published 1 sigma errors take the same factor. Each point sits at the centre of its bin,
-  with a horizontal bar over the bin. In the rows of Prochaska, O'Meara and Worseck (2010) and O'Meara et al. (2013)
-  the error printed with the plus sign is the smaller one, the reverse of the Poisson interval of a count; the
-  figure draws the Poisson interval, the larger error upward (for the O'Meara row the two are equal). The file keeps
-  the print.
+  with a horizontal bar over the bin. The conversion weights every redshift of a bin equally, where a survey's own
+  path weights them unequally (0.03 to 0.22 per cent for the SDSS bins of Prochaska, O'Meara and Worseck 2010; the
+  provenance file). In the rows of Prochaska, O'Meara and Worseck (2010) the error printed with the plus sign is the
+  smaller one, the reverse of the Poisson interval of a count; the figure swaps the two, the larger error upward. The
+  combined O'Meara row is drawn as printed (symmetric, 0.18 either way; its Poisson interval would be 0.16 below and
+  0.19 above). The file keeps the print.
 - **Snapshots against bins.** The model is drawn at snapshot redshifts 0.2 apart; the measurement is in bins one
   sixth of a unit wide. The two measured points above z = 4.6 have no model curve beside them, and neither has the
   one below 2.2. Of the LLS bins, the one from z 4.7 to 5.4 lies beyond the curves, and the one from 2.0 to 2.6
@@ -121,7 +128,10 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
   `ns_ridge` for 3 of them); it refuses none, and all 60 are in the band.
 - **The flags of the drawn lines** are in the side file `docs/figures/cddf_vs_ho21.json`. None says that the
   correction rests on one simulation pair, or that its redshift is interpolated or held constant beyond the table. At
-  z = 2.2 `cddf_bins_without_support` is set: the highest bin has no measured correction there and is absent.
+  z = 2.2 `cddf_bins_without_support` is set: the highest bin, 10^22.8 to 10^23, has no measured correction there
+  and is absent. The lowest bin, 10^17.0 to 10^17.2, is absent at every snapshot: it lies below the catalogue's
+  column-density threshold, so the model was never trained on it (the side file counts two absent bins at z = 2.2
+  and one at 2.8 and 3.4).
 - **Data (points):** the column-density distribution of DLAs that Ho, Bird and Garnett (2021) measured in SDSS
   DR16Q, in their redshift bins 2 to 2.5, 2.5 to 3 and 3 to 4, with the 68 per cent interval. A bar that reaches the
   bottom of a panel has a lower limit of zero. A bin in which the measured f is zero is not drawn, also where the
@@ -208,14 +218,56 @@ python scripts/figures/fig_class_ratio_vs_rogers18.py
 
 ## References
 
+The measurements drawn, each with the provenance file of its data in `docs/figures/data/`:
+
+Crighton, N. H. M., Prochaska, J. X., Murphy, M. T., O'Meara, J. M., Worseck, G. 2019, "Imprints of the first billion
+years: Lyman limit systems at z ~ 5", MNRAS 482, 1456,
+[doi:10.1093/mnras/sty2762](https://doi.org/10.1093/mnras/sty2762),
+[arXiv:1810.10040](https://arxiv.org/abs/1810.10040).
+
+Fumagalli, M., O'Meara, J. M., Prochaska, J. X., Worseck, G. 2013, "Dissecting the properties of optically-thick
+hydrogen at the peak of cosmic star formation history", ApJ 775, 78,
+[doi:10.1088/0004-637X/775/1/78](https://doi.org/10.1088/0004-637X/775/1/78),
+[arXiv:1308.1101](https://arxiv.org/abs/1308.1101).
+
+Fumagalli, M., Fotopoulou, S., Thomson, L. 2020, "Detecting neutral hydrogen at z >~ 3 in large spectroscopic surveys
+of quasars", MNRAS 498, 1951, [doi:10.1093/mnras/staa2388](https://doi.org/10.1093/mnras/staa2388),
+[arXiv:2009.03322](https://arxiv.org/abs/2009.03322).
+
+Ho, M.-F., Bird, S., Garnett, R. 2021, "Damped Lyman-alpha absorbers from Sloan Digital Sky Survey DR16Q with
+Gaussian processes", MNRAS 507, 704, [doi:10.1093/mnras/stab2169](https://doi.org/10.1093/mnras/stab2169),
+[arXiv:2103.10964](https://arxiv.org/abs/2103.10964).
+
+O'Meara, J. M., Prochaska, J. X., Burles, S., Prochter, G., Bernstein, R. A., Burgess, K. M. 2007, "The Keck +
+Magellan Survey for Lyman Limit Absorption. I. The Frequency Distribution of Super Lyman Limit Systems", ApJ 656,
+666, [doi:10.1086/510711](https://doi.org/10.1086/510711),
+[arXiv:astro-ph/0610726](https://arxiv.org/abs/astro-ph/0610726).
+
+O'Meara, J. M., Prochaska, J. X., Worseck, G., Chen, H.-W., Madau, P. 2013, "The HST/ACS+WFC3 Survey for Lyman Limit
+Systems. II. Science", ApJ 765, 137,
+[doi:10.1088/0004-637X/765/2/137](https://doi.org/10.1088/0004-637X/765/2/137),
+[arXiv:1204.3093](https://arxiv.org/abs/1204.3093).
+
+Prochaska, J. X., O'Meara, J. M., Worseck, G. 2010, "A Definitive Survey for Lyman Limit Systems at z ~ 3.5 with the
+Sloan Digital Sky Survey", ApJ 718, 392,
+[doi:10.1088/0004-637X/718/1/392](https://doi.org/10.1088/0004-637X/718/1/392),
+[arXiv:0912.0292](https://arxiv.org/abs/0912.0292).
+
+Ribaudo, J., Lehner, N., Howk, J. C. 2011, "A Hubble Space Telescope Study of Lyman Limit Systems: Census and
+Evolution", ApJ 736, 42, [doi:10.1088/0004-637X/736/1/42](https://doi.org/10.1088/0004-637X/736/1/42),
+[arXiv:1105.0659](https://arxiv.org/abs/1105.0659).
+
+Zafar, T., Peroux, C., Popping, A., et al. 2013, "The ESO UVES advanced data products quasar sample. II. Cosmological
+evolution of the neutral gas mass density", A&A 556, A141,
+[doi:10.1051/0004-6361/201321154](https://doi.org/10.1051/0004-6361/201321154),
+[arXiv:1307.0602](https://arxiv.org/abs/1307.0602).
+
+The simulations and the template:
+
 Fernandez, M. A., Bird, S., Ho, M.-F. 2024, "Cosmological constraints from the eBOSS Lyman-alpha forest using the
 PRIYA simulations", JCAP 2024 (07) 029,
 [doi:10.1088/1475-7516/2024/07/029](https://doi.org/10.1088/1475-7516/2024/07/029),
 [arXiv:2309.03943](https://arxiv.org/abs/2309.03943).
-
-Ho, M.-F., Bird, S., Garnett, R. 2021, "Damped Lyman-alpha absorbers from Sloan Digital Sky Survey DR16Q with
-Gaussian processes", MNRAS, [doi:10.1093/mnras/stab2169](https://doi.org/10.1093/mnras/stab2169),
-[arXiv:2103.10964](https://arxiv.org/abs/2103.10964).
 
 Rogers, K. K., Bird, S., Peiris, H. V., Pontzen, A., Font-Ribera, A., Leistedt, B. 2018, "Simulating the effect of
 high column density absorbers on the one-dimensional Lyman-alpha forest flux power spectrum", MNRAS, 474 (3),

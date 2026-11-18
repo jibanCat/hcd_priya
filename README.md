@@ -272,32 +272,42 @@ design points of their bands are in the repository. No model is published yet: t
 from the candidate LF+MF release (staged, not yet public). The full captions and what each figure does not test:
 [`docs/model_figures.md`](docs/model_figures.md).
 
-![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS against redshift, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/dndx_vs_ho21.png)
+![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS and of every absorber above 10^17.5 cm^-2 against redshift, with the DLA measurement of Ho, Bird and Garnett (2021) and five published measurements of the incidence of Lyman limit systems](docs/figures/dndx_vs_ho21.png)
 
-**The incidence dN/dX against redshift.** Lines: the LF+MF model (`pred.dndx`) for DLAs, subDLAs and LLS at the
-midpoint of each parameter's training range (the nine values are written in the script; nothing is fitted), at the
-snapshots from z = 2.2 to 4.6, the range that the grouped validation of the model's P1D correction covers (the
-correction of the incidence drawn here is not validated at any redshift). Bands: the lowest and the
-highest value over the 60 design points of the training simulations; they are not an uncertainty. Points: the DLAs
-of Ho, Bird and Garnett (2021, [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals,
-from the tables of the DLA data collection [sbird/DLA_data](https://github.com/sbird/DLA_data)
-([provenance](docs/figures/data/ho21/PROVENANCE.md)).
-The measurement covers DLAs only. Bars on the lines: the model's held-out range, from dN/dX times exp(-e) to dN/dX
-times exp(+e), with e the rms over five held-out simulations of ln(prediction / truth); each bound is computed on its
-own, so the bars are asymmetric. They are an indication of size, not a standard deviation.
+**The incidence dN/dX against redshift.** Lines: the LF+MF model (`pred.dndx`) for DLAs, subDLAs and LLS, bins of
+column density (10^20.3 cm^-2 and above, 10^19 to 10^20.3, 10^17.2 to 10^19), at the midpoint of each parameter's
+training range (the nine values are written in the script; nothing is fitted), at the snapshots from z = 2.2 to 4.6,
+the range that the grouped validation of the model's P1D correction covers (the correction of the incidence drawn
+here is not validated at any redshift). Dashed line: the model's count of every absorber with N_HI >= 10^17.5 cm^-2,
+the quantity the LLS points measure. Bands: the lowest and the highest value over the 60 design points of the
+training simulations; they are not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
+[arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals, from the tables of the DLA data
+collection [sbird/DLA_data](https://github.com/sbird/DLA_data) ([provenance](docs/figures/data/ho21/PROVENANCE.md));
+and the incidence of Lyman limit systems (tau_912 >= 2) of five published samples: Prochaska, O'Meara and Worseck
+(2010), O'Meara et al. (2013) with Ribaudo, Lehner and Howk (2011), Fumagalli et al. (2013), Crighton et al. (2019)
+and Fumagalli, Fotopoulou and Thomson (2020) ([provenance](docs/figures/data/lls_incidence/PROVENANCE.md)). Read the
+LLS points against the dashed line, not against the LLS line: they count every absorber above 10^17.5, subDLAs and
+DLAs included. At z = 3.45 the points of Prochaska et al. and of Fumagalli et al. (2020) overlap; the two samples
+share quasars. Every point is drawn per unit X in the cosmology of the model line; the bands are not converted.
+Bars on the lines: the model's held-out range, from dN/dX times exp(-e) to dN/dX times exp(+e), with e the rms over
+five held-out simulations of ln(prediction / truth); each bound is computed on its own, so the bars are asymmetric.
+They are an indication of size, not a standard deviation. [Full caption](docs/model_figures.md).
 
-![The column-density distribution of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021)](docs/figures/cddf_vs_ho21.png)
+![The column-density distribution f(N_HI) of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021) in three redshift bins and three measurements below the DLA threshold](docs/figures/cddf_vs_ho21.png)
 
 **The column-density distribution f(N_HI).** Line: the LF+MF model (`pred.cddf`) at the midpoint of each
 parameter's training range (the nine values are written in the script; nothing is fitted), at the snapshots z = 2.2,
 2.8 and 3.4. Band: the lowest and the highest value over the 60 design points of the training simulations; it is
 not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
 [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) in three redshift bins, with 68 per cent intervals (bins
-where the measured value is zero are not drawn). One
-snapshot stands beside each bin (z = 3.4 for the bin 3 to 4). The bin 4 to 5 is left out because it reaches beyond
-z = 4.6, the edge of the range that the grouped validation of the model's P1D correction covers; the correction of
-the CDDF itself is not validated at any redshift. The model's held-out range is not drawn here; a prediction
-carries it per bin (`pred.cddf_lower` to `pred.cddf_upper`).
+where the measured value is zero are not drawn). Below the DLA threshold: the subDLAs of Zafar et al. (2013) in every
+panel and, in the panel 3 < z < 4, the points of O'Meara et al. (2007) and the region allowed for LLS by Prochaska,
+O'Meara and Worseck (2010) ([provenance](docs/figures/data/lls_subdla/PROVENANCE.md)). Every measurement is drawn per
+unit X in the cosmology of the model line; the band is not converted. One snapshot stands beside each bin (z = 3.4
+for the bin 3 to 4). The bin 4 to 5 is left out because it reaches beyond z = 4.6, the edge of the range that the
+grouped validation of the model's P1D correction covers; the correction of the CDDF itself is not validated at any
+redshift. The model's held-out range is not drawn here; a prediction carries it per bin (`pred.cddf_lower` to
+`pred.cddf_upper`). [Full caption](docs/model_figures.md).
 
 ![The class power ratio at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](docs/figures/class_ratio_vs_rogers18.png)
 

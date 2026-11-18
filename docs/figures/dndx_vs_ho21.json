@@ -297,23 +297,23 @@
    "crighton19_corr": "Crighton et al. (2019)",
    "fumagalli13_nc": "Fumagalli et al. (2013)",
    "fumagalli20_dr16": "Fumagalli, Fotopoulou and Thomson (2020)",
-   "omeara13_t5_comb": "O'Meara et al. (2013)",
+   "omeara13_t5_comb": "O'Meara et al. (2013) with Ribaudo, Lehner and Howk (2011)",
    "prochaska10_t4": "Prochaska, O'Meara and Worseck (2010)"
   },
   "file": "docs/figures/data/lls_incidence/lls_lz_literature.dat",
-  "not_drawn": "the other rows of the table: contained in a drawn row, or counting the same absorbers",
+  "not_drawn": "the other rows of the table: each is contained in a drawn row or counts its absorbers (no drawn row contains another)",
+  "not_independent": "fumagalli20_dr16 (SDSS DR16) shares 344 quasars with prochaska10_t4 (SDSS DR7)",
   "own_marker": {
-   "fumagalli20_dr16": "classified as tau >~ 2; may include systems just below tau = 2 (the paper)"
+   "fumagalli20_dr16": "classified as tau >~ 2; may include systems just below tau = 2 (the paper); at z = 3.45 it overlaps a point of prochaska10_t4"
   },
-  "poisson_interval": [
-   "prochaska10_t4",
-   "omeara13_t5_comb"
+  "swapped_printed_errors": [
+   "prochaska10_t4"
   ],
-  "poisson_interval_means": "drawn with the larger printed error upward; the table keeps the print"
+  "swapped_printed_errors_means": "the larger printed error drawn upward, the Poisson interval of the count; the table keeps the print; the combined O'Meara row, whose two printed errors are equal, is drawn as printed"
  },
  "measurement": "DLA dN/dX of Ho, Bird and Garnett (2021), 68 per cent interval: docs/figures/data/ho21/dndx_all.txt, 18 redshift bins",
  "measurement_source": "Ho, Bird and Garnett (2021), doi:10.1093/mnras/stab2169; tables of github.com/sbird/DLA_data (commit 147c616), fetched from the fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/ho21/PROVENANCE.md",
- "measurement_source_lls": "Prochaska, O'Meara and Worseck (2010), doi:10.1088/0004-637X/718/1/392; O'Meara et al. (2013), doi:10.1088/0004-637X/765/2/137; Fumagalli et al. (2013), doi:10.1088/0004-637X/775/1/78; Crighton et al. (2019), doi:10.1093/mnras/sty2762; Fumagalli, Fotopoulou and Thomson (2020), doi:10.1093/mnras/staa2388; values copied from the papers' tables and text: docs/figures/data/lls_incidence/PROVENANCE.md",
+ "measurement_source_lls": "Prochaska, O'Meara and Worseck (2010), doi:10.1088/0004-637X/718/1/392; O'Meara et al. (2013), doi:10.1088/0004-637X/765/2/137, whose combined row includes a bin of Ribaudo, Lehner and Howk (2011), doi:10.1088/0004-637X/736/1/42; Fumagalli et al. (2013), doi:10.1088/0004-637X/775/1/78; Crighton et al. (2019), doi:10.1093/mnras/sty2762; Fumagalli, Fotopoulou and Thomson (2020), doi:10.1093/mnras/staa2388; values copied from the papers' tables and text: docs/figures/data/lls_incidence/PROVENANCE.md",
  "parameters": {
   "Ap": 1.9e-09,
   "alphaq": 2.15,
