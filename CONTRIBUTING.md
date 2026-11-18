@@ -79,7 +79,8 @@ black .
 ```
 
 The CI job "Format" runs `black --check .` and fails if any file would change. Two files are excluded and never
-reformatted: `scripts/gen_analysis_lock.py`, the generator of the historical analysis lock, and
+reformatted: `scripts/gen_analysis_lock.py`, the generator of the historical analysis lock (kept as it was at that
+lock, except for two personal paths removed), and
 `hcd_analysis/priya_p1d.py`, because a release record cites one of its lines by number (the MF record's mean-flux
 convention) and the loader refuses a record whose citation differs.
 

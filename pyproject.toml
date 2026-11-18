@@ -90,7 +90,8 @@ target-version = ["py311"]
 # rewrites them, whatever black extras are installed.
 include = '\.pyi?$'
 # Excluded, and so never read or rewritten by black:
-# - scripts/gen_analysis_lock.py, the analysis-lock generator, which is kept unchanged with the historical lock;
+# - scripts/gen_analysis_lock.py, the analysis-lock generator, which is kept as it was at the historical lock except
+#   for two personal paths removed, and is not reformatted;
 # - hcd_analysis/priya_p1d.py: a release record cites one of its lines by number (the MF record's mean-flux
 #   convention, emulator/mf_release.py MEAN_FLUX_CONVENTION), and the loader refuses a record whose citation
 #   differs, so the file keeps its line numbers.
