@@ -1,0 +1,1 @@
+Review figure for pull request #30 of this repository (pr30_before_after.png: the LLS literature compilation and the fitted law before and after that pull request); not code. Kept while comments on #30 link to it; do not delete.
