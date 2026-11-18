@@ -24,7 +24,7 @@ over a physically consistent simulation; the absolute incidence stays anchored t
 observations." (PI, 2026-07-18)
 DEPLOYED LLS LAW (PI decision 1c): the K1a-corrected points refit with gamma CONSTRAINED
 to the deployed z-slope 2.127 (amplitude-only GLS, same covariance treatment); the
-free-gamma K1a fit (~2.137) is recorded as the consistency evidence justifying the
+free-gamma K1a fit (~2.115) is recorded as the consistency evidence justifying the
 constraint. The full decision table (all kernels) stays in the JSON for the record.
 
 Env:
@@ -378,7 +378,7 @@ def main():
     lit_over_sim = lit_over_sim_refit(inputs, kernels, s, d, cum_law)
     print(
         "\n[LIT_OVER_SIM REFIT] (plot_dndx_vs_literature.py:95-108 construction, "
-        "corrected laws; PRE-SWAP (1.06, 1.00, 1.34) / slopes (0.95, 0.15, 0.40); deployed now (0.995, 1.00, 1.34)/(0.764, 0.15, 0.40)):"
+        "corrected laws; PRE-SWAP (1.06, 1.00, 1.34) / slopes (0.95, 0.15, 0.40); deployed now (0.992, 1.00, 1.34)/(0.764, 0.15, 0.40)):"
     )
     for cls, v in lit_over_sim.items():
         if cls == "note":

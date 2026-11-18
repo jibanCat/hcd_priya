@@ -80,7 +80,7 @@ def test_pivot_helper_returns_z3_wc_not_allz_median():
 @pytest.mark.skipif(not _HAS_CACHE, reason="LF cache not present")
 def test_production_path_lls_pivot_is_z3_consistent_not_allz_median():
     """The PRODUCTION prior center (built via the z=3 structural w_c, the build_legb_ctx path) gives
-    a z=3-consistent α_pivot(LLS) (≈ lit/sim × w_LLS(z3) ≈ 0.188 with the corrected ratio 0.995),
+    a z=3-consistent α_pivot(LLS) (≈ lit/sim × w_LLS(z3) ≈ 0.188 with the corrected ratio 0.992),
     NOT ≈0.291 (the all-z-median bug). This FAILS on the OLD all-z-median construction (RED) and
     PASSES on the fix. subDLA pinned the same way (its lit/sim slot is unchanged at 1.00)."""
     d = load_cache_historical(_CACHE, reason="test: a cache in the pre-lineage 3.3 format")

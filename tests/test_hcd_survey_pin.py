@@ -39,11 +39,11 @@ def test_survey_pin_center_and_width():
     # DESI LLS center == no boost (boost 1.0); KS center == 2.5 x DESI
     np.testing.assert_allclose(muD[0], muN[0], rtol=1e-6)
     np.testing.assert_allclose(muK[0] / muD[0], INF.HCD_LLS_SURVEY_BOOST["KS"], rtol=1e-6)
-    # widths sigma/mu: DESI 0.287 (PI 2026-07-18 corrected-law width, 1x = measurement +
+    # widths sigma/mu: DESI 0.285 (PI 2026-07-18 corrected-law width, 1x = measurement +
     # kernel-common-mode on the corrected K1a points), KS 0.40 (broad, its OWN selection-
     # driven rule, not the lit-error machinery), None = HCD_PRIOR_FRAC_SIGMA[0] (0.15,
     # the closure/SBC sim-truth width — deliberately NOT cascaded)
-    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA["DESI"] == pytest.approx(0.287)  # the corrected 1x knob
+    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA["DESI"] == pytest.approx(0.285)  # the corrected 1x knob
     assert INF.HCD_LLS_SURVEY_FRAC_SIGMA["KS"] == pytest.approx(0.40)  # KS stays broad
     assert sdD[0] / muD[0] == pytest.approx(INF.HCD_LLS_SURVEY_FRAC_SIGMA["DESI"])
     assert sdK[0] / muK[0] == pytest.approx(INF.HCD_LLS_SURVEY_FRAC_SIGMA["KS"])
@@ -55,23 +55,23 @@ def test_survey_pin_center_and_width():
 
 def test_eboss_and_dk_survey_pins():
     """The per-survey LLS pin keys eBOSS + DESI+KS: both at the cosmic-average center
-    (boost 1.0) and the 1x corrected-law width 0.287 (same as DESI; PI 2026-07-18)."""
+    (boost 1.0) and the 1x corrected-law width 0.285 (same as DESI; PI 2026-07-18)."""
     for sv in ("eBOSS", "DESI+KS"):
         assert INF.HCD_LLS_SURVEY_BOOST[sv] == pytest.approx(1.0)  # cosmic-average center
-        assert INF.HCD_LLS_SURVEY_FRAC_SIGMA[sv] == pytest.approx(0.287)  # 1x corrected width
+        assert INF.HCD_LLS_SURVEY_FRAC_SIGMA[sv] == pytest.approx(0.285)  # 1x corrected width
         mu, sd = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0, survey=sv))
         muN, _ = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0))
         np.testing.assert_allclose(mu[0], muN[0], rtol=1e-6)  # no boost
-        assert sd[0] / mu[0] == pytest.approx(0.287)
+        assert sd[0] / mu[0] == pytest.approx(0.285)
 
 
 def test_lls_width_hedge_2x_toggle():
     """The 2x cosmic-variance hedge (use_lls_width_hedge2x=True) doubles the DESI/eBOSS/DESI+KS
-    LLS width to 0.574 (2 x the corrected 1x knob 0.287); KS is unchanged at 0.40 (its width is
+    LLS width to 0.570 (2 x the corrected 1x knob 0.285); KS is unchanged at 0.40 (its width is
     the selection-driven PI rule, NOT the lit-error 1x/2x machinery — note the hedge now EXCEEDS
     the KS width, a flagged consequence of the corrected kernel-common-mode width)."""
-    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X["DESI"] == pytest.approx(0.574)
-    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X["eBOSS"] == pytest.approx(0.574)
+    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X["DESI"] == pytest.approx(0.570)
+    assert INF.HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X["eBOSS"] == pytest.approx(0.570)
     assert INF.HCD_LLS_SURVEY_FRAC_SIGMA_HEDGE2X["KS"] == pytest.approx(0.40)  # KS unchanged
     for sv in ("DESI", "eBOSS", "DESI+KS"):
         mu1, sd1 = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0, survey=sv))
@@ -79,8 +79,8 @@ def test_lls_width_hedge_2x_toggle():
             np.asarray, INF.hcd_incidence_prior(W, z=3.0, survey=sv, use_lls_width_hedge2x=True)
         )
         np.testing.assert_allclose(mu1, mu2, rtol=1e-6)  # center unchanged
-        assert sd1[0] / mu1[0] == pytest.approx(0.287)  # 1x primary
-        assert sd2[0] / mu2[0] == pytest.approx(0.574)  # 2x hedge
+        assert sd1[0] / mu1[0] == pytest.approx(0.285)  # 1x primary
+        assert sd2[0] / mu2[0] == pytest.approx(0.570)  # 2x hedge
     # KS: hedge is a no-op (already 0.40)
     _, sdK1 = map(np.asarray, INF.hcd_incidence_prior(W, z=3.0, survey="KS"))
     _, sdK2 = map(
@@ -107,7 +107,7 @@ def test_lls_truth_boost_propagates_to_mock_and_truth():
 # --------------------------------------------------------------------------------------------- #
 #  F1 (adversarial backfill 2026-07-19): the survey-key silent .get() fallback is FAIL-LOUD.
 #  Post-width-swap, an unknown survey string silently got width HCD_PRIOR_FRAC_SIGMA[0]=0.15 =
-#  1.9x TIGHTER than the deployed DESI 0.287, on a real-data path, with no guard firing.
+#  1.9x TIGHTER than the deployed DESI 0.285, on a real-data path, with no guard firing.
 # --------------------------------------------------------------------------------------------- #
 def test_unknown_survey_key_fails_loud():
     """hcd_incidence_prior(survey=<unknown>) must RAISE (never a silent fallback width/boost);
@@ -173,8 +173,8 @@ def test_ks_mapped_width_constants():
     strings in INF.KS_DNDX_WIDTH_CONVENTION, carried in the freeze payload)."""
     import math
 
-    assert INF.KS_DNDX_SIGMA_EPS == 0.5310
-    assert INF.KS_DNDX_SIGMA_KAPPA == 0.6681
+    assert INF.KS_DNDX_SIGMA_EPS == 0.5305
+    assert INF.KS_DNDX_SIGMA_KAPPA == 0.6553
     assert INF.KS_DNDX_SIGMA_MSUB == 0.4130
     assert INF.KS_DNDX_DLA_RAW_MU0 == math.log(math.expm1(1.0))
     assert set(INF.KS_DNDX_WIDTH_CONVENTION) == {
@@ -229,6 +229,6 @@ if __name__ == "__main__":
     if os.path.exists(_CACHE):
         test_lls_truth_boost_propagates_to_mock_and_truth()
     print(
-        "[hcd-survey-pin] per-survey center/width (1x=0.287) + 2x hedge + lls_truth_boost "
+        "[hcd-survey-pin] per-survey center/width (1x=0.285) + 2x hedge + lls_truth_boost "
         "+ W2 parameterization/boost-space/width pins OK."
     )

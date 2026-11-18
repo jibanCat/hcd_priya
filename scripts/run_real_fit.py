@@ -219,7 +219,7 @@ def build_real_ctx(survey, *, single_member=False, ensemble_glob=None, ks_zlo=No
         ],  # flatlog2node (Gate-C Model C+) on metal legs; uniform on KS
         survey=info[
             "leg"
-        ],  # PER-SURVEY LLS pin: DESI 1.0×/σ0.287 (2026-07-18 width), KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
+        ],  # PER-SURVEY LLS pin: DESI 1.0×/σ0.285 (2026-07-18 width, 0.287 until 2026-11-18), KS 2.5×/σ0.40 (eBOSS→cosmic-avg)
         hierarchical_hcd=False,
     )  # the referee production baseline (per-class HCD)
     if norc["fix_alpha_res"]:

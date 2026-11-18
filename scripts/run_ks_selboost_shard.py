@@ -26,8 +26,8 @@ blocks are survey-specific and load-bearing). DELTAS vs the DESI runner (spec Se
   (c) PRIOR-STATE TRIPWIRE (assert_prior_state): forward_signature provably does NOT cover
       prior constants, so the required --expect-lls-boost/--expect-lls-frac-sigma args are
       asserted against the DEPLOYED inference constants, PLUS exact asserts that the deployed
-      LLS center constants equal the post-correction K1a values (lit/sim 0.995, ratio-slope
-      0.764, widened base sigma 0.287 / hedge 0.574, realfit z-slope 2.127) and a band assert
+      LLS center constants equal the post-correction K1a values (lit/sim 0.992, ratio-slope
+      0.764, widened base sigma 0.285 / hedge 0.570, realfit z-slope 2.127) and a band assert
       on the BUILT KS prior center via inference.assert_hcd_pivot_z3. All constants + both
       freeze signatures stamped into meta; the analyzer re-asserts them. Launching before the
       K1a swap, or after any later drift, fails loud.
@@ -60,13 +60,14 @@ from scripts.run_dnuis_bias_shard import build_arm_ctx
 import scripts.ks_selboost_arms as AR
 from scripts.ks_selboost_arms import batch_cells  # noqa: F401 (re-export for the batch script)
 
-# the post-correction K1a prior constants of record (landed 2026-07-18; spec Sec 8 hard gate).
+# the post-correction K1a prior constants of record (landed 2026-07-18; re-derived 2026-11-18 with the POW10 journal
+# Table 4 values; spec Sec 8 hard gate).
 # EXACT equality — any later drift of the deployed constants must abort the campaign.
 K1A_EXPECT = dict(
-    lit_over_sim_lls=0.995,  # inference.HCD_LIT_OVER_SIM[0] (definition-matched refit)
+    lit_over_sim_lls=0.992,  # inference.HCD_LIT_OVER_SIM[0] (definition-matched refit)
     lit_over_sim_slope_lls=0.764,  # inference.HCD_LIT_OVER_SIM_SLOPE[0]
-    lls_base_frac_sigma=0.287,  # the WIDENED base width (kernel common-mode included)
-    lls_hedge2x_frac_sigma=0.574,  # the 2x cosmic-variance hedge constant (presence certifies
+    lls_base_frac_sigma=0.285,  # the WIDENED base width (kernel common-mode included)
+    lls_hedge2x_frac_sigma=0.570,  # the 2x cosmic-variance hedge constant (presence certifies
     # the widened-width machinery landed, not just the center)
     lls_realfit_zslope=2.127,  # the constrained lit-law forward z-slope
 )

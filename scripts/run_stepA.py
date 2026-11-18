@@ -354,7 +354,7 @@ def build_config(verbose=False):
         "D_lls_m", 6, 0.966, survey="DESI", prior_center="lit", lls_truth_boost=1.06, sigma_lls=0.15
     )
     # D_lls_m30: matched DESI at the MODERATE σ_LLS=0.30 (the then-deployed 2026-06-11
-    # HCD_LLS_SURVEY_FRAC_SIGMA[DESI]; SUPERSEDED — the deployed DESI width is 0.287 since
+    # HCD_LLS_SURVEY_FRAC_SIGMA[DESI]; SUPERSEDED — the deployed DESI width is 0.285 (0.287 from 2026-07-18 to 2026-11-18) since
     # 2026-07-18) — re-validated that DESI recovers A_p in-gate at the moderate width (D_lls_m at
     # the old σ0.15 gave +1.01σ). Uses the survey pin center (1.06×) with the explicit 0.30 width.
     add_fiducial(

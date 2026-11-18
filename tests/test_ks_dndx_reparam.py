@@ -60,35 +60,38 @@ OLD_HCD_PRIOR_SIGNATURE = "bba3da8868fa498e50bc69f3ff85c192be1fae45058af8ad1211c
 
 # ORCHESTRATOR-PINNED V-A KS reference alpha (LLS, subDLA, DLA) at sites=0 (6-dp literals;
 # atol 5e-7 covers the literal quantization, rtol 1e-4 is the brief's tolerance).
+# Re-pinned 2026-11-18 with the POW10 journal Table 4 values (the LLS law amplitude -0.29 per cent); the W2 rows were
+# 2.4: (0.232049, ...), 3.0: (0.393236, ...), 4.2: (0.697056, ...), 4.6: (0.745217, ...), subDLA and DLA unchanged.
 REF_PINS = {
-    2.4: (0.232049, 0.039804, 0.003008),
-    3.0: (0.393236, 0.062419, 0.004426),
-    4.2: (0.697056, 0.128396, 0.008215),
-    4.6: (0.745217, 0.157059, 0.009761),
+    2.4: (0.231456, 0.039804, 0.003008),
+    3.0: (0.392364, 0.062419, 0.004426),
+    4.2: (0.696248, 0.128396, 0.008215),
+    4.6: (0.744634, 0.157059, 0.009761),
 }
 
 # BIT-LEVEL byte-safety pins of _survey_alpha_prior outputs (captured on THIS tree; these are
 # the deployed alpha-space prior vectors the reparam must NOT move — incl. the KS row, which
-# the mapped branch keeps as the legacy/audit alpha-space prior).
+# the mapped branch keeps as the legacy/audit alpha-space prior). Re-captured 2026-11-18 with the
+# POW10 journal Table 4 values (LLS slots only; subDLA and DLA unchanged).
 SURVEY_PRIOR_PINS = {
     None: (
-        np.array([0.18811862702546295, 0.06218315972222222, 0.004409670138888889]),
-        np.array([0.02821779405381944, 0.02487326388888889, 0.0022048350694444446]),
+        np.array([0.18755143518518516, 0.06218315972222222, 0.004409670138888889]),
+        np.array([0.028132715277777772, 0.02487326388888889, 0.0022048350694444446]),
         None,
     ),
     "DESI": (
-        np.array([0.17211216067355312, 0.06218315972222222, 0.004409670138888889]),
-        np.array([0.04939619011330974, 0.02487326388888889, 0.0022048350694444446]),
+        np.array([0.17165878476633895, 0.06218315972222222, 0.004409670138888889]),
+        np.array([0.04892275365840659, 0.02487326388888889, 0.0022048350694444446]),
         np.array([2.127, 2.758, 2.366]),
     ),
     "eBOSS": (
-        np.array([0.17211216067355312, 0.06218315972222222, 0.004409670138888889]),
-        np.array([0.04939619011330974, 0.02487326388888889, 0.0022048350694444446]),
+        np.array([0.17165878476633895, 0.06218315972222222, 0.004409670138888889]),
+        np.array([0.04892275365840659, 0.02487326388888889, 0.0022048350694444446]),
         np.array([2.127, 2.758, 2.366]),
     ),
     "KS": (
-        np.array([0.4302804016838828, 0.06218315972222222, 0.004409670138888889]),
-        np.array([0.17211216067355314, 0.02487326388888889, 0.0022048350694444446]),
+        np.array([0.42914696191584734, 0.06218315972222222, 0.004409670138888889]),
+        np.array([0.17165878476633895, 0.02487326388888889, 0.0022048350694444446]),
         np.array([2.127, 2.758, 2.366]),
     ),
 }
@@ -176,9 +179,9 @@ def test_reference_curve_pins(ks_setup):
         )
     )[..., 1:]
     np.testing.assert_allclose(a_piv, np.asarray(REF_PINS[3.0]), rtol=1e-4, atol=5e-7)
-    # documented centre moves: KS LLS pivot 0.4302804 (legacy) -> 0.393236 (mapped);
+    # documented centre moves: KS LLS pivot 0.4291470 (legacy) -> 0.392364 (mapped; W2: 0.393236);
     # deployed subDLA pivot preserved to +0.38%.
-    assert a_piv[0] == pytest.approx(0.393236, abs=5e-6)
+    assert a_piv[0] == pytest.approx(0.392364, abs=5e-6)
     assert a_piv[1] / 0.06218315972222222 == pytest.approx(1.0038, abs=2e-4)
 
 
@@ -422,8 +425,8 @@ def test_signature_moved_and_payload_carries_new_constants():
         assert k in p, f"payload missing the new constant {k!r}"
     assert p["HCD_ALPHA_PARAMETERIZATION"]["KS"] == "dndx_mapped_v2"
     assert p["HCD_LLS_BOOST_SPACE"]["KS"] == "dndx_premap"
-    assert p["KS_DNDX_SIGMA_EPS"] == 0.5310
-    assert p["KS_DNDX_SIGMA_KAPPA"] == 0.6681
+    assert p["KS_DNDX_SIGMA_EPS"] == 0.5305
+    assert p["KS_DNDX_SIGMA_KAPPA"] == 0.6553
     assert p["KS_DNDX_SIGMA_MSUB"] == 0.4130
     assert (
         p["KS_HEADROOM_SOURCE"] == "exact-inverse of the boost-1.0 deployed real-fit centre triple"
@@ -493,14 +496,14 @@ def test_forbidden_combinations_raise(ks_setup):
 
 
 def test_mapped_pivot_band_guard():
-    """assert_ks_mapped_pivot: 0.393236 passes; the legacy-band edges and the ~0.727
+    """assert_ks_mapped_pivot: 0.392364 passes; the legacy-band edges and the ~0.727
     pre-map-equivalent of an all-z-median-based centre fail."""
-    INF.assert_ks_mapped_pivot(0.393236, "test")
+    INF.assert_ks_mapped_pivot(0.392364, "test")
     for bad in (0.30, 0.50, 0.727, 0.4302804 * 2.5):
         with pytest.raises(AssertionError, match="mapped band"):
             INF.assert_ks_mapped_pivot(bad, "test")
     # band literal + derivation pin (0.83/1.21 relative margins around the mapped centre)
-    assert INF.KS_DNDX_MAPPED_PIVOT_BAND == (0.326, 0.476)
+    assert INF.KS_DNDX_MAPPED_PIVOT_BAND == (0.326, 0.475)
 
 
 def test_assert_known_survey_untouched():

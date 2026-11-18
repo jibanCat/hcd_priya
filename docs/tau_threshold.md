@@ -145,7 +145,7 @@ How it reads the result, from `a`, `s` and the clean change at the headline thre
 - **modest:** every `abs(a - 1) <= 0.29` and every `s <= 0.10`;
 - **important:** otherwise.
 
-0.29 is the LLS fractional amplitude prior width (0.287) that the code uses on its DESI and eBOSS likelihood paths
+0.29 is the LLS fractional amplitude prior width (0.285) that the code uses on its DESI and eBOSS likelihood paths
 (`HCD_LLS_SURVEY_FRAC_SIGMA` in `hcd_analysis/emulator/inference.py`); the rule was fixed before the check was run.
 The per-class readings apply the same thresholds to `a` and `s` of that class. The rule's labels cover only these
 global measures at thresholds 50 and 200, not the local changes in k; the conclusion of this page is "small over the
