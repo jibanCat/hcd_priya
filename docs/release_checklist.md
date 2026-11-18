@@ -5,8 +5,10 @@ code release (see the last section).
 
 ## 1. Version and records
 - [ ] `hcd_analysis.__version__` is the new version; `pyproject.toml` reads it from there.
-- [ ] `CHANGELOG.md` has a dated section for the version.
-- [ ] `CITATION.cff` has the new `version` and a `date-released`.
+- [ ] `CHANGELOG.md` has a dated section for the version: the placeholder `RELEASE_DATE` in its heading is replaced
+      by the date of the tag.
+- [ ] `CITATION.cff` has the new `version` and a `date-released`: its commented `date-released: RELEASE_DATE` line
+      becomes a real line with the same date.
 - [ ] In the commit to be tagged, the three figure images of `README.md` point to absolute URLs at the release tag.
       The README is the long description of the code package, the images are relative links, and the package index
       page shows a relative link as broken; an upload cannot be amended. The README's other relative links (to

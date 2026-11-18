@@ -67,7 +67,7 @@ def test_the_runner_refuses_a_malformed_tutorial(tmp_path):
 
 # ---------------------------- the library version that carries the D5 rules (PU-0522; R3 delta d1, pre-merge P-M1)
 # It reads pyproject.toml and docs/, so it lives in this source-tier file (the wheel tier copies only tests/).
-D5_VERSION = "0.2.0"
+D5_VERSION = "1.0.0"
 
 
 def _pyproject_version_source(text):

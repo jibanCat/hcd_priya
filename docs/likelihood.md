@@ -526,7 +526,8 @@ A research (fold) model of your own, trained without the simulation your mock co
 
 **It is published with the model release, as a second file of the same record, and is not published yet.** Until
 then the example runs only on a model and a mock of your own. The download holds the items below, a `README.md`, a
-`LICENSE` and `SHA256SUMS`; its model is a fold model, not the release model.
+`LICENSE` (CC BY 4.0 for the files; the example script is under the MIT licence) and `SHA256SUMS`; its model is a
+fold model, not the release model.
 
 The example covers z 2.2 to 4.2: 11 redshifts with 11 wavenumbers each, 121 bins. z 2.2 is the lower edge of the
 grouped-validation domain of the model's multi-fidelity correction of the P1D (z 2.2 to 4.6; a domain edge, not a
@@ -539,9 +540,9 @@ written in the script, as `DOWNLOAD`):
 | Item | Place in the directory | What it is | sha256 |
 |---|---|---|---|
 | `mock` | `mock.p1d.json` | The data set: the P1D of one PRIYA high-resolution simulation, named in the file's provenance and one of the three high-resolution runs listed in `Emulator_Files/hires/emulator_params.json` of the public repository `jibanCat/InferenceLyaData`, at 11 redshifts from 2.2 to 4.2 and 11 wavenumbers each (121 bins), times a resolution table, with a covariance per redshift derived from the KODIAQ-SQUAD P1D of Karacayli et al. (2022), and the truth. No measured P1D is in it. Its provenance names the inputs | `b7db66e81a20c25de571f39fad1a362d7c844a855487a46b31208354ce5efc34` |
-| `model` | `model/` | A research bundle: a fold model, trained WITHOUT the simulation of the mock. The sha256 is that of its `manifest.json`, which names every other file of the bundle by its own sha256 | `f8a830af3faaffc4f47d90f2fc596d4d8cc9760fc3057127da22cea0771638e2` |
-| `mf_record` | `mf_record/` | The fold's MF record, built without that simulation. The sha256 is that of the record | `e639c4b187eface66e5e99bad1efe5645e409fe916f353cd0ef2f88d97bc2fa5` |
-| `incidence_record` | `incidence_record/` | The fold's incidence record, built without that simulation. The sha256 is that of the record | `4e5e6bbcab6171e6c2a22e3f8a284ff96b0638b3d450812365768dea0cc3797a` |
+| `model` | `model/` | A research bundle: a fold model, trained WITHOUT the simulation of the mock. The sha256 is that of its `manifest.json`, which names every other file of the bundle by its own sha256 | `c1e28ee591640d4ccb98c2f05de3d617448c83a74b0c8e2190e2d8e3b393c451` |
+| `mf_record` | `mf_record/` | The fold's MF record, built without that simulation. The sha256 is that of the record | `b38bf9be35c0339a90dd9d062ca68eb18ce7153d2f842f67f8cca90dfe20b776` |
+| `incidence_record` | `incidence_record/` | The fold's incidence record, built without that simulation. The sha256 is that of the record | `33a91a304bb7b228443fee70515a1ff5bbda947fb88fce21fe6df69bfe433d27` |
 | `reference` | `reference.json` | The stored reference: a summary of a converged posterior for this mock on this model, and its posterior predictive band | `35a0ad02dfa502234c79775ba4b37f82a8ec2efd2c162b4fe7b35b0e968cc8ac` |
 
 - **The model is not the release model.** It is one fold of the cross-validation, trained without the simulation

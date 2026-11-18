@@ -35,6 +35,8 @@ shape of pred.P_class, the P1D of clean, LLS, subDLA, DLA: (4, 172)
   details.
 - **Versions.** The version of this package is the version of the model bundle it holds. A version of `hcd-priya`
   accepts the model versions it pins; a model package it does not know is refused with a message that names both.
-- **Licence.** The model files are released under the MIT licence (see `LICENSE`), like the code.
+- **Licence.** The model files are released under the Creative Commons Attribution 4.0 International licence
+  (CC BY 4.0); the few lines of Python in this package, and the example script a release carries, are under the MIT
+  licence, like the code. See `LICENSE`, and the `LICENSE` file of the release inside the package.
 - **No model is published yet.** The package is built and tested in the hcd_priya repository
   (`model_package/`); the model files are copied in at build time and are not in git.

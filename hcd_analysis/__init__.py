@@ -16,4 +16,4 @@ The pipeline and the research code:
   emulator/, comparison/             the emulator's training and research inference; emulator comparisons
 """
 
-__version__ = "0.2.0"
+__version__ = "1.0.0"

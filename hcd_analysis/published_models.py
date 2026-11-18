@@ -32,6 +32,6 @@ MODELS = [
         "name": "lfmf",
         "version": "1.0.0",
         "format": "hcd_priya.release/1",
-        "anchor_sha256": "f894ac584e8fe61a337a5aab0abac208bce0dd9bd7ef12c49da8f7f87380490c",
+        "anchor_sha256": "cd85d3da45f2942161371236d6d5f33d70ac1bc0eea803bf6b1b52338bf8f38f",
     },
 ]

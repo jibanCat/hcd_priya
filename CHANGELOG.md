@@ -2,7 +2,7 @@
 
 All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 
-## 0.2.0 (unreleased)
+## 1.0.0 (RELEASE_DATE)
 
 ### Fixed
 - The absorber catalogue no longer lists a system that straddles the box edge twice
@@ -160,6 +160,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   builds it with every warning treated as an error.
 
 ### Changed
+- The model package `hcd-priya-models` declares the licence `CC-BY-4.0 AND MIT`: the trained model files are under
+  the Creative Commons Attribution 4.0 International licence, its few lines of Python under the MIT licence.
 - The literature dN/dX compilation of the historical research inference (`hcd_analysis.emulator.lit_dndx`) uses
   Table 4 of Prochaska, O'Meara and Worseck (2010) as printed in the journal (ApJ 718, 392), checked against the
   survey's catalogue in pyigm, in place of the arXiv v1 table, which differed in four bins. Its switch for the
