@@ -65,3 +65,27 @@ figure `docs/figures/dndx_vs_ho21.png` (`scripts/figures/fig_dndx_vs_ho21.py`).
   The figure shows the 68 per cent interval.
 - **Not copied:** the CDDF file for 4 < z < 5 (the figure leaves that bin out), the CDDF file for all redshifts, and
   the table of Omega_DLA.
+
+## The cosmology of the measurement, and how the figures convert it
+
+- **The measurement's cosmology: flat, Omega_m = 0.279.** The paper does not state the cosmology of its absorption
+  distance X. Its public code, which the paper points to (https://github.com/jibanCat/gp_dla_detection_dr16q_public),
+  computes the path length with `path_length_int(z, Omega_m=0.279)` and `HubbleByH0(z, Omega_m=0.279)` ("We neglect
+  curvature and radiation, and assume Omega_lambda = 1- Omega_m. Omega_m is WMAP 9 by default"), in
+  `CDDF_analysis/calc_cddf.py`, lines 1818 to 1824 and 1908 to 1913 at commit
+  `bf7bd6412aa2954276150e4b69ab12a0b2ad3958`; every call there uses the default. That the published tables were made
+  with these defaults is inferred from the code, not stated by the paper.
+- **The conversion.** dN/dX and f(N_HI, X) are counts per unit X. Both figures draw the points in the cosmology of the
+  model line (flat, Omega_m = omegamh2 / hub^2 of the parameters it is drawn at: 0.143 / 0.70^2 = 0.2918): each
+  value and its limits are multiplied by the same factor,
+
+      factor = Delta X(0.279) / Delta X(line Omega_m),
+      Delta X = integral from z1 to z2 of (1 + z)^2 / sqrt(Omega_m (1 + z)^3 + 1 - Omega_m) dz
+
+  (`figures_common.to_line_cosmology` in `scripts/figures/`), over the redshift range of the point: for the CDDF, the
+  bin of the table (2 to 2.5, 2.5 to 3, 3 to 4: factors 1.0205, 1.0213 and 1.0219, +0.0088 to +0.0094 dex); for
+  dN/dX, each of the eighteen bins of 1/6 from 2 to 5 about its centre (factors 1.0202 to 1.0224, +0.0087 to +0.0096
+  dex). The tables stay as published; the factors are written to the figures' side files.
+- **The model's band is not converted:** each design point is per unit X of its own cosmology (Omega_m from 0.254 to
+  0.339), so only the line is in the measurement's cosmology. Put in the cosmology of the band's two extremes instead,
+  the points would move by -6.0 to -6.6 per cent (Omega_m 0.254) and +6.9 to +7.6 per cent (Omega_m 0.339).

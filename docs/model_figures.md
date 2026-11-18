@@ -20,17 +20,32 @@ bhfeedback = 0.05, with tau0_amp = 1 and dtau0 = 0
 These are the midpoint of the range each parameter was trained on. They are not a fiducial cosmology, not a best
 fit and not a simulation. Nothing in these figures was fitted to the measurements.
 
-## The incidence dN/dX against Ho, Bird and Garnett (2021)
+## The incidence dN/dX against Ho, Bird and Garnett (2021) and published LLS incidences
 
-![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS against redshift, with the DLA measurement of Ho, Bird and Garnett (2021)](figures/dndx_vs_ho21.png)
+![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS and of every absorber above 10^17.5 cm^-2 against redshift, with the DLA measurement of Ho, Bird and Garnett (2021) and five published measurements of the incidence of Lyman limit systems](figures/dndx_vs_ho21.png)
 
 - **Model (lines):** `pred.dndx` of the LF+MF model at the parameters above, for DLAs (the heavier line), subDLAs
-  and LLS, at the snapshots from z = 2.2 to 4.6. The curves end at 4.6, the upper edge of the grouped-validation
-  domain of the model's multi-fidelity correction of the P1D (z 2.2 to 4.6; a domain edge, not a statement that a
-  validation was passed); below 2.2 the model refuses an LF+MF prediction. The correction of dN/dX that is drawn
-  here has its own table, which is not limited to that range, and is not validated at any redshift: the choice of
-  4.6 keeps the figure inside the grouped-validation domain of the P1D correction, and says nothing about the
-  accuracy of the corrected dN/dX.
+  and LLS, at the snapshots from z = 2.2 to 4.6. The classes are bins of column density: LLS 10^17.2 <= N_HI <
+  10^19, subDLA 10^19 <= N_HI < 10^20.3, DLA N_HI >= 10^20.3 (in cm^-2). The curves end at 4.6, the upper edge of
+  the grouped-validation domain of the model's multi-fidelity correction of the P1D (z 2.2 to 4.6; a domain edge,
+  not a statement that a validation was passed); below 2.2 the model refuses an LF+MF prediction. The correction of
+  dN/dX that is drawn here has its own table, which is not limited to that range, and is not validated at any
+  redshift: the choice of 4.6 keeps the figure inside the grouped-validation domain of the P1D correction, and says
+  nothing about the accuracy of the corrected dN/dX.
+- **Model (dashed line): every absorber with N_HI >= 10^17.5 cm^-2,** which is what the LLS measurements count
+  (below). It is the sum, over the bins of the model's column-density distribution `pred.cddf`, of f(N_HI) times the
+  width in N_HI of the bin's part above 10^17.5. The bins are 0.2 wide in log10 N_HI, so 10^17.5 falls inside the
+  bin from 10^17.4 to 10^17.6: that bin counts from 10^17.5 to its upper edge with f taken constant within it. This
+  partial bin holds 7.2 to 8.4 per cent of the sum; a power law within it, with the slope between its two
+  neighbours, would make the sum 1.0 to 1.3 per cent smaller. Two bins of the distribution have no value at z = 2.2:
+  the bin from 10^22.8 to 10^23, which has none also at 2.4 and 3.2 (no simulation pair has absorbers there at that
+  redshift) and is left out of the sum there, where it has a value it holds less than 1e-5 of the count; and the
+  bin from 10^17.0 to 10^17.2, which has none at any redshift (it lies below the catalogue's column-density threshold)
+  and lies below 10^17.5 and below the LLS class, so it enters neither the count nor the cross-check. As a
+  cross-check the same count formed from the class lines (the LLS line less the distribution's part from 10^17.2 to
+  10^17.5, plus the subDLA and the DLA line) agrees with it: their ratio is 0.9998 to 1.0020 over the snapshots (in
+  the side file). The partial bin enters both sums in the same way, so the cross-check does not test that choice.
+  The band of the dashed line is drawn over the design points like the others.
 - **Model (bands):** the lowest and the highest value over the 60 design points of the low-resolution training
   simulations. They show how far the prediction moves across the training set. They are not an uncertainty. For 12
   of the 60 points the predictor sets a flag that the drawn lines do not have (`outside_sampling_box` for the 12,
@@ -44,9 +59,43 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
   https://github.com/sbird/DLA_data (fetched from its fork https://github.com/jibanCat/DLA_data), read as that
   collection's own reader `ho21_cddf` reads them where it has a reader; the provenance file compares the two step
   by step.
+- **The points are in the cosmology of the line.** dN/dX is a count per unit absorption distance X, and the
+  measurement's X is that of a flat cosmology with Omega_m = 0.279 (the default of the paper's public code; the paper
+  does not state it: `docs/figures/data/ho21/PROVENANCE.md`). The line is per unit X of the cosmology of its
+  parameters, flat with Omega_m = omegamh2 / hub^2 = 0.143 / 0.70^2 = 0.2918. Each bin's value and its limits are
+  multiplied by the same factor, Delta X(0.279) / Delta X(0.2918), with Delta X the integral of
+  (1 + z)^2 / sqrt(Omega_m (1 + z)^3 + 1 - Omega_m) over the bin: 1.0202 to 1.0224 (+0.0087 to +0.0096 dex). The
+  table stays as published; the factors are in the side file. The bands are not converted: each design point is per
+  unit X of its own cosmology (Omega_m from 0.254 to 0.339), so only the lines are in the measurement's cosmology;
+  in the cosmology of the bands' two extremes the points would sit 6.0 to 6.6 per cent lower or 6.9 to 7.6 per
+  cent higher.
+- **Data (LLS points):** the incidence of Lyman limit systems, tau_912 >= 2, which is every absorber with N_HI >=
+  10^17.5 cm^-2 counted cumulatively (subDLAs and DLAs included), from five published samples: Prochaska, O'Meara
+  and Worseck (2010), journal Table 4, SDSS DR7, six bins from z 3.3 to 4.4; O'Meara et al. (2013), the combined row
+  of their Table 5 (their WFC3 and ACS samples with the bin z 1.95 to 2.59 of Ribaudo, Lehner and Howk 2011), z 2.0
+  to 2.6; Fumagalli et al. (2013), the non-colour-selected sample, z 2.6 to 3.0; Crighton et al. (2019), the
+  corrected values, three bins from z 3.75 to 5.4; Fumagalli, Fotopoulou and Thomson (2020), SDSS DR16, z 3.3 to
+  3.6. The last has its own marker (a hollow circle): its absorbers were classified as tau >~ 2, and the paper says
+  its catalogue may include some just below tau = 2. The values are copied from the papers' tables and text into
+  `docs/figures/data/lls_incidence/lls_lz_literature.dat`, unconverted;
+  `docs/figures/data/lls_incidence/PROVENANCE.md` gives each paper, DOI, table and line, and how to rebuild the
+  file. The file has six more rows, each contained in a drawn row or counting its absorbers; they are left out, so
+  that no drawn row contains another. The drawn samples are not all independent: the SDSS DR16 sample of Fumagalli,
+  Fotopoulou and Thomson (2020) shares 344 quasars with the SDSS DR7 sample of Prochaska, O'Meara and Worseck (2010),
+  whose bins overlap it in redshift; at z = 3.45 the two points overlap in the figure.
+- **The LLS points in the cosmology of the line.** Each paper gives l(z) = dN/dz, which needs no cosmology. The
+  figure draws l(X) = l(z) Delta z / Delta X over the row's redshift bin, with Delta X in the cosmology of the line
+  (Omega_m = 0.2918); the published 1 sigma errors take the same factor. Each point sits at the centre of its bin,
+  with a horizontal bar over the bin. The conversion weights every redshift of a bin equally, where a survey's own
+  path weights them unequally (0.03 to 0.22 per cent for the SDSS bins of Prochaska, O'Meara and Worseck 2010; the
+  provenance file). In the rows of Prochaska, O'Meara and Worseck (2010) the error printed with the plus sign is the
+  smaller one, the reverse of the Poisson interval of a count; the figure swaps the two, the larger error upward. The
+  combined O'Meara row is drawn as printed (symmetric, 0.18 either way; its Poisson interval would be 0.16 below and
+  0.19 above). The file keeps the print.
 - **Snapshots against bins.** The model is drawn at snapshot redshifts 0.2 apart; the measurement is in bins one
-  sixth of a unit wide. The two measured points above z = 4.6 have no model curve beside them, and neither has
-  the one below 2.2.
+  sixth of a unit wide. The two measured points above z = 4.6 have no model curve beside them, and neither has the
+  one below 2.2. Of the LLS bins, the one from z 4.7 to 5.4 lies beyond the curves, and the one from 2.0 to 2.6
+  starts below them.
 - **Model (bars on the lines):** the held-out range of the corrected dN/dX, from `pred.dndx_lower` to
   `pred.dndx_upper`: the two bounds a prediction carries (`pred.dndx * exp(-pred.dndx_err)` and
   `pred.dndx * exp(+pred.dndx_err)`, each computed on its own, so the bars are asymmetric). `pred.dndx_err` is, at
@@ -54,9 +103,10 @@ fit and not a simulation. Nothing in these figures was fitted to the measurement
   It includes the bias. With five values it is an indication of size, not the standard deviation of a known
   distribution; `labels["incidence_mf_error"]` on a prediction says what it does not cover. It is not the same
   thing as the band, which shows how far the prediction moves across the training set.
-- **Not shown and not tested here.** Nothing was fitted. The
-  measurement covers DLAs only: the subDLA and LLS curves have no measured point in this figure. The simulations and
-  the survey define and find absorbers differently; that difference was not assessed.
+- **Not shown and not tested here.** Nothing was fitted. No measurement of the subDLA class alone is drawn. The LLS
+  measurements count every absorber above 10^17.5, not the LLS class: read them against the dashed line, not against
+  the LLS line. The simulations and the surveys define and find absorbers differently; that difference was not
+  assessed.
 
 To regenerate it (the second form when you hold the files of a release):
 
@@ -67,7 +117,7 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
 
 ## The column-density distribution against Ho, Bird and Garnett (2021)
 
-![The column-density distribution f(N_HI) of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021) in three redshift bins](figures/cddf_vs_ho21.png)
+![The column-density distribution f(N_HI) of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021) in three redshift bins and three measurements below the DLA threshold](figures/cddf_vs_ho21.png)
 
 - **Model (line):** `pred.cddf` against `pred.log_nhi` of the LF+MF model at the parameters above, at the snapshots
   z = 2.2, 2.8 and 3.4. A bin in which the model has no support is NaN and is absent from the line; it is not drawn
@@ -78,7 +128,10 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
   `ns_ridge` for 3 of them); it refuses none, and all 60 are in the band.
 - **The flags of the drawn lines** are in the side file `docs/figures/cddf_vs_ho21.json`. None says that the
   correction rests on one simulation pair, or that its redshift is interpolated or held constant beyond the table. At
-  z = 2.2 `cddf_bins_without_support` is set: the highest bin has no measured correction there and is absent.
+  z = 2.2 `cddf_bins_without_support` is set: the highest bin, 10^22.8 to 10^23, has no measured correction there
+  and is absent. The lowest bin, 10^17.0 to 10^17.2, is absent at every snapshot: it lies below the catalogue's
+  column-density threshold, so the model was never trained on it (the side file counts two absent bins at z = 2.2
+  and one at 2.8 and 3.4).
 - **Data (points):** the column-density distribution of DLAs that Ho, Bird and Garnett (2021) measured in SDSS
   DR16Q, in their redshift bins 2 to 2.5, 2.5 to 3 and 3 to 4, with the 68 per cent interval. A bar that reaches the
   bottom of a panel has a lower limit of zero. A bin in which the measured f is zero is not drawn, also where the
@@ -89,6 +142,25 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
   https://github.com/sbird/DLA_data (fetched from its fork https://github.com/jibanCat/DLA_data), read as that
   collection's own reader `ho21_cddf` reads them where it has a reader; the provenance file compares the two step
   by step.
+- **Data below the DLA threshold:** in every panel, the f(N_HI) of subDLAs that Zafar et al. (2013) measured over
+  z 1.51 to 5.00 (open squares); in the panel 3 < z < 4, the f(N_HI) of O'Meara et al. (2007) for log10 N_HI 19.0 to
+  20.3 at a mean z of 3.1 (filled diamonds), and the region of f(N_HI) that Prochaska, O'Meara and Worseck (2010)
+  allow for LLS at z 3.7 (the shaded region). The subDLA table is a file of the same collection, read as its own
+  reader reads it; the other two are built from the papers' own tables (O'Meara et al., Table 5, sample ALL-19.0;
+  Prochaska, O'Meara and Worseck, the conservative range of their f(N) table), in the formats of the collection's
+  readers. `docs/figures/data/lls_subdla/PROVENANCE.md` in the repository gives the sources line by line and
+  compares the readers step by step. Their redshifts are not the model's snapshots, and Zafar et al. cover a wider
+  range than any panel.
+- **Every measurement is in the cosmology of the line.** f(N_HI, X) is a count per unit X. Ho, Bird and Garnett
+  computed their X in a flat cosmology with Omega_m = 0.279 (the default of their public code), the other three in
+  one with Omega_m = 0.3 (stated in each paper). The line is per unit X of the cosmology of its parameters, flat with
+  Omega_m = 0.2918. Each measurement's values and limits are multiplied by the same factor, Delta X(own) /
+  Delta X(0.2918) over its redshift range (each panel's bin for Ho, Bird and Garnett; the paper's sample for the
+  others): 1.0205, 1.0213 and 1.0219 (+0.0088 to +0.0094 dex) for the three DLA tables; 0.9870, 0.9871 and 0.9867
+  (-0.0057 to -0.0058 dex) for Zafar et al., O'Meara et al. and Prochaska, O'Meara and Worseck. The files stay as
+  published; the factors are in the side file, and the two PROVENANCE.md files give each cosmology and redshift
+  range with its source. The band is not converted (each design point is per unit X of its own cosmology, Omega_m
+  from 0.254 to 0.339): only the line is in the measurements' cosmology.
 - **One snapshot against one bin.** Each panel sets one snapshot beside a measurement over a range of redshifts. In
   the third panel the model is at the single redshift 3.4 inside a bin one unit wide.
 - **The bin 4 to 5 is left out.** It reaches beyond z = 4.6, the upper edge of the grouped-validation domain of the
@@ -97,7 +169,7 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
 - **Not shown and not tested here.** The held-out error of the model's CDDF is not drawn in this figure (with 29
   bins and five held-out simulations per bin it would hide the comparison); a prediction carries its range per bin as
   `pred.cddf_lower` and `pred.cddf_upper`. The measurement's tables
-  start at log10 N_HI = 20.05; below it the model has no measured point in this figure. The simulations and the
+  start at log10 N_HI = 20.05; below it the points are the three measurements above, at other redshifts. The simulations and the
   survey define and find absorbers differently; that difference was not assessed.
 
 To regenerate it (the second form when you hold the files of a release):
@@ -146,14 +218,56 @@ python scripts/figures/fig_class_ratio_vs_rogers18.py
 
 ## References
 
+The measurements drawn, each with the provenance file of its data in `docs/figures/data/`:
+
+Crighton, N. H. M., Prochaska, J. X., Murphy, M. T., O'Meara, J. M., Worseck, G. 2019, "Imprints of the first billion
+years: Lyman limit systems at z ~ 5", MNRAS 482, 1456,
+[doi:10.1093/mnras/sty2762](https://doi.org/10.1093/mnras/sty2762),
+[arXiv:1810.10040](https://arxiv.org/abs/1810.10040).
+
+Fumagalli, M., O'Meara, J. M., Prochaska, J. X., Worseck, G. 2013, "Dissecting the properties of optically-thick
+hydrogen at the peak of cosmic star formation history", ApJ 775, 78,
+[doi:10.1088/0004-637X/775/1/78](https://doi.org/10.1088/0004-637X/775/1/78),
+[arXiv:1308.1101](https://arxiv.org/abs/1308.1101).
+
+Fumagalli, M., Fotopoulou, S., Thomson, L. 2020, "Detecting neutral hydrogen at z >~ 3 in large spectroscopic surveys
+of quasars", MNRAS 498, 1951, [doi:10.1093/mnras/staa2388](https://doi.org/10.1093/mnras/staa2388),
+[arXiv:2009.03322](https://arxiv.org/abs/2009.03322).
+
+Ho, M.-F., Bird, S., Garnett, R. 2021, "Damped Lyman-alpha absorbers from Sloan Digital Sky Survey DR16Q with
+Gaussian processes", MNRAS 507, 704, [doi:10.1093/mnras/stab2169](https://doi.org/10.1093/mnras/stab2169),
+[arXiv:2103.10964](https://arxiv.org/abs/2103.10964).
+
+O'Meara, J. M., Prochaska, J. X., Burles, S., Prochter, G., Bernstein, R. A., Burgess, K. M. 2007, "The Keck +
+Magellan Survey for Lyman Limit Absorption. I. The Frequency Distribution of Super Lyman Limit Systems", ApJ 656,
+666, [doi:10.1086/510711](https://doi.org/10.1086/510711),
+[arXiv:astro-ph/0610726](https://arxiv.org/abs/astro-ph/0610726).
+
+O'Meara, J. M., Prochaska, J. X., Worseck, G., Chen, H.-W., Madau, P. 2013, "The HST/ACS+WFC3 Survey for Lyman Limit
+Systems. II. Science", ApJ 765, 137,
+[doi:10.1088/0004-637X/765/2/137](https://doi.org/10.1088/0004-637X/765/2/137),
+[arXiv:1204.3093](https://arxiv.org/abs/1204.3093).
+
+Prochaska, J. X., O'Meara, J. M., Worseck, G. 2010, "A Definitive Survey for Lyman Limit Systems at z ~ 3.5 with the
+Sloan Digital Sky Survey", ApJ 718, 392,
+[doi:10.1088/0004-637X/718/1/392](https://doi.org/10.1088/0004-637X/718/1/392),
+[arXiv:0912.0292](https://arxiv.org/abs/0912.0292).
+
+Ribaudo, J., Lehner, N., Howk, J. C. 2011, "A Hubble Space Telescope Study of Lyman Limit Systems: Census and
+Evolution", ApJ 736, 42, [doi:10.1088/0004-637X/736/1/42](https://doi.org/10.1088/0004-637X/736/1/42),
+[arXiv:1105.0659](https://arxiv.org/abs/1105.0659).
+
+Zafar, T., Peroux, C., Popping, A., et al. 2013, "The ESO UVES advanced data products quasar sample. II. Cosmological
+evolution of the neutral gas mass density", A&A 556, A141,
+[doi:10.1051/0004-6361/201321154](https://doi.org/10.1051/0004-6361/201321154),
+[arXiv:1307.0602](https://arxiv.org/abs/1307.0602).
+
+The simulations and the template:
+
 Fernandez, M. A., Bird, S., Ho, M.-F. 2024, "Cosmological constraints from the eBOSS Lyman-alpha forest using the
 PRIYA simulations", JCAP 2024 (07) 029,
 [doi:10.1088/1475-7516/2024/07/029](https://doi.org/10.1088/1475-7516/2024/07/029),
 [arXiv:2309.03943](https://arxiv.org/abs/2309.03943).
-
-Ho, M.-F., Bird, S., Garnett, R. 2021, "Damped Lyman-alpha absorbers from Sloan Digital Sky Survey DR16Q with
-Gaussian processes", MNRAS, [doi:10.1093/mnras/stab2169](https://doi.org/10.1093/mnras/stab2169),
-[arXiv:2103.10964](https://arxiv.org/abs/2103.10964).
 
 Rogers, K. K., Bird, S., Peiris, H. V., Pontzen, A., Font-Ribera, A., Leistedt, B. 2018, "Simulating the effect of
 high column density absorbers on the one-dimensional Lyman-alpha forest flux power spectrum", MNRAS, 474 (3),

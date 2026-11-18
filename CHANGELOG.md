@@ -29,9 +29,13 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   and CI use a model package built with a synthetic bundle.
 - **Three figures with their scripts and data** ([`docs/model_figures.md`](docs/model_figures.md)): the model's
   incidence dN/dX and its column-density distribution against the DLA measurements of Ho, Bird and Garnett (2021),
-  and the class power ratio
-  of the training simulations (as ranges over the simulations and the mean-flux rungs) against Eq. 6 of Rogers et al.
-  (2018), drawn with a band for a free amplitude of its k-dependent term. `scripts/figures/` draws them; the data files
+  the column-density distribution also against three measurements below the DLA threshold (Zafar et al. 2013;
+  O'Meara et al. 2007 and Prochaska, O'Meara and Worseck 2010, both built from the papers' own tables), the
+  incidence also against five published measurements of Lyman limit systems (tau_912 >= 2, copied from the papers'
+  tables and text) beside the model's count of every absorber above 10^17.5 cm^-2, the quantity they measure, and the
+  class power ratio of the training simulations (as ranges over the simulations and the mean-flux rungs) against
+  Eq. 6 of Rogers et al. (2018), drawn with a band for a free amplitude of its k-dependent term. Every measurement is
+  drawn in the cosmology of the model line (its absorption distance converted, the files unchanged). `scripts/figures/` draws them; the data files
   are in `docs/figures/data/`, each with its origin and sha256. The class-ratio figure regenerates from the
   repository alone. The dN/dX and CDDF figures need a model with an incidence record (none is published yet);
   their measured points and the 60 PRIYA design points of their bands are committed figure data.
