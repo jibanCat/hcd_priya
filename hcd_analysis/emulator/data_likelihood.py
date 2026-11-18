@@ -630,12 +630,13 @@ def load_eboss_leg(
 
     PI-CONFIRMED flags (2026-06-13): metals_on=True — eBOSS data is NOT metal-subtracted (the
     reference SiIII correction is commented out, lyaemu/likelihood.py); SiIII (Δv≈2270) oscillates
-    ~6.7 periods in-band at ~5–9%, so it MUST be forward-modeled (a shared ``a_SiIII`` nuisance with
+    ~6.7 periods in-band (a ripple of about 5 to 9% in a mock with the SiIII term injected, not a
+    measurement), so it MUST be forward-modeled (a shared ``a_SiIII`` nuisance with
     DESI) or it aliases into the n_s tilt — the single biggest eBOSS risk. (NOTE: a_SiIII SAMPLING in
     the closure is the Phase-4d test-3 follow-on; until wired, metals_on=True is a no-op with a_SiIII=0.)
     dla_forward_frac=0.0 — DLAs masked, residual in C_data (like KS). mf_floor_on=False / no emucoh —
     eBOSS is a LARGE-scale leg below the high-k floor/emucoh regime (emucoh band k≥0.01 is zero at the
-    A_p pivot k≈0.009). resolution_on=False — eBOSS resolution syst (~2e-4 in-band) stays in C_data.
+    A_p pivot k≈0.009). resolution_on=False: the eBOSS resolution systematic stays in C_data.
     """
     add_cv_floor = _env_flag("HCD_CV_FLOOR") if add_cv_floor is None else bool(add_cv_floor)
     rec = _RD.resolve_file("eboss_dr14_p1d", "eboss_dr14_p1d.npz", explicit=npz_path)
@@ -707,7 +708,8 @@ def _read_ks_p1d(path):
 def _subtract_perz_rank1(C, e, z_idx, n_zbins):
     """``C -= sum_z outer(e|z)``: remove ONE correlated systematic in the SHIPPED DESI cov_syst
     convention — each correlated term enters the covariance as a rank-1 ``outer(e|z)`` within
-    every z block, exactly zero cross-z (cov_syst is z-block-diagonal; verified 6.2e-18). The
+    every z block, exactly zero cross-z (cov_syst is z-block-diagonal: its elements between different
+    redshifts are exactly zero in the published file). The
     per-z-block subtraction on the post-cut rows equals the sub-selection of the full-grid
     removal exactly (a rank-1 block outer restricted to kept rows IS the outer of the restricted
     vector). NOT one globally coherent outer product — that would assert a cross-z coherence the
@@ -796,8 +798,8 @@ def _assemble_leg(
             # "diag" (KS): the conservative cov adds each systematic in QUADRATURE to the DIAGONAL only
             # (Karacayli 2021 Sec 4.6), so REMOVE the resolution variance element-wise from the diagonal;
             # the off-diagonal (statistical) carries no resolution term. NOT "rescale" (which also scales
-            # the off-diagonal): for KS diag != sum_s e_s^2 (min 0.53 / max 4.09), so a rescale is ill-posed.
-            # esyst_res_ks^2 is subdominant in-band (max ~0.17 of the diag) so C_data stays SPD (Cholesky guard).
+            # the off-diagonal): for KS diag != sum_s e_s^2, so a rescale is ill-posed.
+            # esyst_res_ks^2 is below the diagonal in every bin, so C_data stays SPD (Cholesky guard).
             _di = np.diag_indices_from(C_data)
             C_data[_di] = C_data[_di] - e_res**2
         else:  # "rank1" (DESI): drop the per-z mode
