@@ -35,7 +35,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   `docs/likelihood.md` states that wavenumbers must be in s/km.
 - **Science tests of a trained model**, at the release level, in the assets job: golden values (relative 1e-12 on
   the pinned stack, 1e-6 otherwise), positive class spectra, the total P1D rising with A_p below k = 0.015 s/km,
-  fractions and incidence inside their ranges, the CDDF against dN/dX within the held-out errors
+  fractions and incidence inside their ranges, the CDDF against dN/dX within the held-out errors, the held-out
+  prediction residual of the class spectra against the release's own record, recomputed from its residual vectors
   (`tests/test_science_model.py`; golden files from `tools/ci/make_science_golden.py`), and the same counts on the
   LF training cache (`tests/test_science_training_cache.py`).
 - **Release format `hcd_priya.h5/2`** for emulator bundles: HDF5 + JSON, pickle-free, with a lineage block that ties

@@ -8,6 +8,9 @@ trained model), and every test skips when no model is configured.
   points and 3 redshifts. The response is asserted below that k only.
 - The fractions w_c lie in [0, 1] with a sum of at most 1; dN/dX is positive and inside its held-out range; the CDDF
   is inside its held-out range.
+- The held-out prediction residual of the class spectra: every value finite and not negative; the range is the
+  spectrum times exp(-rms_log) and times exp(+rms_log); the values are the rows of the release's own record for the
+  fidelity of the prediction; and every table of that record is recomputed from the residual vectors it ships.
 - The CDDF summed over each HCD class's column-density range agrees with that class's dN/dX within a tolerance taken
   from the prediction's own held-out errors (no observed ratio enters it). dN/dX and f(N_HI) are separate outputs of
   the networks, and under LF+MF each has its own correction table, so they agree only within their errors. For a
@@ -66,7 +69,18 @@ MIDPOINT = {
 }
 DEFAULT_MEAN_FLUX = (1.0, 0.0)  # tau0_amp, dtau0
 EXTRA_MEAN_FLUX = ("midpoint", 1.1, 0.2)  # one more case: the midpoint at another mean flux
-QUANTITIES = ("P_class", "w_c", "dndx", "dndx_lower", "dndx_upper", "cddf", "tau_eff")
+QUANTITIES = (
+    "P_class",
+    "w_c",
+    "dndx",
+    "dndx_lower",
+    "dndx_upper",
+    "cddf",
+    "tau_eff",
+    # the held-out prediction residual of the class spectra (a release with a P1D held-out record)
+    "P_class_validation_rms_log",
+    "P_mix_validation_rms_log",
+)
 
 
 # ------------------------------------------------------------------------------------------- points and cases
@@ -130,6 +144,14 @@ def true_flags(pred):
     return sorted(k for k, v in pred.flags.items() if isinstance(v, (bool, np.bool_)) and bool(v))
 
 
+def _validation(pred, name):
+    """A validation field of a stacked prediction; a model without a P1D held-out record has none, and then the
+    golden checks of a release cannot be made."""
+    a = getattr(pred, name)
+    assert a is not None, f"the configured model carries no P1D held-out record: no {name}"
+    return np.asarray(a)
+
+
 def case_values(pred):
     """The golden quantities of one stacked prediction as float64 arrays, and the sorted names of its True flags."""
     vals = {
@@ -140,6 +162,12 @@ def case_values(pred):
         "dndx_upper": pred.dndx_upper,
         "cddf": np.asarray(pred.cddf)[:, cddf_bin_indices(pred)],
         "tau_eff": pred.tau_eff,
+        "P_class_validation_rms_log": _validation(pred, "P_class_validation_rms_log")[
+            :, :, list(K_INDICES)
+        ],
+        "P_mix_validation_rms_log": _validation(pred, "P_mix_validation_rms_log")[
+            :, list(K_INDICES)
+        ],
     }
     return {k: np.asarray(v, dtype=np.float64) for k, v in vals.items()}, true_flags(pred)
 
@@ -233,6 +261,49 @@ def test_the_predictions_equal_the_golden_values(preds, golden):
             problems.append((key, "flags", f"{flags} != {case['flags_true']}"))
     assert n_compared > 1000
     assert not problems, f"rtol {rtol}: {problems[:10]}"
+
+
+# ------------------------------------------------------------------------------- the P1D validation diagnostics
+def test_the_validation_range_of_the_spectra_is_the_record_s_and_the_record_recomputes(emu, preds):
+    """The held-out prediction residual on every golden prediction, against the release's own P1D held-out record:
+    finite and not negative; the two ends are the spectrum times exp(-rms_log) and exp(+rms_log); each value is the
+    record's row for that redshift and the LF+MF fidelity, and an LF prediction carries the LF rows; every table of
+    the record equals its recomputation from the residual vectors of the evidence file."""
+    from hcd_analysis.emulator import p1d_heldout as PH
+
+    held = emu._p1d
+    assert held is not None, "the configured model carries no P1D held-out record"
+    n_cells = 0
+    for pred in preds.values():
+        e, mix = np.asarray(pred.P_class_validation_rms_log), np.asarray(
+            pred.P_mix_validation_rms_log
+        )
+        assert pred.flags["p1d_validation_available"] is True
+        assert (
+            np.all(np.isfinite(e))
+            and np.all(e >= 0)
+            and np.all(np.isfinite(mix))
+            and np.all(mix >= 0)
+        )
+        P = np.asarray(pred.P_class)
+        np.testing.assert_allclose(
+            pred.P_class_validation_lower, P * np.exp(-e), rtol=1e-14, atol=0
+        )
+        np.testing.assert_allclose(
+            pred.P_class_validation_upper, P * np.exp(+e), rtol=1e-14, atol=0
+        )
+        for i, z in enumerate(np.atleast_1d(pred.z)):
+            row = held.err(float(z), True)
+            assert np.array_equal(e[i], row[:4]) and np.array_equal(mix[i], row[4])
+        n_cells += e.size
+    assert n_cells > 1000
+    name, params = science_points()[0]
+    lf = emu.predict_many(params, z=list(Z), tau0_amp=1.0, dtau0=0.0, fidelity="LF")
+    for i, z in enumerate(Z):
+        assert np.array_equal(lf.P_class_validation_rms_log[i], held.err(z, False)[:4])
+    assert PH.verify_tables(emu._p1d_dir, held) > 1_000_000
+    for text in (pred.labels["p1d_validation"], held.label(False)):
+        assert "empirical validation diagnostics, not calibrated predictive uncertainties" in text
 
 
 # ----------------------------------------------------------------------------------------------- positivity
