@@ -1,7 +1,7 @@
 {
  "dashed": "redshifts above 4.6",
  "fidelity": "LF",
- "figure": "the held-out prediction residual of the class P1D: 100 e against k, one line per redshift",
+ "figure": "the held-out prediction residual of the class P1D: e against k, one line per redshift",
  "held_out": "a fold backbone against the low-fidelity simulation it was trained without",
  "midpoint": {
   "hub": 0.7,
@@ -40,231 +40,232 @@
  "sensitivity": {
   "dotted": "the table without ns0.979Ap1.78e-09, at z = 5.4",
   "statement": "the LF table was also reduced without the simulation ns0.979Ap1.78e-09, whose source spectra file at z = 5.4 is incomplete (notes, anomalous_rows).",
-  "summary_per_cent": {
+  "summary": {
    "DLA": {
     "above_z_4p6": {
-     "max": 7.237,
-     "median": 1.997
+     "max": 0.07237,
+     "median": 0.01997
     },
     "above_z_4p6_largest_modes": {
-     "max": 16.082,
-     "median": 10.968
+     "max": 0.16082,
+     "median": 0.10968
     },
     "below_z_2p2": {
-     "max": 2.576,
-     "median": 1.568
+     "max": 0.02576,
+     "median": 0.01568
     },
     "largest_modes": {
-     "max": 9.928,
-     "median": 3.359
+     "max": 0.09928,
+     "median": 0.03359
     },
     "typical": {
-     "max": 3.262,
-     "median": 1.106
+     "max": 0.03262,
+     "median": 0.01106
     }
    },
    "LLS": {
     "above_z_4p6": {
-     "max": 6.147,
-     "median": 1.417
+     "max": 0.06147,
+     "median": 0.01417
     },
     "above_z_4p6_largest_modes": {
-     "max": 11.925,
-     "median": 7.013
+     "max": 0.11925,
+     "median": 0.07013
     },
     "below_z_2p2": {
-     "max": 2.27,
-     "median": 0.655
+     "max": 0.0227,
+     "median": 0.00655
     },
     "largest_modes": {
-     "max": 5.293,
-     "median": 2.284
+     "max": 0.05293,
+     "median": 0.02284
     },
     "typical": {
-     "max": 2.78,
-     "median": 0.702
+     "max": 0.0278,
+     "median": 0.00702
     }
    },
    "clean": {
     "above_z_4p6": {
-     "max": 7.148,
-     "median": 1.357
+     "max": 0.07148,
+     "median": 0.01357
     },
     "above_z_4p6_largest_modes": {
-     "max": 13.697,
-     "median": 7.728
+     "max": 0.13697,
+     "median": 0.07728
     },
     "below_z_2p2": {
-     "max": 1.921,
-     "median": 0.558
+     "max": 0.01921,
+     "median": 0.00558
     },
     "largest_modes": {
-     "max": 5.941,
-     "median": 2.39
+     "max": 0.05941,
+     "median": 0.0239
     },
     "typical": {
-     "max": 3.185,
-     "median": 0.652
+     "max": 0.03185,
+     "median": 0.00652
     }
    },
    "mixture": {
     "above_z_4p6": {
-     "max": 6.416,
-     "median": 1.413
+     "max": 0.06416,
+     "median": 0.01413
     },
     "above_z_4p6_largest_modes": {
-     "max": 12.362,
-     "median": 7.482
+     "max": 0.12362,
+     "median": 0.07482
     },
     "below_z_2p2": {
-     "max": 1.962,
-     "median": 0.553
+     "max": 0.01962,
+     "median": 0.00553
     },
     "largest_modes": {
-     "max": 5.799,
-     "median": 2.35
+     "max": 0.05799,
+     "median": 0.0235
     },
     "typical": {
-     "max": 2.972,
-     "median": 0.649
+     "max": 0.02972,
+     "median": 0.00649
     }
    },
    "subDLA": {
     "above_z_4p6": {
-     "max": 5.982,
-     "median": 1.549
+     "max": 0.05982,
+     "median": 0.01549
     },
     "above_z_4p6_largest_modes": {
-     "max": 10.831,
-     "median": 7.644
+     "max": 0.10831,
+     "median": 0.07644
     },
     "below_z_2p2": {
-     "max": 2.739,
-     "median": 0.966
+     "max": 0.02739,
+     "median": 0.00966
     },
     "largest_modes": {
-     "max": 6.259,
-     "median": 2.555
+     "max": 0.06259,
+     "median": 0.02555
     },
     "typical": {
-     "max": 3.049,
-     "median": 0.807
+     "max": 0.03049,
+     "median": 0.00807
     }
    }
   }
  },
- "summary_per_cent": {
+ "summary": {
   "DLA": {
    "above_z_4p6": {
-    "max": 29.405,
-    "median": 1.966
+    "max": 0.29405,
+    "median": 0.01966
    },
    "above_z_4p6_largest_modes": {
-    "max": 52.95,
-    "median": 10.959
+    "max": 0.5295,
+    "median": 0.10959
    },
    "below_z_2p2": {
-    "max": 2.576,
-    "median": 1.568
+    "max": 0.02576,
+    "median": 0.01568
    },
    "largest_modes": {
-    "max": 9.183,
-    "median": 3.168
+    "max": 0.09183,
+    "median": 0.03168
    },
    "typical": {
-    "max": 3.015,
-    "median": 1.083
+    "max": 0.03015,
+    "median": 0.01083
    }
   },
   "LLS": {
    "above_z_4p6": {
-    "max": 34.172,
-    "median": 1.461
+    "max": 0.34172,
+    "median": 0.01461
    },
    "above_z_4p6_largest_modes": {
-    "max": 60.878,
-    "median": 6.407
+    "max": 0.60878,
+    "median": 0.06407
    },
    "below_z_2p2": {
-    "max": 2.27,
-    "median": 0.655
+    "max": 0.0227,
+    "median": 0.00655
    },
    "largest_modes": {
-    "max": 4.885,
-    "median": 2.213
+    "max": 0.04885,
+    "median": 0.02213
    },
    "typical": {
-    "max": 2.548,
-    "median": 0.701
+    "max": 0.02548,
+    "median": 0.00701
    }
   },
   "clean": {
    "above_z_4p6": {
-    "max": 41.363,
-    "median": 1.447
+    "max": 0.41363,
+    "median": 0.01447
    },
    "above_z_4p6_largest_modes": {
-    "max": 74.167,
-    "median": 7.059
+    "max": 0.74167,
+    "median": 0.07059
    },
    "below_z_2p2": {
-    "max": 1.921,
-    "median": 0.558
+    "max": 0.01921,
+    "median": 0.00558
    },
    "largest_modes": {
-    "max": 5.444,
-    "median": 2.259
+    "max": 0.05444,
+    "median": 0.02259
    },
    "typical": {
-    "max": 2.917,
-    "median": 0.661
+    "max": 0.02917,
+    "median": 0.00661
    }
   },
   "mixture": {
    "above_z_4p6": {
-    "max": 34.735,
-    "median": 1.46
+    "max": 0.34735,
+    "median": 0.0146
    },
    "above_z_4p6_largest_modes": {
-    "max": 62.163,
-    "median": 6.833
+    "max": 0.62163,
+    "median": 0.06833
    },
    "below_z_2p2": {
-    "max": 1.962,
-    "median": 0.553
+    "max": 0.01962,
+    "median": 0.00553
    },
    "largest_modes": {
-    "max": 5.313,
-    "median": 2.21
+    "max": 0.05313,
+    "median": 0.0221
    },
    "typical": {
-    "max": 2.722,
-    "median": 0.65
+    "max": 0.02722,
+    "median": 0.0065
    }
   },
   "subDLA": {
    "above_z_4p6": {
-    "max": 31.504,
-    "median": 1.556
+    "max": 0.31504,
+    "median": 0.01556
    },
    "above_z_4p6_largest_modes": {
-    "max": 56.064,
-    "median": 6.982
+    "max": 0.56064,
+    "median": 0.06982
    },
    "below_z_2p2": {
-    "max": 2.739,
-    "median": 0.966
+    "max": 0.02739,
+    "median": 0.00966
    },
    "largest_modes": {
-    "max": 5.719,
-    "median": 2.435
+    "max": 0.05719,
+    "median": 0.02435
    },
    "typical": {
-    "max": 2.805,
-    "median": 0.798
+    "max": 0.02805,
+    "median": 0.00798
    }
   }
  },
+ "vertical_axis": "e, the rms of ln(prediction / truth): a number on the natural logarithm, not a percentage; on a spectrum it is the range from the value times exp(-e) to the value times exp(+e)",
  "wavenumbers": "the modes of the box in s/km at each redshift, for hub and omegamh2 of the midpoint",
  "what_it_is": "an empirical validation diagnostic, not a calibrated uncertainty"
 }

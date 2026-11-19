@@ -1029,8 +1029,9 @@ def test_the_p1d_validation_tables_are_drawn_as_the_record_holds_them(
             lines = [c for c in panel if c[3].get("ls") in ("-", "--")]
             assert len(lines) == len(z), (fid, title)
             for (_, x, y, kw), iz in zip(lines, range(len(z))):
-                # the line of a redshift is the record's e times 100, at the modes of the box at the midpoint
-                assert np.array_equal(y, 100.0 * e[iz, row])
+                # the line of a redshift is the record's e itself (not times 100: it is no percentage), at the
+                # modes of the box at the midpoint
+                assert np.array_equal(y, e[iz, row])
                 assert np.array_equal(x, val.mode_wavenumbers(held.n_modes, z[iz]))
                 assert kw["ls"] == ("--" if z[iz] > 4.6 else "-")
             marks = [c for c in panel if c[3].get("marker") == "o"]
@@ -1039,7 +1040,7 @@ def test_the_p1d_validation_tables_are_drawn_as_the_record_holds_them(
             if fid == held.record["sensitivity"]["fidelity"]:
                 # the sensitivity table at the highest redshift, and nowhere else
                 assert len(dotted) == 1
-                assert np.array_equal(dotted[0][2], 100.0 * np.asarray(held.e_sens)[-1, row])
+                assert np.array_equal(dotted[0][2], np.asarray(held.e_sens)[-1, row])
             else:
                 assert dotted == []
         facts = _facts(str(tmp_path / f"p1d_validation_{fid}.png"))
@@ -1055,14 +1056,14 @@ def test_the_p1d_validation_tables_are_drawn_as_the_record_holds_them(
             "omegamh2": C.MIDPOINT["omegamh2"],
         }
         # the numbers of the side file: per row, the record's own summary of that row alone
-        assert set(facts["summary_per_cent"]) == set(PH.ROWS)
+        assert set(facts["summary"]) == set(PH.ROWS)
         for row, name in enumerate(PH.ROWS):
             want = PH.summarise(e[:, row : row + 1, :], z)
-            got = facts["summary_per_cent"][name]
+            got = facts["summary"][name]
             assert set(got) == set(want)
             for regime in want:
                 for q in ("median", "max"):
-                    assert got[regime][q] == pytest.approx(100.0 * want[regime][q], abs=6e-4)
+                    assert got[regime][q] == pytest.approx(want[regime][q], abs=6e-6)
         assert ("sensitivity" in facts) == (fid == held.record["sensitivity"]["fidelity"])
     lf = _facts(str(tmp_path / "p1d_validation_lf.png"))
     assert lf["sensitivity"]["statement"] == held.record["sensitivity"]["statement"]
@@ -1078,8 +1079,8 @@ def test_the_p1d_validation_tables_are_drawn_as_the_record_holds_them(
     assert len(dotted) == len(val.ROW_TITLES)
     for ax, _, y, _ in dotted:
         row = val.ROW_TITLES.index(ax.get_title(loc="left"))
-        assert np.array_equal(y, 200.0 * np.asarray(held.e_sens)[-1, row])
-        assert not np.array_equal(y, 100.0 * np.asarray(held.e["lf"])[-1, row])
+        assert np.array_equal(y, 2.0 * np.asarray(held.e_sens)[-1, row])
+        assert not np.array_equal(y, np.asarray(held.e["lf"])[-1, row])
 
 
 @pytest.mark.parametrize("row", ["mixture", "DLA"])
@@ -1116,8 +1117,8 @@ def test_the_p1d_validation_figure_per_simulation_draws_the_residual_vectors(
                 assert panel == [] and [t.get_text() for t in ax.texts] == ["no estimate"]
                 continue
             iz = z.index(zz)
-            # one line per simulation that has a residual there, each the evidence file's vector times 100
-            want = [100.0 * d[i, iz, 0, i_row] for i in range(len(rec[fid]["sims"]))]
+            # one line per simulation that has a residual there, each the evidence file's vector itself
+            want = [d[i, iz, 0, i_row] for i in range(len(rec[fid]["sims"]))]
             want = [y for y in want if np.isfinite(y).any()]
             assert len(panel) == len(want) >= 1
             for (_, x, y, _), w in zip(panel, want):

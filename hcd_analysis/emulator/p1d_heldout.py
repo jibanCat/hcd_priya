@@ -174,8 +174,11 @@ def summarise(e, z):
     }
 
 
-def _pct(x):
-    return f"{100.0 * x:.2g}"
+def _size(x):
+    """How a label writes one value of e: the number on the natural logarithm and, in brackets, the range it gives
+    on the spectrum, the value times exp(-e) to the value times exp(+e). e is never written as a percentage: for a
+    large e the two ends of the range are far from equal distances."""
+    return f"{x:.2g} (times {np.exp(-x):.3f} to times {np.exp(x):.3f})"
 
 
 def summary_sentences(summary):
@@ -184,21 +187,21 @@ def summary_sentences(summary):
     s = summary
     out = [
         f"Typical (z {Z_TYPICAL[0]} to {Z_TYPICAL[1]}, above the {N_LARGEST_MODES} largest modes of the box): e has "
-        f"a median of {_pct(s['typical']['median'])} per cent and reaches {_pct(s['typical']['max'])} per cent.",
+        f"a median of {_size(s['typical']['median'])} and reaches {_size(s['typical']['max'])}.",
         f"The {N_LARGEST_MODES} largest modes, that is the first {N_LARGEST_MODES} modes of the box by index (for "
         "example near 4.8e-4 and 9.5e-4 s/km at z = 3 for the 120 Mpc/h box; training gave less weight below "
         "1e-3 s/km), same "
-        f"redshifts: a median of {_pct(s['largest_modes']['median'])} per cent, up to "
-        f"{_pct(s['largest_modes']['max'])} per cent.",
+        f"redshifts: a median of {_size(s['largest_modes']['median'])}, up to "
+        f"{_size(s['largest_modes']['max'])}.",
         f"Above z {Z_TYPICAL[1]} (outside the validated redshift range): a median of "
-        f"{_pct(s['above_z_4p6']['median'])} per cent, up to {_pct(s['above_z_4p6']['max'])} per cent, and at the "
-        f"{N_LARGEST_MODES} largest modes a median of {_pct(s['above_z_4p6_largest_modes']['median'])} per cent, "
-        f"up to {_pct(s['above_z_4p6_largest_modes']['max'])} per cent.",
+        f"{_size(s['above_z_4p6']['median'])}, up to {_size(s['above_z_4p6']['max'])}, and at the "
+        f"{N_LARGEST_MODES} largest modes a median of {_size(s['above_z_4p6_largest_modes']['median'])}, "
+        f"up to {_size(s['above_z_4p6_largest_modes']['max'])}.",
     ]
     if "below_z_2p2" in s:
         out.append(
-            f"Below z {Z_TYPICAL[0]}: a median of {_pct(s['below_z_2p2']['median'])} per cent, up to "
-            f"{_pct(s['below_z_2p2']['max'])} per cent."
+            f"Below z {Z_TYPICAL[0]}: a median of {_size(s['below_z_2p2']['median'])}, up to "
+            f"{_size(s['below_z_2p2']['max'])}."
         )
     return out
 
@@ -588,16 +591,17 @@ class P1DHeldout(NamedTuple):
             f"prediction's fidelity ({'LF+MF' if lfmf else 'LF'}: {FIDELITY_STATEMENT[fid]}; {nmax} held-out "
             "simulations). They are empirical validation diagnostics, not calibrated predictive uncertainties. ",
             r["definition"],
-            " SIZES, in per cent (100 e). ",
+            " SIZES: each is e, a number on the natural logarithm, and in brackets the range it gives on a class "
+            "spectrum, the value times exp(-e) to the value times exp(+e). ",
             " ".join(summary_sentences(r["summary"][fid])),
         ]
         if r["sensitivity"]["fidelity"] == fid:
             s = r["summary"]["sensitivity"]
             parts.append(
                 f" SENSITIVITY TEST, not the table of a prediction: {r['sensitivity']['statement']} Without that "
-                f"simulation, above z {Z_TYPICAL[1]}: a median of {_pct(s['above_z_4p6']['median'])} per cent, up "
-                f"to {_pct(s['above_z_4p6']['max'])} per cent, and at the {N_LARGEST_MODES} largest modes up to "
-                f"{_pct(s['above_z_4p6_largest_modes']['max'])} per cent."
+                f"simulation, above z {Z_TYPICAL[1]}: a median of {_size(s['above_z_4p6']['median'])}, up "
+                f"to {_size(s['above_z_4p6']['max'])}, and at the {N_LARGEST_MODES} largest modes up to "
+                f"{_size(s['above_z_4p6_largest_modes']['max'])}."
             )
         parts += [
             " NOTES. ",

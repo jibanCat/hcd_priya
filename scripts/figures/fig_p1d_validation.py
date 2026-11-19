@@ -10,16 +10,16 @@ was made without, how far the prediction of a class spectrum lies from the simul
 - ``p1d_validation_lf.png`` and ``p1d_validation_lfmf.png``, one per fidelity, drawn from the record alone. Five
   panels: the four classes and the mixture (the class spectra mixed with each held-out simulation's own class
   fractions). In each: e = the rms of ln(prediction / truth) over the held-out simulations and the mean-flux rungs,
-  as 100 e in per cent, against the wavenumber, one line per snapshot redshift (the colour, light to dark, is the
+  on a logarithmic axis against the wavenumber, one line per snapshot redshift (the colour, light to dark, is the
   redshift). Redshifts above 4.6, outside the validated range, are dashed. The two largest modes of the box, which
   training gave less weight, carry an open marker. Where the record holds a sensitivity table (the same table
   without one named simulation), its line at the highest redshift is dotted, in a second hue.
 - ``p1d_validation_by_simulation.png``, drawn from the record's evidence file: the residual itself,
-  d = ln(prediction / truth) of the mixture, as 100 d in per cent, one line per held-out simulation, at four
+  d = ln(prediction / truth) of the mixture, one line per held-out simulation, at four
   redshifts, for LF (top row) and LF+MF (bottom row), at the mean-flux rung nearest the mean flux of Kim et al.
   (2007). Two simulations are drawn in a hue: the one the record's sensitivity table leaves out, and the one with
   the largest residual of the mixture at redshifts up to 4.6. The others are grey. The vertical axis is linear
-  within 5 per cent and logarithmic beyond. With ``--row`` the same figure is drawn for one class in place of the
+  within 0.05 and logarithmic beyond. With ``--row`` the same figure is drawn for one class in place of the
   mixture, into ``p1d_validation_by_simulation_<row>.png``; the two simulations in a hue stay the same.
 
 The wavenumbers: the modes of the box are converted to s/km at each redshift with hub and omegamh2 of the midpoint
@@ -56,7 +56,9 @@ ROW_NOUN = {
     "DLA": "the DLA class spectrum",
     "mixture": "the mixture",
 }
-SYMLOG_LINEAR_PER_CENT = 5.0
+SYMLOG_LINEAR = (
+    0.05  # the residual axis of the figure per simulation is linear within this, logarithmic beyond
+)
 # the redshift as one hue from light to dark (a magnitude, so no second hue)
 Z_COLOURS = ("#c5daf6", C.BLUE, "#0d2f61")
 GREY_STYLES = ("-", "--", "-.", ":")
@@ -75,15 +77,14 @@ def mode_wavenumbers(n_modes: int, z: float) -> np.ndarray:
 
 
 def row_summary(e, z) -> dict:
-    """Per row: the median and the largest 100 e in each regime of the record's summary (``p1d_heldout.summarise``)."""
+    """Per row: the median and the largest e in each regime of the record's summary (``p1d_heldout.summarise``)."""
     from hcd_analysis.emulator import p1d_heldout as PH
 
     out = {}
     for i, name in enumerate(PH.ROWS):
         s = PH.summarise(np.asarray(e)[:, i : i + 1, :], z)
         out[name] = {
-            regime: {q: round(100.0 * v, 3) for q, v in stats.items()}
-            for regime, stats in s.items()
+            regime: {q: round(float(v), 5) for q, v in stats.items()} for regime, stats in s.items()
         }
     return out
 
@@ -125,7 +126,7 @@ def draw_table(plt, held, fid: str, out: str, model: dict) -> None:
     for ax, title, row in zip(panels, ROW_TITLES, range(len(PH.ROWS))):
         for iz, zz in enumerate(z):
             k = mode_wavenumbers(held.n_modes, zz)
-            y = 100.0 * e[iz, row]
+            y = e[iz, row]
             colour = cmap(norm(zz))
             ls = "-" if zz <= Z_VALIDATED_MAX + 1e-9 else "--"
             ax.plot(k, y, color=colour, ls=ls, lw=1.1, zorder=2)
@@ -135,7 +136,7 @@ def draw_table(plt, held, fid: str, out: str, model: dict) -> None:
             )  # fmt: skip
         if sens is not None:
             k = mode_wavenumbers(held.n_modes, z[-1])
-            ax.plot(k, 100.0 * held.e_sens[-1, row], color=C.ORANGE, ls=":", lw=1.6, zorder=4)
+            ax.plot(k, held.e_sens[-1, row], color=C.ORANGE, ls=":", lw=1.6, zorder=4)
         ax.set_xscale("log")
         ax.set_yscale("log")
         _per_cent_axis(ax, plt)
@@ -145,7 +146,7 @@ def draw_table(plt, held, fid: str, out: str, model: dict) -> None:
     axes[0, 2].set_xlabel("k (s/km)")
     axes[0, 2].tick_params(labelbottom=True)
     for ax in axes[:, 0]:
-        ax.set_ylabel("100 x rms of ln(prediction / truth)\n(per cent)")
+        ax.set_ylabel("e = rms of ln(prediction / truth)")
     note.axis("off")
     handles = [
         Line2D([], [], color=cmap(0.45), lw=1.1, label=f"redshifts up to {Z_VALIDATED_MAX:g}"),
@@ -167,8 +168,10 @@ def draw_table(plt, held, fid: str, out: str, model: dict) -> None:
         )
     note.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.0, 1.0), handlelength=2.6)
     note.text(
-        0.0, 0.30,
+        0.0, 0.38,
         "Held-out prediction residual:\nan empirical validation diagnostic,\nnot a calibrated uncertainty.\n\n"
+        "e is on the natural logarithm, not a percentage:\non a spectrum the range is the value times\n"
+        "exp(-e) to exp(+e). e = 0.01: times 0.990 to 1.010;\ne = 0.7: times 0.50 to 2.01.\n\n"
         f"{int(held.n[fid].max())} held-out simulations. Wavenumbers of the\nmodes at the midpoint of the parameter box.",
         transform=note.transAxes, fontsize=8.5, color=C.INK_SECONDARY, va="top", ha="left",
     )  # fmt: skip
@@ -181,7 +184,9 @@ def draw_table(plt, held, fid: str, out: str, model: dict) -> None:
         x=0.01, ha="left", fontsize=10.0,
     )  # fmt: skip
     facts = {
-        "figure": "the held-out prediction residual of the class P1D: 100 e against k, one line per redshift",
+        "figure": "the held-out prediction residual of the class P1D: e against k, one line per redshift",
+        "vertical_axis": "e, the rms of ln(prediction / truth): a number on the natural logarithm, not a percentage; "
+        "on a spectrum it is the range from the value times exp(-e) to the value times exp(+e)",
         "what_it_is": "an empirical validation diagnostic, not a calibrated uncertainty",
         "fidelity": FIDELITY_LABEL[fid],
         "held_out": rec[fid]["what"],
@@ -193,14 +198,14 @@ def draw_table(plt, held, fid: str, out: str, model: dict) -> None:
         "midpoint": {k: C.MIDPOINT[k] for k in ("hub", "omegamh2")},
         "dashed": f"redshifts above {Z_VALIDATED_MAX:g}",
         "open_markers": f"the {PH.N_LARGEST_MODES} largest modes of the box",
-        "summary_per_cent": row_summary(e, z),
+        "summary": row_summary(e, z),
         "model": model,
     }
     if sens is not None:
         facts["sensitivity"] = {
             "dotted": f"the table without {PH.design_point(sens['without_sim'])}, at z = {float(z[-1]):g}",
             "statement": sens["statement"],
-            "summary_per_cent": row_summary(held.e_sens, z),
+            "summary": row_summary(held.e_sens, z),
         }
     C.save(fig, out, facts)
     plt.close(fig)
@@ -252,7 +257,7 @@ def draw_by_simulation(
             hit = np.where(np.abs(z - zz) <= 1e-6)[0]
             ax.axhline(0.0, color=C.GRID, lw=0.8, zorder=1)
             ax.set_xscale("log")
-            ax.set_yscale("symlog", linthresh=SYMLOG_LINEAR_PER_CENT, linscale=1.0)
+            ax.set_yscale("symlog", linthresh=SYMLOG_LINEAR, linscale=1.0)
             ax.set_title(f"{FIDELITY_LABEL[fid]}, z = {zz:g}", loc="left")
             if hit.size != 1:
                 ax.text(
@@ -270,14 +275,14 @@ def draw_by_simulation(
                 if not np.isfinite(tf).any():
                     continue  # this simulation has no snapshot at this redshift
                 rung = central_rung(tf, zz)
-                y = 100.0 * d[i, hit[0], rung, i_row]
+                y = d[i, hit[0], rung, i_row]
                 if not np.isfinite(y).any():
                     continue  # no residual of this simulation at this redshift
                 rungs.setdefault(FIDELITY_LABEL[fid], {}).setdefault(f"{zz:g}", []).append(rung)
                 p = PH.design_point(sim)
                 C.line(ax, k, y, **look[p])
                 drawn[p] = look[p]
-    ticks = [-100, -30, -10, -5, 0, 5, 10, 30]
+    ticks = [-1, -0.3, -0.1, -0.05, 0, 0.05, 0.1, 0.3]
     for ax in axes.ravel():
         ax.yaxis.set_major_locator(FixedLocator(ticks))
         ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
@@ -285,7 +290,7 @@ def draw_by_simulation(
     for ax in axes[-1]:
         ax.set_xlabel("k (s/km)")
     for ax in axes[:, 0]:
-        ax.set_ylabel("100 x ln(prediction / truth)\n(per cent)")
+        ax.set_ylabel("d = ln(prediction / truth)")
 
     def text(p):
         if p == left_out:
@@ -311,7 +316,7 @@ def draw_by_simulation(
         fig,
         out,
         {
-            "figure": f"the residual of {ROW_NOUN[row]} per held-out simulation: 100 ln(prediction / truth) against k",
+            "figure": f"the residual of {ROW_NOUN[row]} per held-out simulation: ln(prediction / truth) against k",
             "row": row,
             "what_it_is": "an empirical validation diagnostic, not a calibrated uncertainty",
             "rows": ["LF", "LF+MF"],
@@ -327,7 +332,8 @@ def draw_by_simulation(
             },
             "mean_flux": "the rung whose mean flux is nearest the fit of Kim et al. (2007) at the redshift",
             "rung_indices_drawn": rungs,
-            "vertical_axis": f"linear within {SYMLOG_LINEAR_PER_CENT:g} per cent, logarithmic beyond",
+            "vertical_axis": f"d = ln(prediction / truth), not a percentage; linear within {SYMLOG_LINEAR:g}, "
+            "logarithmic beyond",
             "wavenumbers": "the modes of the box in s/km at each redshift, for hub and omegamh2 of the midpoint",
             "record_sha256": held.record_sha256,
             "evidence_file_sha256": rec["tables"]["sha256"],
