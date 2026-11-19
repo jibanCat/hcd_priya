@@ -381,8 +381,9 @@ from the authors of Bird et al. 2023, JCAP 2023 (10) 037
 repository, and their release is planned but not yet available.
 <!-- docs:data:end -->
 
-**Trained models.** They come in the companion package `hcd-priya-models` (data only, MIT licence), which
-`hcd-priya` requires. `hp.load_published()` finds the model in the installed package and loads it only against
+**Trained models.** They come in the companion package `hcd-priya-models`, which `hcd-priya` requires: a data
+package whose model files are under the Creative Commons Attribution 4.0 licence (CC BY 4.0) and whose few lines of
+Python are under the MIT licence. `hp.load_published()` finds the model in the installed package and loads it only against
 the sha256 that `hcd-priya` itself lists for that model version (`hcd_analysis/published_models.py`): for a
 published model the digest comes from the code package, never from the model package, so changed model files are
 refused, and so is a model version this version of the code does not list. That list holds the model release that

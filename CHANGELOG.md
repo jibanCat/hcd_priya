@@ -48,8 +48,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   clean-lineage bundle, with free HCD amplitudes and no informative HCD priors.
 - **Production and research bundles kept apart.** A bundle trained without some simulations (a validation fold) can
   only be loaded through the explicit research path.
-- **The trained models come in a companion package, `hcd-priya-models`** (`model_package/`; data only, MIT
-  licence), which `hcd-priya` now requires. **`load_published`** (`hcd_analysis.predictor`) loads a model by name
+- **The trained models come in a companion package, `hcd-priya-models`** (`model_package/`; a data package: the
+  model files under CC BY 4.0, its few lines of Python under the MIT licence), which `hcd-priya` now requires. **`load_published`** (`hcd_analysis.predictor`) loads a model by name
   from the installed model package, only against the sha256 listed in `hcd_analysis/published_models.py`.
   With no argument it loads the LF+MF model; a name is compared without case and punctuation. The examples write
   the nine parameters out; `example_params` gives the midpoint of the training range of each parameter and prints
