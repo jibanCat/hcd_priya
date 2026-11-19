@@ -94,9 +94,10 @@ disabled until then.
 - [ ] A model is released only after its own acceptance: a clean lineage, a published manifest digest and a model
       card.
 - [ ] The model package is prepared from the accepted release, in a clean clone: `python model_package/prepare.py
-      --release RELEASE_DIR --release-sha256 SHA256` checks the digest, copies only what the release names and its
-      documentation files, and verifies every file. Its version is the release's version. The model files are not
-      committed.
+      --release RELEASE_DIR --release-sha256 SHA256 --allow-extra examples` checks the digest, copies only what the
+      release names, its documentation files and its `examples` folder, and verifies every file. The release holds
+      an `examples` folder that `release.json` does not name, so the command names it; without the option
+      `prepare.py` stops. Its version is the release's version. The model files are not committed.
 - [ ] The entry that `prepare.py` prints (name, version, format, the sha256 of `release.json`) is in
       `hcd_analysis/published_models.py` of the commit to be tagged, and `pyproject.toml` pins `hcd-priya-models`
       to exactly that version (`==`).

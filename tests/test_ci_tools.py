@@ -1089,3 +1089,11 @@ def test_a_release_is_refused_unless_the_latest_nightly_run_on_its_commit_passed
     assert (
         "env" not in gate[0]
     ), "publish.yml: the gate step takes no token (its permissions stay unchanged)"
+    # the commands of the build job, a continued line joined to its first line
+    commands = (
+        "\n".join(s.get("run", "") for s in publish["steps"]).replace("\\\n", " ").split("\n")
+    )
+    prepare = [c for c in commands if "prepare.py --release" in c]
+    assert len(prepare) == 1 and "--allow-extra examples" in " ".join(
+        prepare[0].split()
+    ), "publish.yml: prepare.py must be told of the release's examples folder, or it stops"

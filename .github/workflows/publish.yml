@@ -112,7 +112,9 @@ jobs:
           python tools/ci/wheel_requires.py "$(ls "$RUNNER_TEMP"/code/*.whl)" --without hcd-priya-models > "$RUNNER_TEMP/requirements.txt"
           python -m pip install -c tools/ci/constraints-devenv.txt -r "$RUNNER_TEMP/requirements.txt"
           python -m pip install --no-deps "$(ls "$RUNNER_TEMP"/code/*.whl)"
-          python model_package/prepare.py --release "$RUNNER_TEMP/release" --release-sha256 "$RELEASE_SHA256"
+          # the release holds an examples folder that release.json does not name: it is named here, or prepare.py stops
+          python model_package/prepare.py --release "$RUNNER_TEMP/release" --release-sha256 "$RELEASE_SHA256" \
+            --allow-extra examples
           SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist model_package
           python tools/ci/check_dist_content.py dist --release
           ls -l dist && sha256sum dist/*
