@@ -12,8 +12,11 @@ release and their published digests, so that ONE published digest anchors the wh
 The two parts above are required. A release may also name optional parts, from the closed list ``OPTIONAL_PARTS``,
 each a directory with the digest of its record:
 
-      release.json     {..., "incidence": {"dir": "<name>", "record_sha256": "<64 hex>"}}
-      <incidence dir>/ the hcd_priya.incidence_mf_record/1 record (incidence_mf.py): the MF correction of dN/dX
+      release.json     {..., "incidence": {"dir": "<name>", "record_sha256": "<64 hex>"},
+                             "p1d_heldout": {"dir": "<name>", "record_sha256": "<64 hex>"}}
+      <incidence dir>/   the hcd_priya.incidence_mf_record/1 record (incidence_mf.py): the MF correction of dN/dX
+      <p1d_heldout dir>/ the hcd_priya.p1d_heldout_record/1 record (p1d_heldout.py): the held-out prediction
+                         residual of the class P1D, with its evidence file
 
 There is one format. A manifest without an optional part is byte for byte what it was before optional parts
 existed. A part outside the list is refused, so a reader that does not know a part never ignores it: a reader from
@@ -39,7 +42,10 @@ FILE = "release.json"
 KEYS = {"format", "release_version", "backbone", "mf"}
 PARTS = {"backbone": ("dir", "manifest_sha256"), "mf": ("dir", "record_sha256")}
 # The optional parts a release may name (a closed list; a later part is added here).
-OPTIONAL_PARTS = {"incidence": ("dir", "record_sha256")}
+OPTIONAL_PARTS = {
+    "incidence": ("dir", "record_sha256"),
+    "p1d_heldout": ("dir", "record_sha256"),
+}
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _PLAIN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*\Z")
 
@@ -115,7 +121,8 @@ def _part_dirs(d, m):
 def read_release_manifest(release_dir, expected_sha256):
     """Read ``release.json`` through a no-follow descriptor, compare its sha256 with the published one BEFORE parsing
     (strict JSON: no duplicate keys, no NaN), validate it, and resolve the part directories. Returns
-    (manifest dict, {"backbone": path, "mf": path, and "incidence": path when the manifest names it}).
+    (manifest dict, {"backbone": path, "mf": path, and the path of each optional part the manifest names:
+    "incidence", "p1d_heldout"}).
     """
     if type(expected_sha256) is not str or not _HEX64.match(
         expected_sha256
@@ -152,14 +159,21 @@ def write_release_manifest(
     mf_record_sha256,
     incidence_dir=None,
     incidence_record_sha256=None,
+    p1d_heldout_dir=None,
+    p1d_heldout_record_sha256=None,
 ):
     """Write ``release.json`` ONCE (an existing one is refused) into ``release_dir``, which already holds every part
     under the given directory names. With ``incidence_dir`` and ``incidence_record_sha256`` (both or neither) the
     manifest also names the incidence MF record, an optional part; without them it is byte for byte what it was
-    before optional parts existed. Returns (path, sha256: the anchor to publish)."""
+    before optional parts existed. ``p1d_heldout_dir`` and ``p1d_heldout_record_sha256`` (both or neither) name
+    the P1D held-out record in the same way. Returns (path, sha256: the anchor to publish)."""
     if (incidence_dir is None) != (incidence_record_sha256 is None):
         raise ReleaseManifestError(
             "give both incidence_dir and incidence_record_sha256, or neither"
+        )
+    if (p1d_heldout_dir is None) != (p1d_heldout_record_sha256 is None):
+        raise ReleaseManifestError(
+            "give both p1d_heldout_dir and p1d_heldout_record_sha256, or neither"
         )
     m = {
         "format": FORMAT,
@@ -169,6 +183,8 @@ def write_release_manifest(
     }
     if incidence_dir is not None:
         m["incidence"] = {"dir": incidence_dir, "record_sha256": incidence_record_sha256}
+    if p1d_heldout_dir is not None:
+        m["p1d_heldout"] = {"dir": p1d_heldout_dir, "record_sha256": p1d_heldout_record_sha256}
     check_release_manifest(m)
     d = os.fspath(release_dir)
     _part_dirs(d, m)

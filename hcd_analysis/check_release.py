@@ -11,7 +11,9 @@ What it does, in order: reports where ``hcd_analysis`` was imported from; loads 
 ``load_published`` with ``--published``, which takes the files from the installed ``hcd-priya-models``), which
 verifies every file against the published digests; predicts the
 per-class P1D at the centre of the parameter box for each requested redshift, at each fidelity the model serves
-there; mixes in the HCD classes; and, with ``--reference``, compares the numbers with reference predictions published beside the release.
+there; mixes in the HCD classes; for a release that carries a P1D held-out record, recomputes that record's tables
+from the residual vectors of its evidence file; and, with ``--reference``, compares the numbers with reference
+predictions published beside the release.
 It prints one line per step. It exits 0 when everything passes: the last line is PASSED after a comparison with a
 reference, "PASSED (no reference compared)" without one, and "PASSED (synthetic build: ...)" with a synthetic test
 build of the model package, so that neither is read as the check of a model. It exits 1 when a step fails
@@ -166,6 +168,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"release.json sha256 {release.get('release_sha256')}, {emu.n_members} members"
         )
         cases = predictions(emu, args.z)
+        held = getattr(emu, "_p1d", None)
+        if (
+            held is not None
+        ):  # the optional part: recompute its tables from its own residual vectors
+            from hcd_analysis.emulator import p1d_heldout
+
+            n_res = p1d_heldout.verify_tables(emu._p1d_dir, held)
+            print(
+                f"P1D held-out record {held.record_sha256[:12]}: its tables recomputed from {n_res} residual "
+                "values of its evidence file: equal"
+            )
     except Exception as exc:  # any failure to load or predict is the result of this check
         print(f"FAILED: {type(exc).__name__}: {exc}")
         return 1

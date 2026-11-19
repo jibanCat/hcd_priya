@@ -111,10 +111,11 @@ def clean() -> None:
 
 def release_parts(src: str) -> tuple[str, list[str], str]:
     """The release's version, the names of the directories that release.json names (the backbone, the MF record
-    and, if the release names one, the incidence MF record), and the release's format."""
+    and, if the release names them, the incidence MF record and the P1D held-out record), and the release's format.
+    """
     with open(os.path.join(src, "release.json"), encoding="utf-8") as fh:
         doc = json.load(fh)
-    parts = [str(doc[p]["dir"]) for p in ("backbone", "mf", "incidence") if p in doc]
+    parts = [str(doc[p]["dir"]) for p in ("backbone", "mf", "incidence", "p1d_heldout") if p in doc]
     return str(doc["release_version"]), parts, str(doc["format"])
 
 

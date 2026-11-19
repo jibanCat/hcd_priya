@@ -106,6 +106,21 @@ never interpolated between redshifts. ``labels["incidence_mf_error"]`` says what
 prediction that returns a corrected value without an estimate beside it emits ``HeldOutErrorWarning``, once per
 process for each record.
 
+**The held-out prediction residual of the class spectra.** A release may also name a P1D held-out record, an
+optional part of its manifest (format ``hcd_priya.p1d_heldout_record/1``, ``emulator.p1d_heldout``). Then every
+prediction carries ``P_class_err``: for each class and wavenumber, the rms of ln(prediction / truth) over
+simulations the model was made without, for the fidelity of the prediction (LF: a fold backbone against its
+held-out low-fidelity simulation; LF+MF: the backbone and the multi-fidelity table both made without the
+high-resolution run it is compared with). On the spectrum itself the range is ``P_class_lower`` to
+``P_class_upper``: ``P_class * exp(-P_class_err)`` and ``P_class * exp(+P_class_err)``, each end computed on its
+own. ``P_mix_err`` is the same residual for the class spectra mixed with each held-out simulation's own class
+fractions. These are empirical validation results, not calibrated predictive uncertainties: they rest on five or
+six simulations, and a substantial part of the residual is present for simulations the model was trained on.
+``labels["p1d_heldout_error"]`` says what the numbers are and keeps three cases apart: the typical residual
+(z 2.2 to 4.6, above the largest modes), the largest modes, and redshifts above 4.6. ``member_std`` is another
+thing, the spread over the members' random seeds. The likelihood (``hcd_analysis.likelihood``) does not use any
+of these fields.
+
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
 k_p = 0.78 Mpc^-1, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
 snapshot redshift (2.0, 2.2, ..., 5.4, matched to 1e-9). The mean flux: either ``tau_eff``, -ln<F> of the PRIYA-filtered
@@ -162,6 +177,7 @@ import jax
 import jax.numpy as jnp
 
 from .emulator import incidence_mf as _IM
+from .emulator import p1d_heldout as _PH
 from .emulator import kcoord as _K
 from .emulator import mf_release as _MR
 from .emulator import safe_h5 as _H
@@ -658,6 +674,10 @@ class Prediction:
         cddf_upper    (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         dndx_err      (3,)        (n_z, 3)        only with an incidence record; else None
         cddf_err      (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
+        P_class_err   (4, K)      (n_z, 4, K)     only with a P1D held-out record; else None
+        P_class_lower (4, K)      (n_z, 4, K)     only with a P1D held-out record; else None
+        P_class_upper (4, K)      (n_z, 4, K)     only with a P1D held-out record; else None
+        P_mix_err     (K,)        (n_z, K)        only with a P1D held-out record; else None
         member_std    (4, K)      (n_z, 4, K)
         tau_eff       float       (n_z,)
 
@@ -735,6 +755,29 @@ class Prediction:
     cddf_upper : numpy.ndarray or None
         Shape (Nbin,). The upper end of that range: ``cddf * exp(+cddf_err)``, computed on its own
         as for ``dndx``. NaN where ``cddf_err`` is NaN; None without an incidence record.
+    P_class_err : numpy.ndarray or None
+        Shape (4, K), in the order of ``P_class``. The held-out prediction residual of each class
+        spectrum: the rms of ln(prediction / truth) over simulations the model was made without,
+        for the fidelity of this prediction. A number on the logarithm, not on ``P_class``; the
+        range on ``P_class`` itself is ``P_class_lower`` to ``P_class_upper``. It is an empirical
+        validation result, not a calibrated predictive uncertainty: read
+        ``labels["p1d_heldout_error"]`` for its sizes in three separate cases and for what it does
+        not cover. With a requested ``k`` it is carried to those wavenumbers by the operation that
+        carries ``P_class`` there. NaN at a redshift the record has no estimate for; never
+        interpolated between redshifts. None without a P1D held-out record.
+    P_class_lower : numpy.ndarray or None
+        Shape (4, K). The lower end of the held-out range of ``P_class``, on ``P_class`` itself:
+        ``P_class * exp(-P_class_err)``. None without a P1D held-out record.
+    P_class_upper : numpy.ndarray or None
+        Shape (4, K). The upper end: ``P_class * exp(+P_class_err)``. Each end is computed from
+        the logarithm on its own. Like ``P_class_err``, the range shows a size found in validation;
+        it is not an interval of a known distribution. None without a P1D held-out record.
+    P_mix_err : numpy.ndarray or None
+        Shape (K,). The same residual for the mixture of the class spectra, measured with each
+        held-out simulation's own counted class fractions (prediction and truth mixed alike). The
+        four class residuals cannot be combined without their correlations; this is the result
+        for those fractions. For the result of ``add_hcd`` with other fractions it is an
+        indication only. None without a P1D held-out record.
     member_std : numpy.ndarray or None
         Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
         members disagree. It is not a calibrated emulator error and not a covariance. None for a
@@ -807,6 +850,10 @@ class Prediction:
     dndx_upper: np.ndarray | None = None
     cddf_lower: np.ndarray | None = None
     cddf_upper: np.ndarray | None = None
+    P_class_err: np.ndarray | None = None
+    P_mix_err: np.ndarray | None = None
+    P_class_lower: np.ndarray | None = None
+    P_class_upper: np.ndarray | None = None
 
 
 class _PredictorBase:
@@ -899,6 +946,8 @@ class _PredictorBase:
             out["mf"] = self._mf.provenance()
         if self._inc is not None:
             out["incidence_mf"] = self._inc.provenance()
+        if self._p1d is not None:
+            out["p1d_heldout"] = self._p1d.provenance()
         if self._release is not None:
             out["release"] = copy.deepcopy(self._release)
         return out
@@ -1084,6 +1133,49 @@ class _PredictorBase:
         # validated_z_min: the lower edge of the redshift range over which the MF correction is validated (the frozen
         # grouped-validation domain); at build time this is the domain edge, not a passed validation.
         self._mf_vzmin = float(rec["validated_z_min"])
+
+    # ------------------------------------------------------------------ the held-out residual of the class P1D
+    _p1d = None
+    _p1d_dir = None
+
+    def _attach_p1d_heldout(self, held):
+        """Bind a loaded P1D held-out record (``p1d_heldout.load_record``, anchored; re-derived from its sealed
+        bytes by ``p1d_heldout.reverify``). The record must be of this model: its LF cache is this backbone's
+        training cache, its modes are the model's, its HR cache is the MF record's, and the high-resolution runs
+        its LF+MF table held out, one at a time, are the runs the MF record was fitted on (one design point each,
+        so the table is of this composition). A bundle without an MF record refuses it: the record holds the
+        residual of the LF+MF prediction too."""
+        held = _PH.reverify(held)
+        if self._mf is None:
+            raise _MR.MFRecordError(
+                "the P1D held-out record holds the residual of the LF+MF prediction too; this bundle carries no "
+                "MF record"
+            )
+        r, sha = held.record, held.record_sha256[:12]
+        cache = self._backbone_identity()["cache_sha256"]
+        if r["inputs"]["lf_cache"]["sha256"] != cache:
+            raise _MR.MFRecordError(
+                f"the P1D held-out record {sha} was measured on the LF cache "
+                f"{r['inputs']['lf_cache']['sha256'][:12]}, not on this bundle's training cache {cache[:12]}"
+            )
+        if held.n_modes != int(np.asarray(self._k_com).size):
+            raise _MR.MFRecordError(
+                f"the P1D held-out record {sha} has {held.n_modes} modes, this model has "
+                f"{int(np.asarray(self._k_com).size)}"
+            )
+        mf = self._mf.record
+        if r["inputs"]["hr_cache"]["sha256"] != mf["caches"]["hr"]["sha256"]:
+            raise _MR.MFRecordError(
+                f"the P1D held-out record {sha} was measured on another HR cache than the MF record's"
+            )
+        want = sorted(_PH.design_point(s) for s in mf["train_sims"])
+        got = sorted(_PH.design_point(s) for s in r["lfmf"]["sims"])
+        if want != got:
+            raise _MR.MFRecordError(
+                f"the P1D held-out record {sha} held out the high-resolution runs {got}, but the MF record was "
+                f"fitted on {want}: the LF+MF table is not of this composition"
+            )
+        self._p1d = held
 
     # ------------------------------------------------------------------ the MF correction of the incidence
     _inc = None
@@ -1399,6 +1491,9 @@ class _PredictorBase:
           ``dndx`` has a held-out error beside it in ``dndx_err``, and so a range in ``dndx_lower``
           and ``dndx_upper`` (the per-bin gaps of ``cddf_err`` are NaN in that array and in the
           two bounds of ``cddf``).
+        - With a P1D held-out record: ``p1d_heldout_error_available``, every class and wavenumber
+          of ``P_class`` has a held-out prediction residual beside it in ``P_class_err``, and so
+          a range in ``P_class_lower`` and ``P_class_upper``.
         - ``synthetic_build``: present, and True, only for a model package built with untrained
           networks for tests; ``labels["synthetic_build"]`` says so in words.
 
@@ -1537,9 +1632,10 @@ class _PredictorBase:
                 for z in zs
             ]
         )
+        binds = None
         if k is not None:
             kreq = np.broadcast_to(k, (len(zs), k.shape[-1])) if k.ndim == 1 else k
-            out = []
+            out, binds = [], []
             for i, z in enumerate(zs):
                 lo, hi = modes[i, 0], modes[i, -1]
                 if np.any(kreq[i] < lo) or np.any(kreq[i] > hi):
@@ -1556,6 +1652,7 @@ class _PredictorBase:
                     CHECKPOINT_SCHEMA_VERSION,
                 )
                 b = _K.bind(kg, jnp.asarray(kreq[i]))
+                binds.append(b)
                 out.append(np.asarray(_K.at_data(b, jnp.asarray(P[i]))))
             P = np.stack(out)
             kout = np.array(kreq, dtype=np.float64)
@@ -1616,6 +1713,21 @@ class _PredictorBase:
             flags["incidence_heldout_error_available"] = bool(np.all(np.isfinite(dndx_err)))
             if use_mf:
                 self._warn_no_heldout_error(dndx_err, cddf_err, cddf)
+        p1d_err = None
+        if self._p1d is not None:
+            # the held-out prediction residual of this fidelity, (n_z, 5, K): the four classes, then the mixture
+            p1d_err = np.stack([self._p1d.err(z, use_mf) for z in zs])
+            if (
+                binds is not None
+            ):  # carried to the requested k by the operation that carries P_class there
+                p1d_err = np.stack(
+                    [
+                        np.asarray(_K.at_data(binds[i], jnp.asarray(p1d_err[i])), dtype=np.float64)
+                        for i in range(len(zs))
+                    ]
+                )
+            flags["p1d_heldout_error_available"] = bool(np.all(np.isfinite(p1d_err)))
+            labels["p1d_heldout_error"] = self._p1d.label(use_mf)
         # a mean flux outside what the model covers is served, flagged, and said aloud: once per call
         if flags["mean_flux_off_ladder"]:
             self._warn_off_ladder(zs, taus)
@@ -1631,6 +1743,14 @@ class _PredictorBase:
                 "cddf_lower": cddf * np.exp(-cddf_err),
                 "cddf_upper": cddf * np.exp(+cddf_err),
             }
+        if p1d_err is not None:
+            # the same for the class spectra: the residual on the logarithm, and the range on the spectrum itself
+            bounds.update(
+                P_class_err=p1d_err[:, :4, :],
+                P_mix_err=p1d_err[:, 4, :],
+                P_class_lower=Pm * np.exp(-p1d_err[:, :4, :]),
+                P_class_upper=Pm * np.exp(+p1d_err[:, :4, :]),
+            )
         return Prediction(
             z=zs[0] if single else _frozen(zs),
             k=_frozen(sel(kout)),
@@ -1966,6 +2086,14 @@ class ResearchPredictor(_PredictorBase):
             load_purpose=self._rb.load_purpose,
         )
 
+    def _attach_p1d_heldout(self, held):
+        """Refused: a P1D held-out record states the residual of a release model, measured with its fold models.
+        A research model (a fold is one) has no such record of its own."""
+        raise _MR.MFRecordError(
+            "a research model carries no P1D held-out record: the record states the held-out prediction residual "
+            "of a release model, measured with that model's folds"
+        )
+
     def _attach_incidence(self, inc):
         """As the base, after the held-out guard of a research model: the record's table must be built without the
         simulations this backbone holds out (as re-derived from the member metas), and the record must say so.
@@ -2182,6 +2310,17 @@ def load_release(release_dir: str | os.PathLike[str], expected_release_sha256: s
                 parts["incidence"], expected_record_sha256=m["incidence"]["record_sha256"]
             )
         )
+    if (
+        "p1d_heldout" in parts
+    ):  # the optional part: the held-out prediction residual of the class P1D
+        b._attach_p1d_heldout(
+            _PH.load_record(
+                parts["p1d_heldout"], expected_record_sha256=m["p1d_heldout"]["record_sha256"]
+            )
+        )
+        b._p1d_dir = parts[
+            "p1d_heldout"
+        ]  # where the evidence file is (check_release recomputes the tables)
     b._release = {
         "format": m["format"],
         "release_version": m["release_version"],
