@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: >-
   If you use this software, please cite it as below, and cite Ho et al. (2026), the analysis it continues.
 type: software
-title: "hcd_priya: a Lyman-alpha forest P1D emulator with high-column-density absorber classes, built on PRIYA simulations"
+title: "hcd_priya: A High-Column-Density Absorber Emulator for Lyman-α Forest Cosmology"
 authors:
   - given-names: Ming-Feng
     family-names: Ho
