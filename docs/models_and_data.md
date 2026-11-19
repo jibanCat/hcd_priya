@@ -147,3 +147,28 @@ released yet. A predictor also says which corrections it applies in one INFO rec
 `predict` or `predict_many` while INFO records pass, and as a DEBUG record at every later corrected call. The library
 configures no logging, so the record shows only when the application lets it pass. Details:
 `docs/release_format_h5.md`, section "The incidence MF record".
+
+**The held-out prediction residual of the class spectra.** A release may carry one more optional part, a P1D
+held-out record. With it every prediction carries `P_class_validation_rms_log`: for each class and wavenumber, the
+rms of ln(prediction / truth) over simulations the model was made without, for the fidelity of the prediction, a
+number on the logarithm; the range on the spectrum itself, `P_class_validation_lower` to
+`P_class_validation_upper` (the value times exp(-rms_log) and the value times exp(+rms_log), each end computed on
+its own); and `P_mix_validation_rms_log`, the same for the class spectra mixed with each held-out simulation's own
+class fractions. These are empirical validation diagnostics, not calibrated predictive uncertainties: they rest on
+five or six simulations that share their initial phases with the training simulations, and a substantial part of
+the residual is present for simulations the model was trained on. `pred.labels["p1d_validation"]` gives the sizes
+in three separate cases (the typical residual at redshifts 2.2 to 4.6 above the two largest modes of the box; those
+two modes; redshifts above 4.6), the record's notes, and what the numbers do not cover. `member_std` is another
+thing: the spread over the members' random seeds. The likelihood does not use these fields and adds no emulator
+term to the data covariance. Details: `docs/release_format_h5.md`,
+section "The P1D held-out record". Figures of these numbers against wavenumber and redshift, and of the residual of
+each held-out simulation: [`docs/model_figures.md`](model_figures.md), the last section; `hp.p1d_heldout_record(emu)`
+returns the record they are drawn from.
+
+**A known defect of the training data at z = 5.4.** The source spectra files of two low-fidelity simulations are
+incomplete at z = 5.4: in compact regions of the box the optical depth of the gas is missing, which gives those two
+rows several times the usual power at the largest scales. It is a defect of the spectra extraction, not physical
+variation and not an effect of this package's processing. Both rows are in the training data of the LF model, and
+the release is not retrained for it. One of the two simulations is held out by a fold, so the LF table of the P1D
+held-out record at z = 5.4 is dominated by it; the record states this and gives the table without that simulation
+beside it as a sensitivity test. Redshifts above 4.6 lie outside the validated range in any case.

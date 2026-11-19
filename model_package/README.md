@@ -22,8 +22,9 @@ shape of pred.P_class, the P1D of clean, LLS, subDLA, DLA: (4, 172)
 
 - **What it holds.** The LF+MF release of the emulator (its name in this package is `lfmf`; `load_published()`
   loads it without a name): the low-fidelity backbone bundle, the multi-fidelity record of the class spectra, the
-  incidence multi-fidelity record (the correction of dN/dX and the CDDF, with their held-out errors) and
-  `release.json`, in the pickle-free format described in the hcd_priya documentation.
+  incidence multi-fidelity record (the correction of dN/dX and the CDDF, with their held-out errors), the P1D
+  held-out record (the held-out prediction residual of the class spectra, with every residual vector it was
+  reduced from) and `release.json`, in the pickle-free format described in the hcd_priya documentation.
 - **How it is checked.** `hcd-priya` pins the sha256 of the release it accepts. `load_published` loads the files of
   this package only if they verify against that digest, file by file. This package loads nothing itself.
 - **How it is built.** The model files are not in git. `python model_package/prepare.py --release RELEASE_DIR

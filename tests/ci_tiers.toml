@@ -82,6 +82,7 @@ release = "only with the real assets, before a release (the assets job); listed 
 "tests/test_analyze_lls_dispcenter.py" = { tier = "source", level = "nightly" }
 "tests/test_blinding.py" = { tier = "wheel", level = "nightly" }
 "tests/test_build_incidence_mf.py" = { tier = "source", level = "pr" }
+"tests/test_build_p1d_heldout.py" = { tier = "source", level = "pr" }
 "tests/test_build_mf_release.py" = { tier = "source", level = "pr" }
 "tests/test_bundle_lineage.py" = { tier = "wheel", level = "pr" }
 "tests/test_cache_builder_catalogue_guard.py" = { tier = "source", level = "nightly" }
@@ -139,6 +140,7 @@ release = "only with the real assets, before a release (the assets job); listed 
 "tests/test_likelihood.py" = { tier = "wheel", level = "pr" }
 "tests/test_likelihood_driver.py" = { tier = "wheel", level = "nightly" }
 "tests/test_load_published.py" = { tier = "wheel", level = "pr" }
+"tests/test_p1d_heldout.py" = { tier = "wheel", level = "pr" }
 "tests/test_lineage.py" = { tier = "wheel", level = "pr" }
 "tests/test_lit_dndx.py" = { tier = "source", level = "nightly" }
 "tests/test_lit_dndx_fits.py" = { tier = "source", level = "nightly" }

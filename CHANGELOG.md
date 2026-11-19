@@ -15,6 +15,20 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   (1+z) L H_0 / c, a factor 1+z short; they now give (1+z)^2 L_com H_0 / c, which the code computes (text only).
 
 ### Added
+- **The held-out prediction residual of the class spectra**, an optional part of a release (the P1D held-out
+  record, format `hcd_priya.p1d_heldout_record/1`; `hcd_analysis/emulator/p1d_heldout.py`). With it a prediction
+  carries `P_class_validation_rms_log` (4, K): for each class and wavenumber, the rms of ln(prediction / truth) over
+  simulations the model was made without, for the fidelity of the prediction, a number on the logarithm;
+  `P_class_validation_lower` and `P_class_validation_upper`, the value times exp(-rms_log) and times
+  exp(+rms_log); `P_mix_validation_rms_log`, the same for the class spectra mixed with each held-out simulation's
+  own class fractions; the flag `p1d_validation_available`; and `labels["p1d_validation"]`, which states the sizes
+  in three separate cases (the typical residual, the two largest modes of the box, redshifts above 4.6). These are
+  empirical validation diagnostics, not calibrated predictive uncertainties. The record ships every residual vector
+  it was reduced from, and `check_release` recomputes its tables from them. No other number of a prediction
+  changes, and the likelihood is unchanged: it adds no emulator term (`docs/release_format_h5.md`, section "The P1D
+  held-out record"; `scripts/build_p1d_heldout.py`). Three figures show it against wavenumber and redshift for
+  each class and the mixture, and per held-out simulation (`scripts/figures/fig_p1d_validation.py`;
+  `docs/model_figures.md`), and `hp.p1d_heldout_record(emu)` returns the record of a loaded model.
 - **Science tests without a model**, at the pr level: the wavenumber convention of the native modes, the mean-flux
   law, the refusal of wavenumbers in h/Mpc above the modes, the statistics of the Gaussian likelihood over seeded
   draws, the interpolation error, the decode of the incidence outputs, the normalisation of the CDDF, the CDDF
@@ -23,7 +37,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   `docs/likelihood.md` states that wavenumbers must be in s/km.
 - **Science tests of a trained model**, at the release level, in the assets job: golden values (relative 1e-12 on
   the pinned stack, 1e-6 otherwise), positive class spectra, the total P1D rising with A_p below k = 0.015 s/km,
-  fractions and incidence inside their ranges, the CDDF against dN/dX within the held-out errors
+  fractions and incidence inside their ranges, the CDDF against dN/dX within the held-out errors, the held-out
+  prediction residual of the class spectra against the release's own record, recomputed from its residual vectors
   (`tests/test_science_model.py`; golden files from `tools/ci/make_science_golden.py`), and the same counts on the
   LF training cache (`tests/test_science_training_cache.py`).
 - **Release format `hcd_priya.h5/2`** for emulator bundles: HDF5 + JSON, pickle-free, with a lineage block that ties

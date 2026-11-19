@@ -117,21 +117,24 @@ print("flags that are set (read them before you use the numbers):", sorted(n for
 ```
 
 With the trained LF+MF model this prints (the model has 172 wavenumbers; no spectrum value is shown here). The
-stand-in model of today's install has another number of wavenumbers, carries no incidence record (so neither
-incidence flag), and its predictions carry the flag `synthetic_build`:
+stand-in model of today's install has another number of wavenumbers, carries no incidence record and no P1D
+held-out record (so none of the three flags of those records), and its predictions carry the flag
+`synthetic_build`:
 
 ```text
 model: LF+MF
 classes, in the order of P_class: ('clean', 'LLS', 'subDLA', 'DLA')
 shape of pred.P_class, the P1D in km/s of each class: (4, 172)
 shape of pred.k, the wavenumbers in s/km: (172,)
-flags that are set (read them before you use the numbers): ['incidence_heldout_error_available', 'incidence_mf_applied', 'k_downweighted', 'mf_applied']
+flags that are set (read them before you use the numbers): ['incidence_heldout_error_available', 'incidence_mf_applied', 'k_downweighted', 'mf_applied', 'p1d_validation_available']
 ```
 
-The four flags say that the multi-fidelity correction was applied to the class spectra (`mf_applied`) and to the
+The five flags say that the multi-fidelity correction was applied to the class spectra (`mf_applied`) and to the
 incidence (`incidence_mf_applied`), that the release carries the held-out error of the incidence
-(`incidence_heldout_error_available`), and that some of the model's own wavenumbers lie below 1e-3 s/km, where
-training gave less weight (`k_downweighted`).
+(`incidence_heldout_error_available`), that every class spectrum has a held-out prediction residual beside it
+(`p1d_validation_available`: `pred.P_class_validation_rms_log`, an empirical validation diagnostic, not a
+calibrated predictive uncertainty; `pred.labels["p1d_validation"]` says what it is), and that some of the model's
+own wavenumbers lie below 1e-3 s/km, where training gave less weight (`k_downweighted`).
 
 - **What "LF+MF" is.** The emulator trained on the low-fidelity (low-resolution) PRIYA simulations, with the
   multi-fidelity correction that calibrates its class spectra to the high-resolution simulations
@@ -274,7 +277,10 @@ Drawn by the scripts in [`scripts/figures/`](scripts/figures/); the data files a
 and CDDF figures need a model with an incidence record; their measured points and the 60
 design points of their bands are in the repository. No model is published yet: the two model figures were drawn
 from the candidate LF+MF release (staged, not yet public). The full captions and what each figure does not test:
-[`docs/model_figures.md`](docs/model_figures.md).
+[`docs/model_figures.md`](docs/model_figures.md). That page also shows the model's held-out prediction residual of
+the class P1D against wavenumber and redshift, and per held-out simulation
+(`scripts/figures/fig_p1d_validation.py`): empirical validation diagnostics, not calibrated predictive
+uncertainties.
 
 ![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS and of every absorber above 10^17.5 cm^-2 against redshift, with the DLA measurement of Ho, Bird and Garnett (2021) and five published measurements of the incidence of Lyman limit systems](docs/figures/dndx_vs_ho21.png)
 
@@ -345,11 +351,20 @@ Not in this release:
   amplitudes, one per class per redshift, and fits nothing; the incidence law and its priors are research code.
 - **No prediction between snapshot redshifts.** Predictions exist at z = 2.0, 2.2, ..., 5.4 only; an LF+MF prediction
   is refused below the MF record's lower edge (z 2.2 by default) and flagged above z 4.6.
+- **Two defective training rows at z = 5.4.** The source spectra files of two low-fidelity simulations are incomplete
+  at z = 5.4 (in compact regions of the box the optical depth of the gas is missing; a defect of the spectra
+  extraction, not physical variation and not an effect of this package's processing). Both rows are in the training
+  data of the LF model, and one of them dominates the held-out prediction residual of the LF prediction at z = 5.4
+  at the largest scales; the model release's P1D held-out record states it and gives the residual without that
+  simulation beside it.
 - **No bandpower model.** A prediction is a per-class spectrum at points in k: no metal lines, no
   spectrograph-resolution correction and no bin window. `hcd_analysis.likelihood` brings it to a data set's bins by
   linear interpolation and an optional factor ([`docs/likelihood.md`](docs/likelihood.md)).
 - **No calibrated emulator error.** `member_std` is the spread over ensemble members that differ only in their random
-  seed; it is not an error bar and not a covariance.
+  seed; it is not an error bar and not a covariance. With the model release, each class spectrum carries a held-out
+  prediction residual (`P_class_validation_rms_log`: the rms of ln(prediction / truth) over simulations the model
+  was made without). It is an empirical validation diagnostic from five or six simulations, not a calibrated
+  predictive uncertainty, and the likelihood adds no emulator term to the data covariance.
 - **No trained model, catalogue or derived product of this project is public yet** (see
   [Models and data](#models-and-data)).
 

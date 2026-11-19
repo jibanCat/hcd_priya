@@ -343,7 +343,9 @@ mistake can be caught: small values meant as absolute fractions but given to `hc
 ## What is not in it
 
 - **No emulator error.** C is the data set's covariance, as given: this is a data likelihood. The model is treated as
-  exact, so a posterior from it is narrower than one that accounts for the error of the emulator.
+  exact, so a posterior from it is narrower than one that accounts for the error of the emulator. A prediction of a
+  release with a P1D held-out record carries the held-out prediction residual of each class spectrum
+  (`pred.P_class_validation_rms_log`, `pred.P_mix_validation_rms_log`); this module does not read those fields.
 - **No bandpower model, no resolution model, no metals, no continuum or DLA-masking systematics** beyond what a data
   set puts into its covariance and its `model_factor`.
 - **No MF correction of the class fractions without an incidence record.** Under LF+MF the default `pred.w_c` is

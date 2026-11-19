@@ -402,7 +402,8 @@ def test_one_format_with_a_closed_list_of_optional_parts():
     full = dict(plain, incidence=inc)
     assert RM.check_release_manifest(dict(plain)) == plain
     assert RM.check_release_manifest(dict(full)) == full and full["format"] == RM.FORMAT
-    assert set(RM.OPTIONAL_PARTS) == {"incidence"} and not hasattr(RM, "FORMAT_2")
+    # the closed list: the incidence MF record, and the P1D held-out record (tests/test_p1d_heldout.py)
+    assert set(RM.OPTIONAL_PARTS) == {"incidence", "p1d_heldout"} and not hasattr(RM, "FORMAT_2")
     for bad, why in (
         (dict(full, error={"dir": "error", "record_sha256": "d" * 64}), "unknown \\['error'\\]"),
         (dict(full, incidence=dict(inc, dir="mf")), "two different directories"),
