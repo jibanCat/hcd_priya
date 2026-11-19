@@ -516,6 +516,90 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
   consistent form and understate what the predictor returns (about sixfold for DLA). The map and its record are
   unchanged by this.
 
+## The P1D held-out record (`hcd_priya.p1d_heldout_record/1`)
+
+**In short.** A release may carry, as a second optional part, the held-out prediction residual of the class P1D
+(`hcd_analysis/emulator/p1d_heldout.py`). For a simulation that a model was made without, the residual is
+`d = ln(prediction / truth)` of a class spectrum at one redshift, one mean flux and one mode. The record reduces the
+residuals to `e = sqrt(mean(d^2))` per redshift, class and mode, and a prediction carries `e` beside each class
+spectrum. It is an empirical validation result. It is not a calibrated predictive uncertainty, and it is not a
+generalisation error: a substantial part of it is present for simulations the model was trained on (the record's
+notes state what was measured).
+
+```
+<part dir>/
+  p1d_heldout_record.json   what the numbers are, the tables a prediction uses, the inputs by digest
+  p1d_heldout_tables.h5     the evidence: every residual vector the tables were reduced from
+```
+
+- **Two fidelities, each with the residual of its own prediction.** `lf`: a fold backbone against the low-fidelity
+  simulation it was trained without. `lfmf`: the same backbone with a multi-fidelity table fitted without the
+  high-resolution run of that design point, against that run. An LF prediction carries the first table, an LF+MF
+  prediction the second.
+- **Five rows.** The four classes (clean, LLS, subDLA, DLA), then the mixture: the class spectra mixed with each
+  held-out simulation's own counted class fractions, prediction and truth alike. The four class residuals cannot be
+  combined without their correlations; the mixture row is the result for those fractions.
+- **The statistic.** `e` is taken about zero, so a bias counts. It is taken over the held-out simulations and over
+  the mean-flux rungs of the training ladder (each row of the training data exists at 20 mean fluxes). `n` counts
+  simulations only: the rungs of one snapshot are the same spectra with the optical depth rescaled, not independent
+  points. With at most six (LF) or five (LF+MF) simulations, `e` shows a size, not the width of a known distribution.
+- **On the spectrum itself.** `e` is a number on the logarithm. The range of a value `v` is `v * exp(-e)` to
+  `v * exp(+e)`, each end computed on its own.
+- **No interpolation between redshifts.** An estimate exists at a tabulated redshift or not at all.
+
+**The record** (`p1d_heldout_record.json`, a closed JSON object):
+
+| Key | Content |
+|---|---|
+| `format`, `version`, `kind` | `hcd_priya.p1d_heldout_record/1`; a version text; `rms_log_heldout_prediction_residual` |
+| `definition` | the statement of what the numbers are. It is a constant of the code: a record with another statement is refused |
+| `class_order`, `n_modes`, `n_rung` | the four classes; the number of modes (the model's); the number of mean-flux rungs |
+| `lf`, `lfmf` | per fidelity: `what` (how it was held out), `z`, `sims` (the held-out simulations), `e` (redshift, 5 rows, mode), `n` (redshift, 5 rows) |
+| `sensitivity` | a second table of one fidelity, reduced without one named simulation, with a statement of why. It is a sensitivity test and never the table of a prediction |
+| `summary` | the median and the largest `e` of each table in separate regimes (below) |
+| `what_it_does_not_cover`, `notes` | texts: the limits; and four notes (the comparison with training simulations, anomalous truth rows, a design point with a trend, the sampling noise of the truth) |
+| `inputs` | the two training caches, the fold models and fold multi-fidelity records, and the residual file, each by sha256 |
+| `tables` | the evidence file: name, size, sha256 |
+| `code` | the commit the residuals were computed with |
+
+**The regimes of the summary.** A prediction's label states them separately, because they differ in size:
+- *typical*: redshifts 2.2 to 4.6 (the redshift range of the grouped validation), above the two largest modes;
+- *the two largest modes*: the first two modes of the box by index. For the 120 Mpc/h box they lie near 4.8e-4 and
+  9.5e-4 s/km at z = 3; training gave less weight below 1e-3 s/km, and a prediction that reaches such wavenumbers
+  carries the flag `k_downweighted`;
+- *above z 4.6*, again apart for the two largest modes; and, for LF, *below z 2.2*.
+
+**The evidence file** (`p1d_heldout_tables.h5`, a table file of this format, plain datasets): for each fidelity
+`<fid>_d` (simulation, redshift, rung, 5 rows, mode; float32; NaN where a simulation has no snapshot), the target mean
+flux of every truth row `<fid>_target_F`, the number of sightlines of each class in every truth row `<fid>_counts`,
+the bias `<fid>_b` = mean(d) and `e` per rung `<fid>_e_rung`; and `k_com_hmpc`, the comoving wavenumbers of the modes.
+The simulations are in the sorted order of their names, as in the record. Every table of the record is computed from
+the residual values as stored, so anyone can recompute them from this file.
+
+**What is checked, and when.**
+- At a load (`load_release`): the record's bytes against the digest the manifest gives, before they are parsed; the
+  closed schema; the constant statements; finite tables; that the summary is the reduction of the tables; the
+  evidence file's size and sha256. The record must be of the model: the same LF training cache, the same number of
+  modes, the HR cache of the multi-fidelity record, and held-out high-resolution runs that are the runs the
+  multi-fidelity record was fitted on.
+- By `python -m hcd_analysis.check_release`: all of the above, and every table of the record recomputed from the
+  residual vectors of the evidence file.
+- A research model (a cross-validation fold is one) takes no such record: the record states the residual of a
+  release model, measured with that model's folds.
+
+**On a prediction.** `P_class_err` (4, K) is `e` of the four classes at the prediction's redshift and fidelity;
+`P_class_lower` and `P_class_upper` are `P_class * exp(-e)` and `P_class * exp(+e)`; `P_mix_err` (K,) is the mixture
+row, which applies to the result of `add_hcd` at the held-out simulations' own fractions and is an indication only
+for other fractions. With a requested `k` they are carried to those wavenumbers by the operation that carries
+`P_class` there. The flag `p1d_heldout_error_available` is True when every value is finite;
+`labels["p1d_heldout_error"]` gives the definition, the sizes in the regimes above, the notes and the limits, in the
+record's own words. The record changes no other number of a prediction, and `hcd_analysis.likelihood` does not use
+it: the likelihood adds no emulator term to the data covariance.
+
+**Writing one.** `scripts/build_p1d_heldout.py` builds a record from a residual file and a spec (the inputs by
+digest and the record's texts), each pinned by its sha256, into a new directory; it evaluates no model. To change a
+statement, change the spec and build again: the tables stay the same and the record's digest changes.
+
 ## The release manifest (`hcd_priya.release/1`)
 
 An LF+MF release is published under ONE digest, the sha256 of a small `release.json` in the release directory
@@ -531,7 +615,7 @@ An LF+MF release is published under ONE digest, the sha256 of a small `release.j
 `dir` is one plain directory name inside the release directory (never a path, `..` or a symlink), and the two differ.
 The key set is closed and the `mf` part is required: an LF-only bundle is not a release of this format and loads with
 `load_bundle` as before. Only `release.json` is anchored by the release digest: the loader reads the parts it
-names (the two required ones and, when present, the optional one below) and ignores every other file in the release directory, which is not part of the release.
+names (the two required ones and, when present, the optional ones below) and ignores every other file in the release directory, which is not part of the release.
 `predictor.load_release(release_dir, "<published release sha256>")` reads `release.json`
 through a no-follow descriptor, compares its sha256 before parsing, validates it, and loads both parts through
 `load_bundle(..., mf_dir=..., mf_record_sha256=...)` with the digests it names; since the record pins its backbone's
@@ -541,13 +625,14 @@ into a directory that already holds both parts. The two-digest call (`load_bundl
 `mf_record_sha256`) keeps working.
 
 **Optional parts.** Beside the two required parts a manifest may name optional parts from a closed list. Today the
-list has one entry, the incidence MF record:
+list has two entries, the incidence MF record and the P1D held-out record:
 
 ```json
 {"format": "hcd_priya.release/1", "release_version": "<text>",
  "backbone": {"dir": "<name>", "manifest_sha256": "<64 hex>"},
  "mf": {"dir": "<name>", "record_sha256": "<64 hex>"},
- "incidence": {"dir": "<name>", "record_sha256": "<64 hex>"}}
+ "incidence": {"dir": "<name>", "record_sha256": "<64 hex>"},
+ "p1d_heldout": {"dir": "<name>", "record_sha256": "<64 hex>"}}
 ```
 
 There is one release format. A manifest without an optional part is byte for byte what it was before optional parts
@@ -558,7 +643,9 @@ from before optional parts existed refuses a release that names one.
 training cache; an LF+MF prediction of such a release has its `dndx` multiplied by `R_c(z)` (flag
 `incidence_mf_applied`, `provenance["incidence_mf"]`). Only `load_release` applies it: the two-digest call
 (`load_bundle` with `mf_dir`) on the parts of a release with an incidence record does not read that record, and
-returns the LF `dndx` and `w_c` with no incidence flag. What a release gives with and without the part:
+returns the LF `dndx` and `w_c` with no incidence flag. In the same way only `load_release` attaches the P1D
+held-out record (section above); the two-digest call returns predictions without `P_class_err`. What a release
+gives with and without the incidence part:
 
 | | without an incidence record | with an incidence record |
 |---|---|---|

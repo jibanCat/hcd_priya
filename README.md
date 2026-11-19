@@ -117,21 +117,24 @@ print("flags that are set (read them before you use the numbers):", sorted(n for
 ```
 
 With the trained LF+MF model this prints (the model has 172 wavenumbers; no spectrum value is shown here). The
-stand-in model of today's install has another number of wavenumbers, carries no incidence record (so neither
-incidence flag), and its predictions carry the flag `synthetic_build`:
+stand-in model of today's install has another number of wavenumbers, carries no incidence record and no P1D
+held-out record (so none of the three flags of those records), and its predictions carry the flag
+`synthetic_build`:
 
 ```text
 model: LF+MF
 classes, in the order of P_class: ('clean', 'LLS', 'subDLA', 'DLA')
 shape of pred.P_class, the P1D in km/s of each class: (4, 172)
 shape of pred.k, the wavenumbers in s/km: (172,)
-flags that are set (read them before you use the numbers): ['incidence_heldout_error_available', 'incidence_mf_applied', 'k_downweighted', 'mf_applied']
+flags that are set (read them before you use the numbers): ['incidence_heldout_error_available', 'incidence_mf_applied', 'k_downweighted', 'mf_applied', 'p1d_heldout_error_available']
 ```
 
-The four flags say that the multi-fidelity correction was applied to the class spectra (`mf_applied`) and to the
+The five flags say that the multi-fidelity correction was applied to the class spectra (`mf_applied`) and to the
 incidence (`incidence_mf_applied`), that the release carries the held-out error of the incidence
-(`incidence_heldout_error_available`), and that some of the model's own wavenumbers lie below 1e-3 s/km, where
-training gave less weight (`k_downweighted`).
+(`incidence_heldout_error_available`), that every class spectrum has a held-out prediction residual beside it
+(`p1d_heldout_error_available`: `pred.P_class_err`, an empirical validation result, not a calibrated
+uncertainty; `pred.labels["p1d_heldout_error"]` says what it is), and that some of the model's own wavenumbers lie
+below 1e-3 s/km, where training gave less weight (`k_downweighted`).
 
 - **What "LF+MF" is.** The emulator trained on the low-fidelity (low-resolution) PRIYA simulations, with the
   multi-fidelity correction that calibrates its class spectra to the high-resolution simulations
@@ -349,7 +352,10 @@ Not in this release:
   spectrograph-resolution correction and no bin window. `hcd_analysis.likelihood` brings it to a data set's bins by
   linear interpolation and an optional factor ([`docs/likelihood.md`](docs/likelihood.md)).
 - **No calibrated emulator error.** `member_std` is the spread over ensemble members that differ only in their random
-  seed; it is not an error bar and not a covariance.
+  seed; it is not an error bar and not a covariance. With the model release, each class spectrum carries a held-out
+  prediction residual (`P_class_err`: the rms of ln(prediction / truth) over simulations the model was made
+  without). It is an empirical validation result from five or six simulations, not a calibrated predictive
+  uncertainty, and the likelihood adds no emulator term to the data covariance.
 - **No trained model, catalogue or derived product of this project is public yet** (see
   [Models and data](#models-and-data)).
 

@@ -180,7 +180,9 @@ def summary_sentences(summary):
     out = [
         f"Typical (z {Z_TYPICAL[0]} to {Z_TYPICAL[1]}, above the {N_LARGEST_MODES} largest modes of the box): e has "
         f"a median of {_pct(s['typical']['median'])} per cent and reaches {_pct(s['typical']['max'])} per cent.",
-        f"The {N_LARGEST_MODES} largest modes (below about 1e-3 s/km, which training gave less weight), same "
+        f"The {N_LARGEST_MODES} largest modes, that is the first {N_LARGEST_MODES} modes of the box by index (for "
+        "example near 4.8e-4 and 9.5e-4 s/km at z = 3 for the 120 Mpc/h box; training gave less weight below "
+        "1e-3 s/km), same "
         f"redshifts: a median of {_pct(s['largest_modes']['median'])} per cent, up to "
         f"{_pct(s['largest_modes']['max'])} per cent.",
         f"Above z {Z_TYPICAL[1]} (outside the validated redshift range): a median of "

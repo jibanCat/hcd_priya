@@ -147,3 +147,17 @@ released yet. A predictor also says which corrections it applies in one INFO rec
 `predict` or `predict_many` while INFO records pass, and as a DEBUG record at every later corrected call. The library
 configures no logging, so the record shows only when the application lets it pass. Details:
 `docs/release_format_h5.md`, section "The incidence MF record".
+
+**The held-out prediction residual of the class spectra.** A release may carry one more optional part, a P1D
+held-out record. With it every prediction carries `P_class_err`: for each class and wavenumber, the rms of
+ln(prediction / truth) over simulations the model was made without, for the fidelity of the prediction; the range on
+the spectrum itself, `P_class_lower` to `P_class_upper` (the value times exp(-err) and the value times exp(+err),
+each end computed on its own); and `P_mix_err`, the same for the class spectra mixed with each held-out
+simulation's own class fractions. These are empirical validation results, not calibrated predictive uncertainties:
+they rest on five or six simulations that share their initial phases with the training simulations, and a
+substantial part of the residual is present for simulations the model was trained on.
+`pred.labels["p1d_heldout_error"]` gives the sizes in three separate cases (the typical residual at redshifts 2.2 to
+4.6 above the two largest modes of the box; those two modes; redshifts above 4.6), the record's notes, and what
+the numbers do not cover. `member_std` is another thing: the spread over the members' random seeds. The likelihood
+does not use these fields and adds no emulator term to the data covariance. Details: `docs/release_format_h5.md`,
+section "The P1D held-out record".
