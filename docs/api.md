@@ -140,7 +140,7 @@ limitations of this release"). Their full docstrings are in the source.
 
 The trained models come in the companion package `hcd-priya-models`, which `hcd-priya` requires. `load_published`
 (above) loads a model from that package only against the digest listed here. The list holds the model release that
-`pyproject.toml` pins, the LF+MF model to be published with this version of the code; it is not published yet.
+`pyproject.toml` pins: the LF+MF model published with this version of the code.
 
 ```{eval-rst}
 .. autoapimodule:: hcd_analysis.published_models

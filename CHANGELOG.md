@@ -53,7 +53,7 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   from the installed model package, only against the sha256 listed in `hcd_analysis/published_models.py`.
   With no argument it loads the LF+MF model; a name is compared without case and punctuation. The examples write
   the nine parameters out; `example_params` gives the midpoint of the training range of each parameter and prints
-  that statement and the values when it is called. The list holds the LF+MF model release to be published with this
+  that statement and the values when it is called. The list holds the LF+MF model release published with this
   version, and `pyproject.toml` pins `hcd-priya-models` to exactly its version; tests and CI use a model package
   built with a synthetic bundle, whose version is the pinned one with the label `+synthetic`.
 - **Three figures with their scripts and data** ([`docs/model_figures.md`](docs/model_figures.md)): the model's
@@ -109,7 +109,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - **The example download.** `examples/mock_recovery.py --download DIR` (or the environment variable
   `HCD_PRIYA_EXAMPLE_DOWNLOAD`) reads the mock, a fold model trained without the mock's simulation, its two records
   and a stored reference from one directory, each item against the sha256 written in the script, and draws the
-  chain of a run over the stored reference. The download is NOT published yet; `docs/likelihood.md` lists its items
+  chain of a run over the stored reference. The download is published with the model release, as a file of the
+  GitHub release of this version; `docs/likelihood.md` lists its items
   and their sha256.
 - **A research (fold) model can take an incidence record.** `load_research_bundle` accepts `incidence_dir` and
   `incidence_record_sha256`. The record is refused unless its table was built without the simulations the model

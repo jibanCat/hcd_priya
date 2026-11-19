@@ -286,7 +286,8 @@
   "incidence_heldout_error_available",
   "incidence_mf_applied",
   "k_downweighted",
-  "mf_applied"
+  "mf_applied",
+  "p1d_validation_available"
  ],
  "heldout_error": "drawn on the model lines (LF+MF): the held-out range from pred.dndx_lower to pred.dndx_upper (pred.dndx * exp(-pred.dndx_err) and pred.dndx * exp(+pred.dndx_err), each bound computed on its own: asymmetric); pred.dndx_err is the held-out rms of ln(prediction / truth)",
  "incidence_hr_simulations": 5,

@@ -388,7 +388,16 @@ def test_the_script_names_the_five_items_of_the_download_each_with_a_sha256():
     assert ex.DOWNLOAD_FORMAT == "hcd_priya.example_download/1"
     assert ex.DOWNLOAD_ENV == "HCD_PRIYA_EXAMPLE_DOWNLOAD"
     doc = " ".join(ex.__doc__.split())
-    assert "published with the model release" in doc and "(not yet published)" in doc
+    assert "published with the model release" in doc and "not yet published" not in doc.lower()
+    # the archive of the download: an https URL on the release of this version, and the sha256 of the archive
+    import hcd_analysis
+
+    assert ex.DOWNLOAD_URL == (
+        f"https://github.com/jibanCat/hcd_priya/releases/download/v{hcd_analysis.__version__}/"
+        "hcd_priya_example_download.tar.gz"
+    )
+    assert re.fullmatch(r"[0-9a-f]{64}", ex.DOWNLOAD_ARCHIVE_SHA256)
+    assert ex.DOWNLOAD_ARCHIVE_SHA256 not in {sha for _, sha in ex.DOWNLOAD.values()}
     assert "not the release model" in doc
 
 
@@ -604,7 +613,9 @@ def test_the_docs_list_the_items_of_the_download_with_the_sha256_written_in_the_
     rows = re.findall(r"(?m)^\| `([a-z_]+)` \| `([^`]+)` \| .* \| `([0-9a-f]{64})` \|$", text)
     assert {name: (place.rstrip("/"), sha) for name, place, sha in rows} == ex.DOWNLOAD
     said = " ".join(text.split())
-    assert "published with the model release" in said and "is not published yet" in said
+    assert "published with the model release" in said and "not published yet" not in said
+    # the docs give the archive of the download as the script does: the same URL and the same sha256
+    assert ex.DOWNLOAD_URL in text and ex.DOWNLOAD_ARCHIVE_SHA256 in text
     assert ex.DOWNLOAD_ENV in text
     assert ex.DOWNLOAD_FORMAT in text and ex.DOWNLOAD_MANIFEST in text
 

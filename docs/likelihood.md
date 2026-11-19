@@ -8,7 +8,7 @@ with it is run. The reference of every function is on the [API page](api.md).
 
 **Nothing is fitted to a measurement by anything on this page.** The example recovers the parameters of a mock, a
 data vector made from a simulation at a known point. The example reads the mock and its model from the example
-download described below, published with the model release (not yet published), or from files you name.
+download described below, published with the model release, or from files you name.
 
 ## The mathematics, step by step
 
@@ -526,8 +526,11 @@ A research (fold) model of your own, trained without the simulation your mock co
 
 ## The example download
 
-**It is published with the model release, as a second file of the same record, and is not published yet.** Until
-then the example runs only on a model and a mock of your own. The download holds the items below, a `README.md`, a
+**It is published with the model release, as a file of the same record:** `hcd_priya_example_download.tar.gz` on
+the [GitHub release of this version](https://github.com/jibanCat/hcd_priya/releases/tag/v1.0.0)
+(<https://github.com/jibanCat/hcd_priya/releases/download/v1.0.0/hcd_priya_example_download.tar.gz>,
+sha256 `27bd0f96c88ae195175351bbf05468188b8fdf745c99bac9e54bebf571e31d7a`). Unpack it and name the directory with `--download`.
+The download holds the items below, a `README.md`, a
 `LICENSE` (CC BY 4.0 for the files; the example script is under the MIT licence) and `SHA256SUMS`; its model is a
 fold model, not the release model.
 

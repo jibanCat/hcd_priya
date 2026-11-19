@@ -41,8 +41,10 @@ The release's inference is the Gaussian likelihood with the mock-recovery exampl
 ([`likelihood.md`](likelihood.md)), on a model release and a mock data set; no fit to real data is part of this
 release (see [Scope and limitations of this release](../README.md#scope-and-limitations-of-this-release)).
 
-The trained model is released in the companion package `hcd-priya-models`, and the example download of the
-mock-recovery example is published with the model release; neither is published yet. The training cache and the
+The trained model is released in the companion package `hcd-priya-models`, which `pip install hcd-priya` brings,
+and as files on the [GitHub release of this version](https://github.com/jibanCat/hcd_priya/releases/tag/v1.0.0): the release archive, the reference
+predictions that `check_release --reference` compares with, and the example download of the mock-recovery
+example. The training cache and the
 research checkpoints are not distributed: request a checkpoint and a cache slice from the PI (mfho@umich.edu) or
 open an issue. Please do not commit any large data or model artefacts to this code repository.
 

@@ -16,8 +16,8 @@
 
 **The example download** (``--download DIR``, or the environment variable ``HCD_PRIYA_EXAMPLE_DOWNLOAD``) is one
 directory with the mock, the model that goes with it and the stored reference; ``DOWNLOAD`` below names its items and
-the sha256 each must have. It is published with the model release, as a second file of the same record
-(not yet published). The model in it is a fold model: it was trained without the simulation the mock was made
+the sha256 each must have. It is published with the model release, as a file of the same record
+(``DOWNLOAD_URL`` below: unpack the archive and name the directory). The model in it is a fold model: it was trained without the simulation the mock was made
 from, so the recovery is a held-out one. It is not the release model. Without the
 download the example runs on a model and a mock of your own (the second and third command lines below), and then
 has no stored reference.
@@ -87,7 +87,8 @@ FULL = {"Rminus1_stop": 0.01, "Rminus1_cl_stop": 0.05, "learn_proposal": True}
 PROPOSAL_FRACTION = 0.02  # the starting proposal width, as a fraction of each box: efficiency only
 BURN_IN_FRACTION = 0.3  # rows dropped from the start of a chain before anything is read from it
 
-# The example download: one directory, NOT PUBLISHED YET. Each item with its place in the directory and the sha256 it
+# The example download: one directory, published with the model release as one archive (DOWNLOAD_URL, with the
+# sha256 of the archive). Each item with its place in the directory and the sha256 it
 # must have; an item with another sha256 is refused by the loader that reads it.
 # - mock: the data set (hcd_analysis.likelihood.read_p1d_data). A simulation's P1D with a covariance; no measurement.
 # - model: a research bundle, a fold model trained WITHOUT the simulation the mock was made from. The sha256 is that
@@ -99,6 +100,8 @@ BURN_IN_FRACTION = 0.3  # rows dropped from the start of a chain before anything
 # The directory also holds a manifest (DOWNLOAD_MANIFEST) that states the format and the same five sha256; a
 # directory whose manifest states anything else was made for another version of this script, and is refused.
 DOWNLOAD_ENV = "HCD_PRIYA_EXAMPLE_DOWNLOAD"
+DOWNLOAD_URL = "https://github.com/jibanCat/hcd_priya/releases/download/v1.0.0/hcd_priya_example_download.tar.gz"
+DOWNLOAD_ARCHIVE_SHA256 = "27bd0f96c88ae195175351bbf05468188b8fdf745c99bac9e54bebf571e31d7a"
 DOWNLOAD_FORMAT = "hcd_priya.example_download/1"
 DOWNLOAD_MANIFEST = "example_download.json"
 DOWNLOAD = {
@@ -135,7 +138,8 @@ def parse(argv=None) -> argparse.Namespace:
     ap.add_argument(
         "--download",
         metavar="DIR",
-        help="the example download: the mock, its model and the stored reference (not published yet).\n"
+        help="the example download: the mock, its model and the stored reference, unpacked from the archive\n"
+        "published with the model release (DOWNLOAD_URL in this script).\n"
         f"Without any model argument, the environment variable {DOWNLOAD_ENV} is read instead",
     )
     ap.add_argument(

@@ -8,9 +8,8 @@ model that holds an incidence record; their measured points and the 60 design po
 repository. The scripts save their figures to files under the matplotlib backend of your session, which they do not
 choose; without a display, set `MPLBACKEND=Agg`.
 
-**What the model figures are drawn from.** No model is published yet. The two model figures below were drawn from the
-candidate LF+MF release (staged, not yet public) with the multi-fidelity correction of the incidence built from
-five high-resolution simulations. They will be redrawn from the published model.
+**What the model figures are drawn from.** The model release of this version (`hp.load_published()`), whose
+multi-fidelity correction of the incidence is built from five high-resolution simulations.
 
 **The parameters of every model curve,** written out in `scripts/figures/figures_common.py`:
 
@@ -226,7 +225,7 @@ These figures show what `P_class_validation_rms_log` and `P_mix_validation_rms_l
 drawn from the model's own P1D held-out record (`docs/release_format_h5.md`, section "The P1D held-out record"), by
 one script. They show an empirical validation diagnostic, not a calibrated uncertainty: for simulations the model
 was made without, how far the predicted spectrum lies from the simulation. Like the two model figures above, they
-were drawn from the candidate LF+MF release and will be redrawn from the published model.
+are drawn from the model release of this version.
 
 ![The held-out prediction residual of the class P1D for the LF model: the rms of ln(prediction / truth) against the wavenumber, one line per redshift, in five panels (clean, LLS, subDLA, DLA and the mixture). An empirical validation diagnostic, not a calibrated uncertainty](figures/p1d_validation_lf.png)
 

@@ -20,44 +20,31 @@ It is built on the PRIYA suite of cosmological hydrodynamic simulations.
 
 <!-- docs:install:start -->
 `hcd-priya` installs the Python package `hcd_analysis` and the command `hcd`. It requires `hcd-priya-models`, a
-data-only package that holds the trained models. It needs Python 3.11 or later on Linux (x86-64).
-
-**What works today: an install from a clone, with a stand-in model.** Neither package is on a package index yet, and
-no trained model is published yet. What someone outside the project can install today is the code together with a
-stand-in model package: a synthetic bundle of untrained networks. It shows that the installation and the interface
-work; its numbers are not science. These are the commands that continuous integration runs:
+data package that holds the trained model; pip installs it by itself. It needs Python 3.11 or later on Linux (x86-64).
 
 ```bash
-git clone https://github.com/jibanCat/hcd_priya && cd hcd_priya
 python3.11 -m venv .venv && source .venv/bin/activate
-pip install build && python -m build --wheel --outdir dist .
-# builds the stand-in model wheel into dist/models and installs both wheels, with pinned dependencies
-tools/ci/install_with_synthetic_models.sh python "$(ls dist/*.whl)[test]" dist/models \
-    -c tools/ci/constraints-devenv.txt
-export HCD_PRIYA_ALLOW_SYNTHETIC=1      # the stand-in loads only with this switch, and with a warning
+pip install hcd-priya
 python -c "import hcd_analysis; print(hcd_analysis.__version__)"
 hcd --help
 ```
 
-- **The switch.** `load_published` refuses the stand-in unless `HCD_PRIYA_ALLOW_SYNTHETIC=1` is set, so that untrained
-  networks are never taken for a model. With it, the first example of the README runs and prints the shapes and
-  flags of the stand-in, which differ from those of the trained model.
-- **With a model wheel in hand.** The model wheel is built in this repository
-  ([`model_package/`](model_package/README.md)) from an accepted release. Whoever holds one installs it as a file,
-  which is never looked up on an index: `pip install . path/to/hcd_priya_models-VERSION-py3-none-any.whl`.
+This installs the code and the trained LF+MF model together (the model package is about 40 MB; nothing is
+downloaded later). The first example of the README then runs as written, with no switch and no warning, and
+`python -I -m hcd_analysis.check_release --published` checks the installed model file by file.
+
 - **The supported install** pins every dependency to the versions the test suite is developed and run with
-  ([`tools/ci/constraints-devenv.txt`](tools/ci/constraints-devenv.txt)), on CPython 3.11, as the commands above
-  do. [`CONTRIBUTING.md`](CONTRIBUTING.md) adds the editable install for development.
-
-**What will work after publication (not available yet).** Once both packages are published, the whole install will
-be one line. It does not work today:
-
-```bash
-pip install hcd-priya        # NOT AVAILABLE YET: neither package is on a package index
-```
-
-It will install the code and the trained LF+MF model together, and the first example of the README will then run as
-written, with no switch and no warning.
+  ([`tools/ci/constraints-devenv.txt`](tools/ci/constraints-devenv.txt)), on CPython 3.11: take that file from this
+  repository at the release tag and add `-c constraints-devenv.txt` to the pip command.
+- **From a clone, for development and tests.** [`CONTRIBUTING.md`](CONTRIBUTING.md) gives the commands. They do not
+  use the trained model: continuous integration and the tests build a stand-in model package, a synthetic bundle of
+  untrained networks whose numbers are not science (`tools/ci/install_with_synthetic_models.sh`).
+- **The switch of the stand-in.** `load_published` refuses the stand-in unless `HCD_PRIYA_ALLOW_SYNTHETIC=1` is set,
+  so that untrained networks are never taken for a model. With it, the first example of the README runs and prints
+  the shapes and flags of the stand-in, which differ from those of the trained model.
+- **With a model wheel in hand.** A model wheel built in this repository from a release's files
+  ([`model_package/`](model_package/README.md)) installs as a file, which is never looked up on an index:
+  `pip install . path/to/hcd_priya_models-VERSION-py3-none-any.whl`.
 
 **Notes.**
 
@@ -65,8 +52,8 @@ written, with no switch and no warning.
   Windows are not tested. [`docs/compatibility.md`](docs/compatibility.md) lists what is tested and what is not.
 - **Extras:** `test` (pytest), `tutorials` (jupyter, nbformat) and `dev`. `pyproject.toml` declares the
   dependencies; `requirements.txt` only points to the install above.
-- **Working in a clone.** To run the scripts or the pipeline from the clone, make the install editable after the
-  commands above: `pip install --no-deps -e .`. The pipeline records the clone's commit, and only
+- **Working in a clone.** To run the scripts or the pipeline from the clone, make the install editable:
+  `pip install --no-deps -e .` after either install above. The pipeline records the clone's commit, and only
   an editable install makes that commit the code that runs (with your changes committed); a plain install runs the
   copy made when it was installed. The scripts under `scripts/` are not part of the installed package; run them from
   the repository root.
@@ -116,8 +103,8 @@ print("shape of pred.k, the wavenumbers in s/km:", pred.k.shape)
 print("flags that are set (read them before you use the numbers):", sorted(n for n, v in pred.flags.items() if v is True))
 ```
 
-With the trained LF+MF model this prints (the model has 172 wavenumbers; no spectrum value is shown here). The
-stand-in model of today's install has another number of wavenumbers, carries no incidence record and no P1D
+With the trained LF+MF model, which `pip install hcd-priya` brings, this prints (the model has 172 wavenumbers; no
+spectrum value is shown here). The stand-in model of the tests has another number of wavenumbers, carries no incidence record and no P1D
 held-out record (so none of the three flags of those records), and its predictions carry the flag
 `synthetic_build`:
 
@@ -142,9 +129,10 @@ own wavenumbers lie below 1e-3 s/km, where training gave less weight (`k_downwei
   "Status" below). It is the model this package publishes, and
   `hp.load_published()` loads it without a name.
 - **Where the model comes from.** The trained model is in a companion package, `hcd-priya-models`, which `hcd-priya`
-  requires. Nothing is downloaded when you load it. **Neither package is published yet**: [Install](#install) says
-  what works today, and [Models and data](#models-and-data) what `load_published` checks. With a release's files
-  in hand, the same model loads from its directory and the sha256 published with it:
+  requires and pip installs with it. Nothing is downloaded when you load it;
+  [Models and data](#models-and-data) says what `load_published` checks. The same model is also published as
+  files, on the [GitHub release of this version](https://github.com/jibanCat/hcd_priya/releases/tag/v1.0.0); with a release's files
+  in hand, it loads from its directory and the sha256 published with it:
 
   ```python
   emu = hp.load_release("path/to/release", "<published release sha256>")
@@ -275,8 +263,8 @@ How the finder works, its settings, its products and the checks of a catalogue a
 Drawn by the scripts in [`scripts/figures/`](scripts/figures/); the data files are in
 [`docs/figures/data/`](docs/figures/data/). The class-ratio figure regenerates from the repository alone. The dN/dX
 and CDDF figures need a model with an incidence record; their measured points and the 60
-design points of their bands are in the repository. No model is published yet: the two model figures were drawn
-from the candidate LF+MF release (staged, not yet public). The full captions and what each figure does not test:
+design points of their bands are in the repository. The model figures are drawn from the model release of this
+version. The full captions and what each figure does not test:
 [`docs/model_figures.md`](docs/model_figures.md). That page also shows the model's held-out prediction residual of
 the class P1D against wavenumber and redshift, and per held-out simulation
 (`scripts/figures/fig_p1d_validation.py`): empirical validation diagnostics, not calibrated predictive
@@ -370,7 +358,8 @@ Not in this release:
   redshifts and reaches 1.35: the range `pred.cddf_lower` to `pred.cddf_upper` is the value times 0.62 to the
   value times 1.61 in the median, and the value times 0.26 to the value times 3.9 at the largest. Below those
   bins the median is 0.03.
-- **No trained model, catalogue or derived product of this project is public yet** (see
+- **No catalogue or derived product of this project is public.** The trained LF+MF model is; the absorber
+  catalogues, the training cache and the research checkpoints are not (see
   [Models and data](#models-and-data)).
 
 ---
@@ -392,7 +381,8 @@ Python are under the MIT licence. `hp.load_published()` finds the model in the i
 the sha256 that `hcd-priya` itself lists for that model version (`hcd_analysis/published_models.py`): for a
 published model the digest comes from the code package, never from the model package, so changed model files are
 refused, and so is a model version this version of the code does not list. That list holds the model release that
-`pyproject.toml` pins, the LF+MF model to be published with this version of the code; it is not published yet.
+`pyproject.toml` pins: the LF+MF model published with this version of the code. Its files (the release archive,
+the reference predictions and the example download) are on the [GitHub release of this version](https://github.com/jibanCat/hcd_priya/releases/tag/v1.0.0).
 `hp.load_release(release_dir, sha256)` loads a release whose files you hold yourself. To check a model from a fresh
 install, run `python -I -m hcd_analysis.check_release --published`, or with `RELEASE_DIR SHA256` for a release
 directory (`-I` keeps a clone in the current directory out of the import path, so the installation is what is
