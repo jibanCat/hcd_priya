@@ -9,8 +9,8 @@ This repository holds the code of an emulator of the one-dimensional flux power 
 absorbers contaminating it, together with the research pipeline it was built
 for: measuring two cosmological parameters, the forest power amplitude A_p and
 the tilt n_s, from the P1D. The supported interface of this release is the
-predictor of the per-class P1D; the measurement itself is research code that does
-not run at this commit (see
+predictor of the per-class P1D and a Gaussian data likelihood with a mock-recovery
+example; the measurement itself is research code that is not part of the release (see
 [Scope and limitations of this release](#scope-and-limitations-of-this-release)).
 It is built on the PRIYA suite of cosmological hydrodynamic simulations.
 
@@ -365,6 +365,11 @@ Not in this release:
   prediction residual (`P_class_validation_rms_log`: the rms of ln(prediction / truth) over simulations the model
   was made without). It is an empirical validation diagnostic from five or six simulations, not a calibrated
   predictive uncertainty, and the likelihood adds no emulator term to the data covariance.
+- **The CDDF is poorly known at the highest column densities.** In its four bins from 10^22.2 cm^-2 up, the
+  held-out error of the CDDF (`pred.cddf_err`, a number on the logarithm) has a median of 0.48 over the LF+MF
+  redshifts and reaches 1.35: the range `pred.cddf_lower` to `pred.cddf_upper` is the value times 0.62 to the
+  value times 1.61 in the median, and the value times 0.26 to the value times 3.9 at the largest. Below those
+  bins the median is 0.03.
 - **No trained model, catalogue or derived product of this project is public yet** (see
   [Models and data](#models-and-data)).
 
@@ -411,8 +416,9 @@ the research code reads.
 - The emulator deep-dive covers the architecture, the τ₀ cache, the training
   recipe, the forward model, the input contract and the conventions:
   [`hcd_analysis/emulator/README.md`](hcd_analysis/emulator/README.md).
-- The tutorials are five short notebooks that introduce the per-(sim, snap) HCD
-  data products from the ground up, with a recommended reading order:
+- Five short notebooks introduce the per-(sim, snap) HCD data products of the catalogue pipeline from the ground
+  up, for readers who hold the simulation outputs. They need the raw spectra and the pipeline's outputs, which
+  are not distributed, and they do not use the emulator:
   [`notebooks/tutorials/README.md`](notebooks/tutorials/README.md).
 - The science walkthrough and the record of bugs found on the catalog/P1D side
   are in [`docs/analysis.md`](docs/analysis.md),
@@ -420,11 +426,14 @@ the research code reads.
   [`docs/data_layout.md`](docs/data_layout.md) and
   [`docs/p1d_definition.md`](docs/p1d_definition.md).
 - The public validation summaries, all on simulations or mocks: the held-out errors of dN/dX and the CDDF that the
-  model carries (`pred.dndx_err`, `pred.cddf_err`); the emulator-covariance check on the example's mock and the
-  interpolation checks ([`docs/likelihood.md`](docs/likelihood.md)); the comparison with the template of Rogers et
-  al. (2018) ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)). The full validation of the class spectra
-  (held-out LOSO error, coverage and the Fisher checks) is not public, and no result from real data is in this
-  release; the closure gates belong to the research path and are not part of it.
+  model carries (`pred.dndx_err`, `pred.cddf_err`); the held-out prediction residual of the class spectra that
+  the model carries (`pred.P_class_validation_rms_log`, with every residual vector in the model release and three
+  figures of it in [`docs/model_figures.md`](docs/model_figures.md)); the emulator-covariance check on the
+  example's mock and the interpolation checks ([`docs/likelihood.md`](docs/likelihood.md)); the comparison with
+  the template of Rogers et al. (2018) ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)). That residual
+  rests on six (LF) and five (LF+MF) held-out simulations; the leave-one-simulation-out validation of the class
+  spectra over all training simulations, the coverage tests and the Fisher checks are not public. No result from
+  real data is in this release; the closure gates belong to the research path and are not part of it.
 
 ---
 

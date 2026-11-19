@@ -141,8 +141,8 @@ quantity, as the range `dndx_lower` to `dndx_upper` and `cddf_lower` to `cddf_up
 value times exp(+err), each bound computed on its own, asymmetric about the value for a non-zero error), and on the
 logarithm, as `dndx_err`
 and `cddf_err`, the held-out rms of ln(prediction / truth); an LF+MF prediction without one warns
-(`HeldOutErrorWarning`). No such record is
-released yet. A predictor also says which corrections it applies in one INFO record on the Python logger
+(`HeldOutErrorWarning`). The model release of this
+version carries an incidence record with its held-out error. A predictor also says which corrections it applies in one INFO record on the Python logger
 `hcd_analysis.predictor`, with the sha256 of each record applied: once per predictor, at its first corrected call of
 `predict` or `predict_many` while INFO records pass, and as a DEBUG record at every later corrected call. The library
 configures no logging, so the record shows only when the application lets it pass. Details:

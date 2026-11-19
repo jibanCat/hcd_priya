@@ -170,7 +170,9 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
   any redshift.
 - **Not shown and not tested here.** The held-out error of the model's CDDF is not drawn in this figure (with 29
   bins and five held-out simulations per bin it would hide the comparison); a prediction carries its range per bin as
-  `pred.cddf_lower` and `pred.cddf_upper`. The measurement's tables
+  `pred.cddf_lower` and `pred.cddf_upper`. In the four bins from 10^22.2 cm^-2 up that range is wide: `pred.cddf_err`
+  has a median of 0.48 over the LF+MF redshifts there (the value times 0.62 to the value times 1.61) and reaches
+  1.35 (the value times 0.26 to the value times 3.9); below those bins its median is 0.03. The measurement's tables
   start at log10 N_HI = 20.05; below it the points are the three measurements above, at other redshifts. The simulations and the
   survey define and find absorbers differently; that difference was not assessed.
 

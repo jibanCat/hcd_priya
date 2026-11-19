@@ -348,9 +348,9 @@ for each.
 
 ## What's next after these tutorials
 
-The four observables you've now learned to read — `catalog`,
-`cddf_corrected`, `p1d_per_class`, and `meta.json` — are the inputs to
-the HCD emulator under construction.  The next milestone is **phase 1
-of the emulator work**: building a single in-repo HDF5 cache that stacks
-the per-(sim, snap) observables across all 1076 outputs onto a shared
-k-grid and NHI-grid.
+The four observables you've now learned to read (`catalog`,
+`cddf_corrected`, `p1d_per_class`, and `meta.json`) are what the HCD
+emulator was trained on.  The emulator itself is the package's predictor,
+`hcd_analysis.predictor`: the top-level `README.md` shows how to load the
+trained model and make a prediction, and it needs none of the files these
+notebooks read.
