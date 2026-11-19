@@ -271,7 +271,7 @@ def test_the_validation_range_of_the_spectra_is_the_record_s_and_the_record_reco
     the record equals its recomputation from the residual vectors of the evidence file."""
     from hcd_analysis.emulator import p1d_heldout as PH
 
-    held = emu._p1d
+    held, held_dir = emu.p1d_heldout_record()
     assert held is not None, "the configured model carries no P1D held-out record"
     n_cells = 0
     for pred in preds.values():
@@ -301,7 +301,7 @@ def test_the_validation_range_of_the_spectra_is_the_record_s_and_the_record_reco
     lf = emu.predict_many(params, z=list(Z), tau0_amp=1.0, dtau0=0.0, fidelity="LF")
     for i, z in enumerate(Z):
         assert np.array_equal(lf.P_class_validation_rms_log[i], held.err(z, False)[:4])
-    assert PH.verify_tables(emu._p1d_dir, held) > 1_000_000
+    assert PH.verify_tables(held_dir, held) > 1_000_000
     for text in (pred.labels["p1d_validation"], held.label(False)):
         assert "empirical validation diagnostics, not calibrated predictive uncertainties" in text
 

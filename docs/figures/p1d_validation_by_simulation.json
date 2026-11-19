@@ -1,0 +1,108 @@
+{
+ "evidence_file_sha256": "df8a29e2ad6d1abaf71055d0dcb35a5f76563a1d86fa0d45c0752883af5d04fe",
+ "figure": "the residual of the mixture per held-out simulation: 100 ln(prediction / truth) against k",
+ "in_the_first_hue": {
+  "design_point": "ns0.979Ap1.78e-09",
+  "why": "the record's sensitivity table leaves it out"
+ },
+ "in_the_second_hue": {
+  "design_point": "ns0.914Ap1.32e-09",
+  "why": "the largest rms of the LF residual of the mixture at redshifts up to 4.6"
+ },
+ "mean_flux": "the rung whose mean flux is nearest the fit of Kim et al. (2007) at the redshift",
+ "model": {
+  "incidence_hr_simulations": 5,
+  "incidence_record": true,
+  "release_format": "hcd_priya.release/1",
+  "synthetic_build": false
+ },
+ "record_sha256": "95289614cb360e2b87861a4c8a725d1fc3dfd98d43b23174cef55b44f0425f8e",
+ "redshifts": [
+  2.2,
+  3.0,
+  4.0,
+  5.4
+ ],
+ "row": "mixture",
+ "rows": [
+  "LF",
+  "LF+MF"
+ ],
+ "rung_indices_drawn": {
+  "LF": {
+   "2.2": [
+    10,
+    10,
+    10,
+    10,
+    10,
+    10
+   ],
+   "3": [
+    10,
+    10,
+    10,
+    10,
+    10,
+    10
+   ],
+   "4": [
+    10,
+    10,
+    10,
+    10,
+    10,
+    10
+   ],
+   "5.4": [
+    10,
+    10,
+    10,
+    10,
+    10,
+    10
+   ]
+  },
+  "LF+MF": {
+   "2.2": [
+    10,
+    10,
+    10,
+    10,
+    10
+   ],
+   "3": [
+    10,
+    10,
+    10,
+    10,
+    10
+   ],
+   "4": [
+    10,
+    10,
+    10,
+    10,
+    10
+   ],
+   "5.4": [
+    10,
+    10,
+    10,
+    10,
+    10
+   ]
+  }
+ },
+ "simulations": [
+  "ns0.859Ap1.29e-09",
+  "ns0.885Ap2.32e-09",
+  "ns0.909Ap1.98e-09",
+  "ns0.914Ap1.32e-09",
+  "ns0.972Ap1.69e-09",
+  "ns0.979Ap1.78e-09"
+ ],
+ "vertical_axis": "linear within 5 per cent, logarithmic beyond",
+ "wavenumbers": "the modes of the box in s/km at each redshift, for hub and omegamh2 of the midpoint",
+ "what_it_is": "an empirical validation diagnostic, not a calibrated uncertainty"
+}

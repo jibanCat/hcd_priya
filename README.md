@@ -277,7 +277,10 @@ Drawn by the scripts in [`scripts/figures/`](scripts/figures/); the data files a
 and CDDF figures need a model with an incidence record; their measured points and the 60
 design points of their bands are in the repository. No model is published yet: the two model figures were drawn
 from the candidate LF+MF release (staged, not yet public). The full captions and what each figure does not test:
-[`docs/model_figures.md`](docs/model_figures.md).
+[`docs/model_figures.md`](docs/model_figures.md). That page also shows the model's held-out prediction residual of
+the class P1D against wavenumber and redshift, and per held-out simulation
+(`scripts/figures/fig_p1d_validation.py`): empirical validation diagnostics, not calibrated predictive
+uncertainties.
 
 ![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS and of every absorber above 10^17.5 cm^-2 against redshift, with the DLA measurement of Ho, Bird and Garnett (2021) and five published measurements of the incidence of Lyman limit systems](docs/figures/dndx_vs_ho21.png)
 

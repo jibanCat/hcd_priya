@@ -168,7 +168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"release.json sha256 {release.get('release_sha256')}, {emu.n_members} members"
         )
         cases = predictions(emu, args.z)
-        held = getattr(emu, "_p1d", None)
+        held, held_dir = emu.p1d_heldout_record()
         # the optional part: recompute its tables from its own residual vectors
         if held is not None:
             from hcd_analysis.emulator import p1d_heldout
@@ -179,7 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "were not recomputed"
                 )
             else:
-                n_res = p1d_heldout.verify_tables(emu._p1d_dir, held)
+                n_res = p1d_heldout.verify_tables(held_dir, held)
                 print(
                     f"P1D held-out record {held.record_sha256[:12]}: its tables recomputed from {n_res} residual "
                     "values of its evidence file: equal"

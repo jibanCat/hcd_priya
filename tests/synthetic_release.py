@@ -176,12 +176,14 @@ def make_release(
     incidence=False,
     heldout=False,
     p1d_heldout=False,
+    p1d_evidence=True,
 ):
     """Write the release under ``root`` (created). Returns {"root": Path, "sha": the sha256 of release.json,
     "bundle": the backbone's SyntheticBundle, "mf_sha": the MF record's sha256}. With ``incidence`` the release
     also names a synthetic incidence MF record, the optional part ("incidence_sha": its sha256). With
     ``p1d_heldout`` it names a synthetic P1D held-out record ("p1d_heldout_sha"), measured in name on the MF
-    record's own training runs."""
+    record's own training runs; with ``p1d_evidence=False`` that record is written without its evidence file.
+    """
     from tests.test_predictor_mf import write_mf
 
     root = Path(root)
@@ -203,6 +205,7 @@ def make_release(
             hr_cache=mf["caches"]["hr"]["sha256"],
             hr_sims=mf["train_sims"],
             n_modes=mf["tables"]["n_modes"],
+            with_evidence=p1d_evidence,
         )
         extra.update(
             p1d_heldout_dir="p1d_heldout", p1d_heldout_record_sha256=out["p1d_heldout_sha"]

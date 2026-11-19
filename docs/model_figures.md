@@ -1,6 +1,8 @@
 # Figures: the model and the simulations against published work
 
-Three figures, each drawn by one script of `scripts/figures/`. The data files they read are committed under
+Three figures against published work, each drawn by one script of `scripts/figures/`, and three figures of the
+model's held-out prediction residual of the class P1D, drawn by a fourth script (the last section). The data
+files that the first three read are committed under
 `docs/figures/data`. The class-ratio figure regenerates from the repository alone. The dN/dX and CDDF figures need a
 model that holds an incidence record; their measured points and the 60 design points of their bands are in the
 repository. The scripts save their figures to files under the matplotlib backend of your session, which they do not
@@ -215,6 +217,76 @@ To regenerate it (no model is needed):
 ```text
 python scripts/figures/fig_class_ratio_vs_rogers18.py
 ```
+
+## The held-out prediction residual of the class P1D
+
+These figures show what `P_class_validation_rms_log` and `P_mix_validation_rms_log` of a prediction hold. They are
+drawn from the model's own P1D held-out record (`docs/release_format_h5.md`, section "The P1D held-out record"), by
+one script. They show an empirical validation diagnostic, not a calibrated uncertainty: for simulations the model
+was made without, how far the predicted spectrum lies from the simulation. Like the two model figures above, they
+were drawn from the candidate LF+MF release and will be redrawn from the published model.
+
+![The held-out prediction residual of the class P1D for the LF model: the rms of ln(prediction / truth) in per cent against the wavenumber, one line per redshift, in five panels (clean, LLS, subDLA, DLA and the mixture). An empirical validation diagnostic, not a calibrated uncertainty](figures/p1d_validation_lf.png)
+
+![The same for the LF+MF model: the rms of ln(prediction / truth) in per cent against the wavenumber, one line per redshift, in five panels. An empirical validation diagnostic, not a calibrated uncertainty](figures/p1d_validation_lfmf.png)
+
+- **What is drawn.** e = the rms of ln(prediction / truth) over the held-out simulations and the 20 mean-flux
+  rungs, as 100 e in per cent, for each class and for the mixture (the class spectra mixed with each held-out
+  simulation's own class fractions), one line per snapshot redshift. The colour, light to dark, is the redshift.
+  LF: a fold model against the low-fidelity simulation it was trained without, six simulations. LF+MF: a fold model
+  with a multi-fidelity table fitted without the high-resolution run of the same design point, against that run,
+  five simulations.
+- **Three cases, kept apart.** Solid lines beyond the open markers: redshifts 2.2 to 4.6 above the two largest
+  modes of the box, the typical case. Open markers: the two largest modes, which training gave less weight; the
+  residual is larger there. Dashed lines: redshifts above 4.6, outside the validated range.
+- **The darkest dashed line of the LF figure, z = 5.4,** is dominated by one held-out simulation whose source
+  spectra file is incomplete at that redshift (a listed limitation of the release: `docs/models_and_data.md`). The
+  dotted line is the same table without that simulation.
+- **Not an error bar.** The numbers rest on five or six simulations that share their initial phases with the
+  training simulations, and a substantial part of the residual is present for simulations the model was trained
+  on. The likelihood does not use them.
+- **Wavenumbers.** The modes of the box, converted to s/km at each redshift with `hub` and `omegamh2` of the
+  midpoint above. Each simulation has its own cosmology, so its own wavenumbers differ from these by a few per cent.
+- **The side files** (`p1d_validation_lf.json`, `p1d_validation_lfmf.json`) hold, per row, the median and the
+  largest value in each of these cases, and the record the figure was drawn from.
+
+![The residual ln(prediction / truth) of the mixture in per cent against the wavenumber, one line per held-out simulation, at redshifts 2.2, 3, 4 and 5.4, for the LF model (top) and the LF+MF model (bottom). An empirical validation diagnostic, not a calibrated uncertainty](figures/p1d_validation_by_simulation.png)
+
+- **What is drawn.** The residual itself, d = ln(prediction / truth) of the mixture, with its sign, as 100 d in per
+  cent, one line per held-out simulation, at the mean-flux rung nearest the mean flux of Kim et al. (2007). These
+  are the vectors of the record's evidence file, which ships with the model. The vertical axis is linear within 5
+  per cent and logarithmic beyond.
+- **Two simulations are drawn in a colour.** Orange, `ns0.914Ap1.32e-09`: the prediction lies above the simulation
+  at the largest scales, more so at higher redshift. Blue, `ns0.979Ap1.78e-09`: at z = 5.4 its LF line leaves the
+  others by far; this is the simulation with the incomplete source file, and the one the dotted line above leaves
+  out. The other simulations are grey.
+- **For one class** in place of the mixture, add `--row clean`, `--row LLS`, `--row subDLA` or `--row DLA`; the
+  figure is then written as `p1d_validation_by_simulation_<row>.png`. Only the figure of the mixture is committed.
+
+To regenerate the three figures:
+
+```text
+python scripts/figures/fig_p1d_validation.py --published
+python scripts/figures/fig_p1d_validation.py --release RELEASE_DIR SHA256
+```
+
+**The same on a prediction of your own.** With `pred` from `emu.predict(...)` of a model that carries the record
+(the flag `p1d_validation_available` is set), this draws one class spectrum with the range
+`P_class_validation_lower` to `P_class_validation_upper` around it. The band is the validation diagnostic above,
+not a calibrated uncertainty:
+
+```python
+import matplotlib.pyplot as plt
+
+c = 3  # the class, in the order of hp.CLASSES: 0 clean, 1 LLS, 2 subDLA, 3 DLA
+fig, ax = plt.subplots()
+ax.loglog(pred.k, pred.P_class[c], label="prediction")
+ax.fill_between(pred.k, pred.P_class_validation_lower[c], pred.P_class_validation_upper[c], alpha=0.3,
+                label="held-out prediction residual (a validation diagnostic)")
+ax.set(xlabel="k (s/km)", ylabel="P1D (km/s)"); ax.legend(); fig.savefig("my_prediction.png")
+```
+
+The record itself, with its tables per fidelity and its texts, is `emu.p1d_heldout_record()`.
 
 ## References
 

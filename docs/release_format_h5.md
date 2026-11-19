@@ -602,6 +602,12 @@ validation diagnostics, not calibrated predictive uncertainties. The record chan
 prediction, and `hcd_analysis.likelihood` does not use it: the likelihood adds no emulator term to the data
 covariance.
 
+**The record of a loaded model.** `emu.p1d_heldout_record()` returns `(record, directory)`: the record with its
+read-only tables per fidelity (`record.e`, `record.n`, `record.z`), the sensitivity table (`record.e_sens`) and
+its texts (`record.record`), and the directory that holds it with its evidence file; `(None, None)` for a model
+without one. `scripts/figures/fig_p1d_validation.py` draws the tables and the residual vectors from it
+(`docs/model_figures.md`).
+
 **Writing one.** `scripts/build_p1d_heldout.py` builds a record from a residual file and a spec (the inputs by
 digest and the record's texts), each pinned by its sha256, into a new directory; it evaluates no model. To change a
 statement, change the spec and build again: the tables stay the same and the record's digest changes.

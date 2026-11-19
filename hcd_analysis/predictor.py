@@ -1143,6 +1143,16 @@ class _PredictorBase:
     _p1d = None
     _p1d_dir = None
 
+    def p1d_heldout_record(self):
+        """The P1D held-out record of this model and the directory that holds it with its evidence file:
+        ``(record, directory)``, or ``(None, None)`` for a model without one. ``record`` is a
+        ``hcd_analysis.emulator.p1d_heldout.P1DHeldout`` (read-only tables ``e`` and ``n`` per fidelity, the
+        sensitivity table, the record's texts); the evidence file ``p1d_heldout_tables.h5`` in ``directory``
+        holds every residual vector. It is what ``P_class_validation_rms_log`` of a prediction is read from:
+        empirical validation diagnostics, not calibrated predictive uncertainties
+        (scripts/figures/fig_p1d_validation.py draws them)."""
+        return self._p1d, self._p1d_dir
+
     def _attach_p1d_heldout(self, held):
         """Bind a loaded P1D held-out record (``p1d_heldout.load_record``, anchored; re-derived from its sealed
         bytes by ``p1d_heldout.reverify``). The record must be of this model: its LF cache is this backbone's

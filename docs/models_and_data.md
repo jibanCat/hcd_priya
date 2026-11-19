@@ -161,7 +161,9 @@ in three separate cases (the typical residual at redshifts 2.2 to 4.6 above the 
 two modes; redshifts above 4.6), the record's notes, and what the numbers do not cover. `member_std` is another
 thing: the spread over the members' random seeds. The likelihood does not use these fields and adds no emulator
 term to the data covariance. Details: `docs/release_format_h5.md`,
-section "The P1D held-out record".
+section "The P1D held-out record". Figures of these numbers against wavenumber and redshift, and of the residual of
+each held-out simulation: [`docs/model_figures.md`](model_figures.md), the last section; `emu.p1d_heldout_record()`
+returns the record they are drawn from.
 
 **A known defect of the training data at z = 5.4.** The source spectra files of two low-fidelity simulations are
 incomplete at z = 5.4: in compact regions of the box the optical depth of the gas is missing, which gives those two

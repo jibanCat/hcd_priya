@@ -1,0 +1,270 @@
+{
+ "dashed": "redshifts above 4.6",
+ "fidelity": "LF",
+ "figure": "the held-out prediction residual of the class P1D: 100 e against k, one line per redshift",
+ "held_out": "a fold backbone against the low-fidelity simulation it was trained without",
+ "midpoint": {
+  "hub": 0.7,
+  "omegamh2": 0.143
+ },
+ "model": {
+  "incidence_hr_simulations": 5,
+  "incidence_record": true,
+  "release_format": "hcd_priya.release/1",
+  "synthetic_build": false
+ },
+ "n_held_out_simulations": 6,
+ "open_markers": "the 2 largest modes of the box",
+ "record_kind": "rms_log_heldout_prediction_residual",
+ "record_sha256": "95289614cb360e2b87861a4c8a725d1fc3dfd98d43b23174cef55b44f0425f8e",
+ "redshifts": [
+  2.0,
+  2.2,
+  2.4,
+  2.6,
+  2.8,
+  3.0,
+  3.2,
+  3.4,
+  3.6,
+  3.8,
+  4.0,
+  4.2,
+  4.4,
+  4.6,
+  4.8,
+  5.0,
+  5.2,
+  5.4
+ ],
+ "sensitivity": {
+  "dotted": "the table without ns0.979Ap1.78e-09, at z = 5.4",
+  "statement": "the LF table was also reduced without the simulation ns0.979Ap1.78e-09, whose source spectra file at z = 5.4 is incomplete (notes, anomalous_rows).",
+  "summary_per_cent": {
+   "DLA": {
+    "above_z_4p6": {
+     "max": 7.237,
+     "median": 1.997
+    },
+    "above_z_4p6_largest_modes": {
+     "max": 16.082,
+     "median": 10.968
+    },
+    "below_z_2p2": {
+     "max": 2.576,
+     "median": 1.568
+    },
+    "largest_modes": {
+     "max": 9.928,
+     "median": 3.359
+    },
+    "typical": {
+     "max": 3.262,
+     "median": 1.106
+    }
+   },
+   "LLS": {
+    "above_z_4p6": {
+     "max": 6.147,
+     "median": 1.417
+    },
+    "above_z_4p6_largest_modes": {
+     "max": 11.925,
+     "median": 7.013
+    },
+    "below_z_2p2": {
+     "max": 2.27,
+     "median": 0.655
+    },
+    "largest_modes": {
+     "max": 5.293,
+     "median": 2.284
+    },
+    "typical": {
+     "max": 2.78,
+     "median": 0.702
+    }
+   },
+   "clean": {
+    "above_z_4p6": {
+     "max": 7.148,
+     "median": 1.357
+    },
+    "above_z_4p6_largest_modes": {
+     "max": 13.697,
+     "median": 7.728
+    },
+    "below_z_2p2": {
+     "max": 1.921,
+     "median": 0.558
+    },
+    "largest_modes": {
+     "max": 5.941,
+     "median": 2.39
+    },
+    "typical": {
+     "max": 3.185,
+     "median": 0.652
+    }
+   },
+   "mixture": {
+    "above_z_4p6": {
+     "max": 6.416,
+     "median": 1.413
+    },
+    "above_z_4p6_largest_modes": {
+     "max": 12.362,
+     "median": 7.482
+    },
+    "below_z_2p2": {
+     "max": 1.962,
+     "median": 0.553
+    },
+    "largest_modes": {
+     "max": 5.799,
+     "median": 2.35
+    },
+    "typical": {
+     "max": 2.972,
+     "median": 0.649
+    }
+   },
+   "subDLA": {
+    "above_z_4p6": {
+     "max": 5.982,
+     "median": 1.549
+    },
+    "above_z_4p6_largest_modes": {
+     "max": 10.831,
+     "median": 7.644
+    },
+    "below_z_2p2": {
+     "max": 2.739,
+     "median": 0.966
+    },
+    "largest_modes": {
+     "max": 6.259,
+     "median": 2.555
+    },
+    "typical": {
+     "max": 3.049,
+     "median": 0.807
+    }
+   }
+  }
+ },
+ "summary_per_cent": {
+  "DLA": {
+   "above_z_4p6": {
+    "max": 29.405,
+    "median": 1.966
+   },
+   "above_z_4p6_largest_modes": {
+    "max": 52.95,
+    "median": 10.959
+   },
+   "below_z_2p2": {
+    "max": 2.576,
+    "median": 1.568
+   },
+   "largest_modes": {
+    "max": 9.183,
+    "median": 3.168
+   },
+   "typical": {
+    "max": 3.015,
+    "median": 1.083
+   }
+  },
+  "LLS": {
+   "above_z_4p6": {
+    "max": 34.172,
+    "median": 1.461
+   },
+   "above_z_4p6_largest_modes": {
+    "max": 60.878,
+    "median": 6.407
+   },
+   "below_z_2p2": {
+    "max": 2.27,
+    "median": 0.655
+   },
+   "largest_modes": {
+    "max": 4.885,
+    "median": 2.213
+   },
+   "typical": {
+    "max": 2.548,
+    "median": 0.701
+   }
+  },
+  "clean": {
+   "above_z_4p6": {
+    "max": 41.363,
+    "median": 1.447
+   },
+   "above_z_4p6_largest_modes": {
+    "max": 74.167,
+    "median": 7.059
+   },
+   "below_z_2p2": {
+    "max": 1.921,
+    "median": 0.558
+   },
+   "largest_modes": {
+    "max": 5.444,
+    "median": 2.259
+   },
+   "typical": {
+    "max": 2.917,
+    "median": 0.661
+   }
+  },
+  "mixture": {
+   "above_z_4p6": {
+    "max": 34.735,
+    "median": 1.46
+   },
+   "above_z_4p6_largest_modes": {
+    "max": 62.163,
+    "median": 6.833
+   },
+   "below_z_2p2": {
+    "max": 1.962,
+    "median": 0.553
+   },
+   "largest_modes": {
+    "max": 5.313,
+    "median": 2.21
+   },
+   "typical": {
+    "max": 2.722,
+    "median": 0.65
+   }
+  },
+  "subDLA": {
+   "above_z_4p6": {
+    "max": 31.504,
+    "median": 1.556
+   },
+   "above_z_4p6_largest_modes": {
+    "max": 56.064,
+    "median": 6.982
+   },
+   "below_z_2p2": {
+    "max": 2.739,
+    "median": 0.966
+   },
+   "largest_modes": {
+    "max": 5.719,
+    "median": 2.435
+   },
+   "typical": {
+    "max": 2.805,
+    "median": 0.798
+   }
+  }
+ },
+ "wavenumbers": "the modes of the box in s/km at each redshift, for hub and omegamh2 of the midpoint",
+ "what_it_is": "an empirical validation diagnostic, not a calibrated uncertainty"
+}

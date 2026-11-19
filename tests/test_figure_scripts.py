@@ -979,6 +979,262 @@ def test_the_dndx_figure_refuses_a_model_without_an_incidence_record(tmp_path):
     assert not (tmp_path / "dndx.png").exists()
 
 
+# ---- the held-out prediction residual of the class P1D (every number below is synthetic)
+
+
+@pytest.fixture(scope="module")
+def release_p1d(tmp_path_factory):
+    return SR.make_release(tmp_path_factory.mktemp("figures_p1d") / "release", p1d_heldout=True)
+
+
+def _spy_on_plot(monkeypatch):
+    """Record every Axes.plot call: (the axes, x, y, the keywords)."""
+    from matplotlib.axes import Axes
+
+    calls, real = [], Axes.plot
+
+    def spy(self, x, y, *a, **k):
+        calls.append((self, np.asarray(x, dtype=float), np.asarray(y, dtype=float), dict(k)))
+        return real(self, x, y, *a, **k)
+
+    monkeypatch.setattr(Axes, "plot", spy)
+    return calls
+
+
+def _figures(calls):
+    out = []
+    for ax, *_ in calls:
+        if not any(ax.figure is f for f in out):
+            out.append(ax.figure)
+    return out
+
+
+def test_the_p1d_validation_tables_are_drawn_as_the_record_holds_them(
+    tmp_path, release_p1d, monkeypatch
+):
+    from hcd_analysis.emulator import p1d_heldout as PH
+
+    val = _script("fig_p1d_validation")
+    assert val.Z_BY_SIMULATION == (2.2, 3.0, 4.0, 5.4) and val.ROW_CHOICES == PH.ROWS
+    held, _ = hp.load_release(str(release_p1d["root"]), release_p1d["sha"]).p1d_heldout_record()
+    calls = _spy_on_plot(monkeypatch)
+    assert val.main(_args(release_p1d) + ["--out-dir", str(tmp_path)]) == 0
+    figures = _figures(calls)
+    assert len(figures) == 3
+    for fig, fid, label in zip(figures, PH.FIDELITIES, ("LF", "LF+MF")):
+        z, e = np.asarray(held.z[fid]), np.asarray(held.e[fid])
+        mine = [c for c in calls if c[0].figure is fig]
+        for row, title in enumerate(val.ROW_TITLES):
+            panel = [c for c in mine if c[0].get_title(loc="left") == title]
+            lines = [c for c in panel if c[3].get("ls") in ("-", "--")]
+            assert len(lines) == len(z), (fid, title)
+            for (_, x, y, kw), iz in zip(lines, range(len(z))):
+                # the line of a redshift is the record's e times 100, at the modes of the box at the midpoint
+                assert np.array_equal(y, 100.0 * e[iz, row])
+                assert np.array_equal(x, val.mode_wavenumbers(held.n_modes, z[iz]))
+                assert kw["ls"] == ("--" if z[iz] > 4.6 else "-")
+            marks = [c for c in panel if c[3].get("marker") == "o"]
+            assert len(marks) == len(z) and all(len(c[1]) == PH.N_LARGEST_MODES for c in marks)
+            dotted = [c for c in panel if c[3].get("ls") == ":"]
+            if fid == held.record["sensitivity"]["fidelity"]:
+                # the sensitivity table at the highest redshift, and nowhere else
+                assert len(dotted) == 1
+                assert np.array_equal(dotted[0][2], 100.0 * np.asarray(held.e_sens)[-1, row])
+            else:
+                assert dotted == []
+        facts = _facts(str(tmp_path / f"p1d_validation_{fid}.png"))
+        assert facts["fidelity"] == label and facts["redshifts"] == [float(v) for v in z]
+        assert (
+            facts["what_it_is"]
+            == "an empirical validation diagnostic, not a calibrated uncertainty"
+        )
+        assert facts["record_sha256"] == release_p1d["p1d_heldout_sha"] == held.record_sha256
+        assert facts["n_held_out_simulations"] == len(held.record[fid]["sims"])
+        assert facts["model"]["synthetic_build"] is False and facts["midpoint"] == {
+            "hub": C.MIDPOINT["hub"],
+            "omegamh2": C.MIDPOINT["omegamh2"],
+        }
+        # the numbers of the side file: per row, the record's own summary of that row alone
+        assert set(facts["summary_per_cent"]) == set(PH.ROWS)
+        for row, name in enumerate(PH.ROWS):
+            want = PH.summarise(e[:, row : row + 1, :], z)
+            got = facts["summary_per_cent"][name]
+            assert set(got) == set(want)
+            for regime in want:
+                for q in ("median", "max"):
+                    assert got[regime][q] == pytest.approx(100.0 * want[regime][q], abs=6e-4)
+        assert ("sensitivity" in facts) == (fid == held.record["sensitivity"]["fidelity"])
+    lf = _facts(str(tmp_path / "p1d_validation_lf.png"))
+    assert lf["sensitivity"]["statement"] == held.record["sensitivity"]["statement"]
+    assert PH.design_point(held.record["sensitivity"]["without_sim"]) in lf["sensitivity"]["dotted"]
+    # The dotted line is the sensitivity table and not the registered one. The two are equal in the synthetic
+    # record (every simulation has the same size of residual), so draw once more with the sensitivity table doubled.
+    import matplotlib.pyplot as plt
+
+    doubled = held._replace(e_sens=2.0 * np.asarray(held.e_sens))
+    calls.clear()
+    val.draw_table(plt, doubled, "lf", str(tmp_path / "doubled.png"), {})
+    dotted = [c for c in calls if c[3].get("ls") == ":"]
+    assert len(dotted) == len(val.ROW_TITLES)
+    for ax, _, y, _ in dotted:
+        row = val.ROW_TITLES.index(ax.get_title(loc="left"))
+        assert np.array_equal(y, 200.0 * np.asarray(held.e_sens)[-1, row])
+        assert not np.array_equal(y, 100.0 * np.asarray(held.e["lf"])[-1, row])
+
+
+@pytest.mark.parametrize("row", ["mixture", "DLA"])
+def test_the_p1d_validation_figure_per_simulation_draws_the_residual_vectors(
+    tmp_path, release_p1d, monkeypatch, row
+):
+    from hcd_analysis.emulator import p1d_heldout as PH
+    from hcd_analysis.emulator import safe_io as S
+
+    val = _script("fig_p1d_validation")
+    # the synthetic record holds LF at z 2, 3 and 5 and LF+MF at z 3 and 5: three of its redshifts and one it lacks
+    monkeypatch.setattr(val, "Z_BY_SIMULATION", (2.0, 3.0, 5.0, 5.4))
+    emu = hp.load_release(str(release_p1d["root"]), release_p1d["sha"])
+    held, record_dir = emu.p1d_heldout_record()
+    rec = held.record
+    arrays, _ = S.read_table_h5(os.path.join(record_dir, PH.TABLES_FILE), PH.table_datasets(rec))
+    calls = _spy_on_plot(monkeypatch)
+    assert val.main(_args(release_p1d) + ["--out-dir", str(tmp_path), "--row", row]) == 0
+    name = "p1d_validation_by_simulation" + ("" if row == "mixture" else f"_{row}")
+    assert sorted(f for f in os.listdir(tmp_path) if f.endswith(".png")) == sorted(
+        [name + ".png", "p1d_validation_lf.png", "p1d_validation_lfmf.png"]
+    )
+    fig = _figures(calls)[2]
+    mine = [c for c in calls if c[0].figure is fig]
+    i_row = PH.ROWS.index(row)
+    for fid, label in zip(PH.FIDELITIES, ("LF", "LF+MF")):
+        z = list(rec[fid]["z"])
+        d = arrays[f"{fid}_d"].astype(np.float64)
+        for zz in val.Z_BY_SIMULATION:
+            title = f"{label}, z = {zz:g}"
+            panel = [c for c in mine if c[0].get_title(loc="left") == title]
+            ax = [a for a in fig.axes if a.get_title(loc="left") == title][0]
+            if zz not in z:
+                assert panel == [] and [t.get_text() for t in ax.texts] == ["no estimate"]
+                continue
+            iz = z.index(zz)
+            # one line per simulation that has a residual there, each the evidence file's vector times 100
+            want = [100.0 * d[i, iz, 0, i_row] for i in range(len(rec[fid]["sims"]))]
+            want = [y for y in want if np.isfinite(y).any()]
+            assert len(panel) == len(want) >= 1
+            for (_, x, y, _), w in zip(panel, want):
+                assert np.array_equal(y, w)
+                assert np.array_equal(x, val.mode_wavenumbers(held.n_modes, zz))
+    # the synthetic record has one simulation without a value at its first redshift: one line fewer there
+    first = [c for c in mine if c[0].get_title(loc="left") == "LF, z = 2"]
+    assert len(first) == len(rec["lf"]["sims"]) - 1
+    facts = _facts(str(tmp_path / (name + ".png")))
+    assert facts["row"] == row and facts["rows"] == ["LF", "LF+MF"]
+    assert facts["what_it_is"] == "an empirical validation diagnostic, not a calibrated uncertainty"
+    assert facts["record_sha256"] == held.record_sha256
+    assert facts["evidence_file_sha256"] == rec["tables"]["sha256"]
+    assert facts["simulations"] == sorted({PH.design_point(s) for s in rec["lf"]["sims"]})
+    assert facts["in_the_first_hue"]["design_point"] == PH.design_point(
+        rec["sensitivity"]["without_sim"]
+    )
+    assert facts["in_the_second_hue"]["design_point"] in facts["simulations"]
+    assert set(facts["rung_indices_drawn"]) == {"LF", "LF+MF"}
+
+
+def test_the_rung_drawn_per_simulation_is_the_one_nearest_the_kim_mean_flux():
+    from hcd_analysis.emulator.mean_flux_model import kim_tau0
+
+    val = _script("fig_p1d_validation")
+    for z in (2.2, 4.0):
+        tau = float(kim_tau0(z)) * np.array([0.6, 0.8, 1.03, 1.3, np.nan])
+        assert val.central_rung(np.exp(-tau), z) == 2
+        assert val.central_rung(np.exp(-tau[::-1]), z) == 2
+        assert val.central_rung(np.exp(-tau[:2]), z) == 1
+
+
+def test_the_wavenumbers_of_the_p1d_validation_figures_are_the_modes_at_the_midpoint():
+    from hcd_analysis.emulator import kcoord
+    from hcd_analysis.emulator.schema import L_BOX_HMPC
+
+    val = _script("fig_p1d_validation")
+    k = val.mode_wavenumbers(7, 3.0)
+    want = kcoord.k_skm_from_kcom(
+        2.0 * np.pi * np.arange(1, 8) / L_BOX_HMPC, 3.0, C.MIDPOINT["hub"], C.MIDPOINT["omegamh2"]
+    )
+    assert k.shape == (7,) and np.array_equal(k, np.asarray(want, dtype=np.float64))
+    assert np.all(np.diff(k) > 0) and k[1] == pytest.approx(2.0 * k[0])
+    assert not np.array_equal(k, val.mode_wavenumbers(7, 4.0))
+
+
+def test_the_p1d_validation_figures_refuse_a_model_without_the_record(tmp_path):
+    val = _script("fig_p1d_validation")
+    plain = SR.make_release(tmp_path / "plain")
+    with pytest.raises(SystemExit, match="no P1D held-out record"):
+        val.main(_args(plain) + ["--out-dir", str(tmp_path / "out")])
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_record_shipped_without_its_evidence_file_draws_the_two_tables_only(tmp_path, capsys):
+    val = _script("fig_p1d_validation")
+    alone = SR.make_release(tmp_path / "alone", p1d_heldout=True, p1d_evidence=False)
+    out = tmp_path / "out"
+    assert val.main(_args(alone) + ["--out-dir", str(out)]) == 0
+    assert sorted(f for f in os.listdir(out) if f.endswith(".png")) == [
+        "p1d_validation_lf.png",
+        "p1d_validation_lfmf.png",
+    ]
+    assert "without its evidence file" in capsys.readouterr().out
+
+
+def test_the_lines_of_the_docs_that_draw_the_range_on_a_prediction_run(
+    tmp_path, release_p1d, monkeypatch
+):
+    """The code block of docs/model_figures.md that draws a class spectrum with its validation range, run as
+    written on a prediction of the synthetic model."""
+    import re
+
+    import matplotlib.pyplot as plt
+
+    page = open(os.path.join(REPO, "docs", "model_figures.md"), encoding="utf-8").read()
+    blocks = re.findall(r"```python\n(.*?)```", page, flags=re.S)
+    assert len(blocks) == 1 and "P_class_validation_lower" in blocks[0]
+    assert len(blocks[0].strip().splitlines()) <= 8
+    emu = hp.load_release(str(release_p1d["root"]), release_p1d["sha"])
+    pred = emu.predict(C.MIDPOINT, z=3.0, tau0_amp=1.0, dtau0=0.0)
+    assert pred.flags["p1d_validation_available"] is True
+    monkeypatch.chdir(tmp_path)
+    scope = {"pred": pred}
+    exec(compile(blocks[0], "docs/model_figures.md", "exec"), scope)  # noqa: S102
+    with open(tmp_path / "my_prediction.png", "rb") as fh:
+        assert fh.read(8) == PNG
+    band = scope["ax"].collections[0].get_paths()[0].vertices[:, 1]
+    assert band.min() == pytest.approx(float(np.min(pred.P_class_validation_lower[scope["c"]])))
+    assert band.max() == pytest.approx(float(np.max(pred.P_class_validation_upper[scope["c"]])))
+    plt.close(scope["fig"])
+
+
+def test_the_committed_p1d_validation_figures_are_of_one_record_and_say_what_they_are():
+    """The three committed images and their side files: drawn from one record, each saying that it shows an
+    empirical validation diagnostic; the docs page shows all three and gives the command. No value is pinned.
+    """
+    figures = os.path.join(REPO, "docs", "figures")
+    names = ("p1d_validation_lf", "p1d_validation_lfmf", "p1d_validation_by_simulation")
+    facts = [_facts(os.path.join(figures, n + ".png")) for n in names]
+    assert len({f["record_sha256"] for f in facts}) == 1
+    assert all(
+        f["what_it_is"] == "an empirical validation diagnostic, not a calibrated uncertainty"
+        for f in facts
+    )
+    assert [f.get("fidelity") for f in facts] == ["LF", "LF+MF", None] and facts[2][
+        "row"
+    ] == "mixture"
+    assert all(f["model"]["synthetic_build"] is False for f in facts)
+    page = open(os.path.join(REPO, "docs", "model_figures.md"), encoding="utf-8").read()
+    for n in names:
+        assert f"](figures/{n}.png)" in page, n
+    assert "python scripts/figures/fig_p1d_validation.py --published" in page
+    assert "empirical validation diagnostic" in page and "not a calibrated uncertainty" in page
+    assert "P_class_validation_lower" in page and "P_class_validation_upper" in page
+
+
 def test_an_absent_bin_breaks_the_line_and_the_band():
     import matplotlib
 

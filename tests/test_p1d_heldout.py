@@ -477,6 +477,18 @@ def test_a_prediction_carries_the_residual_of_its_own_fidelity(emu, held):
     assert mf.provenance["p1d_heldout"]["record_sha256"] == held.record_sha256
 
 
+def test_a_loaded_model_gives_its_record_and_the_directory_that_holds_it(rel, emu, held, tmp_path):
+    record, directory = emu.p1d_heldout_record()
+    assert record.record_sha256 == held.record_sha256 == rel["p1d_heldout_sha"]
+    assert np.array_equal(record.e["lf"], held.e["lf"]) and not record.e["lf"].flags.writeable
+    assert os.path.samefile(directory, rel["root"] / "p1d_heldout")
+    assert sorted(os.listdir(directory)) == sorted([PH.RECORD_FILE, PH.TABLES_FILE])
+    assert PH.verify_tables(directory, record) > 0
+    # a model without the part has neither
+    plain = make_release(tmp_path / "plain")
+    assert hp.load_release(str(plain["root"]), plain["sha"]).p1d_heldout_record() == (None, None)
+
+
 def test_the_range_is_on_the_spectrum_each_end_from_the_logarithm_on_its_own(emu):
     pred = emu.predict(PARAMS, z=3.0, **CALL)
     np.testing.assert_allclose(
