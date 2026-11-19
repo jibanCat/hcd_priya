@@ -1287,3 +1287,37 @@ def test_the_release_date_is_one_line_in_each_of_two_files_and_the_two_agree():
         ), "the placeholder stands in both files or in neither"
     else:
         assert real == [day] and commented == [] and "RELEASE_DATE" not in citation
+
+
+# ---- the README is the page of the package on the index: its links must work from there
+def test_the_readme_links_into_this_repository_are_absolute_at_the_tag_of_this_version():
+    """The index shows the README of the uploaded package and cannot resolve a relative link or image, and an
+    upload cannot be amended. Every link and image of the README into this repository is therefore an absolute URL
+    at the tag of this version, and each names a file or folder that exists in this tree. Links inside the page
+    (#section) stay as they are."""
+    import hcd_analysis
+
+    tag = f"v{hcd_analysis.__version__}"
+    text = open(os.path.join(REPO, "README.md"), encoding="utf-8").read()
+    targets = re.findall(r"\]\(([^()\s]+)\)", text)
+    assert len(targets) > 40
+    relative = [u for u in targets if not re.match(r"(https?://|mailto:|#)", u)]
+    assert relative == [], f"relative links or images in README.md: {relative[:5]}"
+    own = re.compile(
+        r"https://(?:github\.com/jibanCat/hcd_priya/(blob|tree)|raw\.githubusercontent\.com/jibanCat/hcd_priya)"
+        r"/([^/]+)/([^#]+)(?:#.*)?$"
+    )
+    seen = {"blob": 0, "tree": 0, None: 0}
+    for url in targets:
+        m = own.match(url)
+        if m is None:
+            continue
+        kind, ref, path = m.groups()
+        assert ref == tag, f"{url}: the link must be at the tag {tag}"
+        full = os.path.join(REPO, path)
+        assert (
+            os.path.isdir(full) if kind == "tree" else os.path.isfile(full)
+        ), f"{url}: not in this tree"
+        seen[kind] += 1
+    images = re.findall(r"!\[[^\]]*\]\((https://raw\.githubusercontent\.com/[^)]+)\)", text)
+    assert seen[None] == len(images) == 3 and seen["blob"] >= 30 and seen["tree"] >= 2
