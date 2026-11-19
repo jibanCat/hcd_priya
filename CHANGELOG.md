@@ -17,15 +17,16 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 ### Added
 - **The held-out prediction residual of the class spectra**, an optional part of a release (the P1D held-out
   record, format `hcd_priya.p1d_heldout_record/1`; `hcd_analysis/emulator/p1d_heldout.py`). With it a prediction
-  carries `P_class_err` (4, K): for each class and wavenumber, the rms of ln(prediction / truth) over simulations
-  the model was made without, for the fidelity of the prediction; `P_class_lower` and `P_class_upper`, the value
-  times exp(-err) and times exp(+err); `P_mix_err`, the same for the class spectra mixed with each held-out
-  simulation's own class fractions; the flag `p1d_heldout_error_available`; and `labels["p1d_heldout_error"]`,
-  which states the sizes in three separate cases (the typical residual, the two largest modes of the box,
-  redshifts above 4.6). It is an empirical validation result, not a calibrated predictive uncertainty. The record
-  ships every residual vector it was reduced from, and `check_release` recomputes its tables from them. No other
-  number of a prediction changes, and the likelihood is unchanged: it adds no emulator term
-  (`docs/release_format_h5.md`, section "The P1D held-out record"; `scripts/build_p1d_heldout.py`).
+  carries `P_class_validation_rms_log` (4, K): for each class and wavenumber, the rms of ln(prediction / truth) over
+  simulations the model was made without, for the fidelity of the prediction, a number on the logarithm;
+  `P_class_validation_lower` and `P_class_validation_upper`, the value times exp(-rms_log) and times
+  exp(+rms_log); `P_mix_validation_rms_log`, the same for the class spectra mixed with each held-out simulation's
+  own class fractions; the flag `p1d_validation_available`; and `labels["p1d_validation"]`, which states the sizes
+  in three separate cases (the typical residual, the two largest modes of the box, redshifts above 4.6). These are
+  empirical validation diagnostics, not calibrated predictive uncertainties. The record ships every residual vector
+  it was reduced from, and `check_release` recomputes its tables from them. No other number of a prediction
+  changes, and the likelihood is unchanged: it adds no emulator term (`docs/release_format_h5.md`, section "The P1D
+  held-out record"; `scripts/build_p1d_heldout.py`).
 - **Science tests without a model**, at the pr level: the wavenumber convention of the native modes, the mean-flux
   law, the refusal of wavenumbers in h/Mpc above the modes, the statistics of the Gaussian likelihood over seeded
   draws, the interpolation error, the decode of the incidence outputs, the normalisation of the CDDF, the CDDF

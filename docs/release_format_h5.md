@@ -522,7 +522,7 @@ correction is a separate, small record (`hcd_analysis/emulator/incidence_mf.py`)
 (`hcd_analysis/emulator/p1d_heldout.py`). For a simulation that a model was made without, the residual is
 `d = ln(prediction / truth)` of a class spectrum at one redshift, one mean flux and one mode. The record reduces the
 residuals to `e = sqrt(mean(d^2))` per redshift, class and mode, and a prediction carries `e` beside each class
-spectrum. It is an empirical validation result. It is not a calibrated predictive uncertainty, and it is not a
+spectrum. It is an empirical validation diagnostic. It is not a calibrated predictive uncertainty, and it is not a
 generalisation error: a substantial part of it is present for simulations the model was trained on (the record's
 notes state what was measured).
 
@@ -587,14 +587,16 @@ the residual values as stored, so anyone can recompute them from this file.
 - A research model (a cross-validation fold is one) takes no such record: the record states the residual of a
   release model, measured with that model's folds.
 
-**On a prediction.** `P_class_err` (4, K) is `e` of the four classes at the prediction's redshift and fidelity;
-`P_class_lower` and `P_class_upper` are `P_class * exp(-e)` and `P_class * exp(+e)`; `P_mix_err` (K,) is the mixture
-row, which applies to the result of `add_hcd` at the held-out simulations' own fractions and is an indication only
-for other fractions. With a requested `k` they are carried to those wavenumbers by the operation that carries
-`P_class` there. The flag `p1d_heldout_error_available` is True when every value is finite;
-`labels["p1d_heldout_error"]` gives the definition, the sizes in the regimes above, the notes and the limits, in the
-record's own words. The record changes no other number of a prediction, and `hcd_analysis.likelihood` does not use
-it: the likelihood adds no emulator term to the data covariance.
+**On a prediction.** `P_class_validation_rms_log` (4, K) is `e` of the four classes at the prediction's redshift
+and fidelity, a number on the logarithm; `P_class_validation_lower` and `P_class_validation_upper` are
+`P_class * exp(-e)` and `P_class * exp(+e)`; `P_mix_validation_rms_log` (K,) is the mixture row, which applies to
+the result of `add_hcd` at the held-out simulations' own fractions and is an indication only for other fractions.
+With a requested `k` they are carried to those wavenumbers by the operation that carries `P_class` there. The flag
+`p1d_validation_available` is True when every value is finite; `labels["p1d_validation"]` gives the definition, the
+sizes in the regimes above, the notes and the limits, in the record's own words. These fields are empirical
+validation diagnostics, not calibrated predictive uncertainties. The record changes no other number of a
+prediction, and `hcd_analysis.likelihood` does not use it: the likelihood adds no emulator term to the data
+covariance.
 
 **Writing one.** `scripts/build_p1d_heldout.py` builds a record from a residual file and a spec (the inputs by
 digest and the record's texts), each pinned by its sha256, into a new directory; it evaluates no model. To change a
@@ -644,8 +646,8 @@ training cache; an LF+MF prediction of such a release has its `dndx` multiplied 
 `incidence_mf_applied`, `provenance["incidence_mf"]`). Only `load_release` applies it: the two-digest call
 (`load_bundle` with `mf_dir`) on the parts of a release with an incidence record does not read that record, and
 returns the LF `dndx` and `w_c` with no incidence flag. In the same way only `load_release` attaches the P1D
-held-out record (section above); the two-digest call returns predictions without `P_class_err`. What a release
-gives with and without the incidence part:
+held-out record (section above); the two-digest call returns predictions without
+`P_class_validation_rms_log`. What a release gives with and without the incidence part:
 
 | | without an incidence record | with an incidence record |
 |---|---|---|

@@ -8,8 +8,9 @@
 **What it is.** For a simulation that a model was made without, the residual is ``d = ln(prediction / truth)`` of a
 class spectrum at one redshift, one mean flux and one mode. The record reduces the residuals of the held-out
 simulations to ``e = sqrt(mean(d^2))`` per redshift, class and mode (``DEFINITION`` is the record's own statement). A
-prediction carries ``e`` as ``P_class_err``, and the range ``P_class * exp(-e)`` to ``P_class * exp(+e)``. It is an
-empirical validation result, not a calibrated predictive uncertainty: it rests on five or six simulations, and a
+prediction carries ``e`` as ``P_class_validation_rms_log``, and the range ``P_class * exp(-e)`` to
+``P_class * exp(+e)``. It is an
+empirical validation diagnostic, not a calibrated predictive uncertainty: it rests on five or six simulations, and a
 large part of it is present for simulations the model was trained on (the record's notes say what was measured).
 
 **Two fidelities, each with the residual of its own prediction.** ``lf``: a fold backbone against the low-fidelity
@@ -70,7 +71,7 @@ DEFINITION = (
     "the optical depth rescaled, not independent points. e is a number on the logarithm, not on the spectrum: on "
     "the spectrum itself the held-out range of a value v is v * exp(-e) to v * exp(+e), each end computed on its "
     "own. The fifth row, the mixture, is the same quantity for the class spectra mixed with each held-out "
-    "simulation's own counted class fractions. It is an empirical validation result, not a calibrated predictive "
+    "simulation's own counted class fractions. It is an empirical validation diagnostic, not a calibrated predictive "
     "uncertainty. No interpolation between redshifts."
 )
 FIDELITY_STATEMENT = {
@@ -559,14 +560,15 @@ class P1DHeldout(NamedTuple):
         return np.array(self.e[fid][hit[0]], dtype=np.float64)
 
     def label(self, lfmf):
-        """The words a prediction carries about its ``P_class_err``: what it is, the three regimes kept apart, the
+        """The words a prediction carries about its ``P_class_validation_rms_log``: what it is, the three regimes kept apart, the
         record's notes and what the numbers do not cover."""
         fid = "lfmf" if lfmf else "lf"
         r = self.record
         nmax = int(self.n[fid].max())
         parts = [
-            f"P_class_err and P_mix_err are the held-out prediction residual of this prediction's fidelity "
-            f"({'LF+MF' if lfmf else 'LF'}: {FIDELITY_STATEMENT[fid]}; {nmax} held-out simulations). ",
+            "P_class_validation_rms_log and P_mix_validation_rms_log are the held-out prediction residual of this "
+            f"prediction's fidelity ({'LF+MF' if lfmf else 'LF'}: {FIDELITY_STATEMENT[fid]}; {nmax} held-out "
+            "simulations). They are empirical validation diagnostics, not calibrated predictive uncertainties. ",
             r["definition"],
             " SIZES, in per cent (100 e). ",
             " ".join(summary_sentences(r["summary"][fid])),
@@ -584,7 +586,7 @@ class P1DHeldout(NamedTuple):
             " ".join(r["notes"][k] for k in sorted(_NOTE_KEYS)),
             " WHAT IT DOES NOT COVER. ",
             r["what_it_does_not_cover"],
-            " P_mix_err is the residual of the mixture at the held-out simulations' own class fractions; for other "
+            " P_mix_validation_rms_log is the residual of the mixture at the held-out simulations' own class fractions; for other "
             "fractions it is an indication only. With a requested k, e is carried to the requested wavenumbers by "
             "the operation that carries P_class there.",
         ]

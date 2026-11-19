@@ -325,13 +325,13 @@ def test_a_record_is_written_once(rel, tmp_path):
 
 # ----------------------------------------------------------------------------------------------- the words
 def test_the_statements_use_the_agreed_term_and_keep_three_cases_apart(held):
-    """The term is "held-out prediction residual"; it is called an empirical validation result and never a
+    """The term is "held-out prediction residual"; it is called an empirical validation diagnostic and never a
     generalisation error or a calibrated uncertainty; the label gives the typical case, the largest modes and the
     redshifts above 4.6 as three separate statements."""
     for lfmf in (False, True):
         text = held.label(lfmf)
         assert "held-out prediction residual" in text
-        assert "empirical validation result, not a calibrated predictive uncertainty" in text
+        assert "empirical validation diagnostic, not a calibrated predictive uncertainty" in text
         low = text.lower()
         for word in (
             "generalisation error",
@@ -388,11 +388,14 @@ def test_a_release_without_the_part_is_what_it_was(tmp_path):
     plain = make_release(tmp_path / "plain", incidence=True, heldout=True)
     assert "p1d_heldout" not in json.loads((plain["root"] / "release.json").read_text())
     pred = hp.load_release(str(plain["root"]), plain["sha"]).predict(PARAMS, z=3.0, **CALL)
-    for name in ("P_class_err", "P_mix_err", "P_class_lower", "P_class_upper"):
+    for name in (
+        "P_class_validation_rms_log",
+        "P_mix_validation_rms_log",
+        "P_class_validation_lower",
+        "P_class_validation_upper",
+    ):
         assert getattr(pred, name) is None
-    assert (
-        "p1d_heldout_error_available" not in pred.flags and "p1d_heldout_error" not in pred.labels
-    )
+    assert "p1d_validation_available" not in pred.flags and "p1d_validation" not in pred.labels
     assert "p1d_heldout" not in pred.provenance
 
 
@@ -401,61 +404,100 @@ def test_a_prediction_carries_the_residual_of_its_own_fidelity(emu, held):
     mf = emu.predict(PARAMS, z=3.0, **CALL)
     lf = emu.predict(PARAMS, z=3.0, fidelity="LF", **CALL)
     K = mf.k.size
-    assert mf.P_class_err.shape == (4, K) and mf.P_mix_err.shape == (K,)
-    assert np.array_equal(mf.P_class_err, held.err(3.0, True)[:4])
-    assert np.array_equal(mf.P_mix_err, held.err(3.0, True)[4])
-    assert np.array_equal(lf.P_class_err, held.err(3.0, False)[:4])
-    assert not np.array_equal(lf.P_class_err, mf.P_class_err)
-    np.testing.assert_allclose(mf.P_class_err[:, 0], 0.03 * np.arange(1, 5), rtol=1e-6, atol=0)
-    np.testing.assert_allclose(lf.P_class_err[:, 0], 0.01 * np.arange(1, 5) * 2, rtol=1e-6, atol=0)
+    assert mf.P_class_validation_rms_log.shape == (4, K) and mf.P_mix_validation_rms_log.shape == (
+        K,
+    )
+    assert np.array_equal(mf.P_class_validation_rms_log, held.err(3.0, True)[:4])
+    assert np.array_equal(mf.P_mix_validation_rms_log, held.err(3.0, True)[4])
+    assert np.array_equal(lf.P_class_validation_rms_log, held.err(3.0, False)[:4])
+    assert not np.array_equal(lf.P_class_validation_rms_log, mf.P_class_validation_rms_log)
+    np.testing.assert_allclose(
+        mf.P_class_validation_rms_log[:, 0], 0.03 * np.arange(1, 5), rtol=1e-6, atol=0
+    )
+    np.testing.assert_allclose(
+        lf.P_class_validation_rms_log[:, 0], 0.01 * np.arange(1, 5) * 2, rtol=1e-6, atol=0
+    )
     for pred in (mf, lf):
-        assert pred.flags["p1d_heldout_error_available"] is True
-        assert not pred.P_class_err.flags.writeable and not pred.P_class_lower.flags.writeable
-    assert mf.labels["p1d_heldout_error"] == held.label(True)
-    assert lf.labels["p1d_heldout_error"] == held.label(False)
+        assert pred.flags["p1d_validation_available"] is True
+        assert (
+            not pred.P_class_validation_rms_log.flags.writeable
+            and not pred.P_class_validation_lower.flags.writeable
+        )
+    assert mf.labels["p1d_validation"] == held.label(True)
+    assert lf.labels["p1d_validation"] == held.label(False)
     assert mf.provenance["p1d_heldout"]["record_sha256"] == held.record_sha256
 
 
 def test_the_range_is_on_the_spectrum_each_end_from_the_logarithm_on_its_own(emu):
     pred = emu.predict(PARAMS, z=3.0, **CALL)
     np.testing.assert_allclose(
-        pred.P_class_lower, pred.P_class * np.exp(-pred.P_class_err), rtol=1e-14, atol=0
+        pred.P_class_validation_lower,
+        pred.P_class * np.exp(-pred.P_class_validation_rms_log),
+        rtol=1e-14,
+        atol=0,
     )
     np.testing.assert_allclose(
-        pred.P_class_upper, pred.P_class * np.exp(+pred.P_class_err), rtol=1e-14, atol=0
+        pred.P_class_validation_upper,
+        pred.P_class * np.exp(+pred.P_class_validation_rms_log),
+        rtol=1e-14,
+        atol=0,
     )
-    assert np.all(pred.P_class_lower < pred.P_class) and np.all(pred.P_class < pred.P_class_upper)
+    assert np.all(pred.P_class_validation_lower < pred.P_class) and np.all(
+        pred.P_class < pred.P_class_validation_upper
+    )
     # the upper end lies farther from the value than the lower end
-    assert np.all(pred.P_class_upper - pred.P_class > pred.P_class - pred.P_class_lower)
+    assert np.all(
+        pred.P_class_validation_upper - pred.P_class > pred.P_class - pred.P_class_validation_lower
+    )
 
 
 def test_a_redshift_without_an_estimate_gives_nan_and_no_flag(emu):
     pred = emu.predict(PARAMS, z=4.0, **CALL)  # the synthetic record has 3.0 and 5.0 for LF+MF
-    assert np.isnan(pred.P_class_err).all() and np.isnan(pred.P_mix_err).all()
-    assert np.isnan(pred.P_class_lower).all() and np.isnan(pred.P_class_upper).all()
-    assert pred.flags["p1d_heldout_error_available"] is False
+    assert (
+        np.isnan(pred.P_class_validation_rms_log).all()
+        and np.isnan(pred.P_mix_validation_rms_log).all()
+    )
+    assert (
+        np.isnan(pred.P_class_validation_lower).all()
+        and np.isnan(pred.P_class_validation_upper).all()
+    )
+    assert pred.flags["p1d_validation_available"] is False
     assert np.all(np.isfinite(pred.P_class))  # the spectrum itself is unaffected
 
 
 def test_a_stack_and_a_requested_k_carry_it_too(emu, held):
     one = emu.predict(PARAMS, z=3.0, **CALL)
     stack = emu.predict_many(PARAMS, z=[3.0, 4.0, 5.0], **CALL)
-    assert stack.P_class_err.shape == (3, 4, one.k.size) and stack.P_mix_err.shape == (
+    assert stack.P_class_validation_rms_log.shape == (
+        3,
+        4,
+        one.k.size,
+    ) and stack.P_mix_validation_rms_log.shape == (
         3,
         one.k.size,
     )
-    assert np.array_equal(stack.P_class_err[0], one.P_class_err)
-    assert np.isnan(stack.P_class_err[1]).all() and np.isfinite(stack.P_class_err[2]).all()
+    assert np.array_equal(stack.P_class_validation_rms_log[0], one.P_class_validation_rms_log)
     assert (
-        stack.flags["p1d_heldout_error_available"] is False
+        np.isnan(stack.P_class_validation_rms_log[1]).all()
+        and np.isfinite(stack.P_class_validation_rms_log[2]).all()
+    )
+    assert (
+        stack.flags["p1d_validation_available"] is False
     )  # one redshift of the stack has no estimate
     k = np.array([one.k[1] * 1.3, one.k[3] * 1.1])
     at = emu.predict(PARAMS, z=3.0, k=k, **CALL)
-    assert at.P_class_err.shape == (4, 2) and at.P_mix_err.shape == (2,)
+    assert at.P_class_validation_rms_log.shape == (4, 2) and at.P_mix_validation_rms_log.shape == (
+        2,
+    )
     # the synthetic residual is the same at every mode, so it is the same at any requested wavenumber
-    np.testing.assert_allclose(at.P_class_err, one.P_class_err[:, :2], rtol=1e-6, atol=0)
     np.testing.assert_allclose(
-        at.P_class_upper, at.P_class * np.exp(at.P_class_err), rtol=1e-14, atol=0
+        at.P_class_validation_rms_log, one.P_class_validation_rms_log[:, :2], rtol=1e-6, atol=0
+    )
+    np.testing.assert_allclose(
+        at.P_class_validation_upper,
+        at.P_class * np.exp(at.P_class_validation_rms_log),
+        rtol=1e-14,
+        atol=0,
     )
 
 
@@ -522,7 +564,7 @@ def test_a_research_model_takes_no_such_record(held, tmp_path):
     with pytest.raises(E, match="a research model carries no P1D held-out record"):
         fold._attach_p1d_heldout(held)
     pred = fold.predict(PARAMS, z=3.0, **CALL)
-    assert pred.P_class_err is None and "p1d_heldout_error_available" not in pred.flags
+    assert pred.P_class_validation_rms_log is None and "p1d_validation_available" not in pred.flags
 
 
 # ----------------------------------------------------------------------------------------------- the tools

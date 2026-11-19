@@ -108,18 +108,18 @@ process for each record.
 
 **The held-out prediction residual of the class spectra.** A release may also name a P1D held-out record, an
 optional part of its manifest (format ``hcd_priya.p1d_heldout_record/1``, ``emulator.p1d_heldout``). Then every
-prediction carries ``P_class_err``: for each class and wavenumber, the rms of ln(prediction / truth) over
-simulations the model was made without, for the fidelity of the prediction (LF: a fold backbone against its
+prediction carries ``P_class_validation_rms_log``: for each class and wavenumber, the rms of ln(prediction / truth)
+over simulations the model was made without, for the fidelity of the prediction (LF: a fold backbone against its
 held-out low-fidelity simulation; LF+MF: the backbone and the multi-fidelity table both made without the
-high-resolution run it is compared with). On the spectrum itself the range is ``P_class_lower`` to
-``P_class_upper``: ``P_class * exp(-P_class_err)`` and ``P_class * exp(+P_class_err)``, each end computed on its
-own. ``P_mix_err`` is the same residual for the class spectra mixed with each held-out simulation's own class
-fractions. These are empirical validation results, not calibrated predictive uncertainties: they rest on five or
-six simulations, and a substantial part of the residual is present for simulations the model was trained on.
-``labels["p1d_heldout_error"]`` says what the numbers are and keeps three cases apart: the typical residual
-(z 2.2 to 4.6, above the largest modes), the largest modes, and redshifts above 4.6. ``member_std`` is another
-thing, the spread over the members' random seeds. The likelihood (``hcd_analysis.likelihood``) does not use any
-of these fields.
+high-resolution run it is compared with). It is a number on the logarithm. On the spectrum itself the range is
+``P_class_validation_lower`` to ``P_class_validation_upper``: ``P_class * exp(-rms_log)`` and
+``P_class * exp(+rms_log)``, each end computed on its own. ``P_mix_validation_rms_log`` is the same residual for
+the class spectra mixed with each held-out simulation's own class fractions. These are empirical validation
+diagnostics, not calibrated predictive uncertainties: they rest on five or six simulations, and a substantial part
+of the residual is present for simulations the model was trained on. ``labels["p1d_validation"]`` says what the
+numbers are and keeps three cases apart: the typical residual (z 2.2 to 4.6, above the two largest modes of the
+box), those two modes, and redshifts above 4.6. ``member_std`` is another thing, the spread over the members'
+random seeds. The likelihood (``hcd_analysis.likelihood``) does not use any of these fields.
 
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
 k_p = 0.78 Mpc^-1, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
@@ -674,10 +674,10 @@ class Prediction:
         cddf_upper    (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
         dndx_err      (3,)        (n_z, 3)        only with an incidence record; else None
         cddf_err      (Nbin,)     (n_z, Nbin)     only with an incidence record; else None
-        P_class_err   (4, K)      (n_z, 4, K)     only with a P1D held-out record; else None
-        P_class_lower (4, K)      (n_z, 4, K)     only with a P1D held-out record; else None
-        P_class_upper (4, K)      (n_z, 4, K)     only with a P1D held-out record; else None
-        P_mix_err     (K,)        (n_z, K)        only with a P1D held-out record; else None
+        P_class_validation_rms_log, P_class_validation_lower, P_class_validation_upper
+                      (4, K)      (n_z, 4, K)     only with a P1D held-out record; else None
+        P_mix_validation_rms_log
+                      (K,)        (n_z, K)        only with a P1D held-out record; else None
         member_std    (4, K)      (n_z, 4, K)
         tau_eff       float       (n_z,)
 
@@ -755,29 +755,34 @@ class Prediction:
     cddf_upper : numpy.ndarray or None
         Shape (Nbin,). The upper end of that range: ``cddf * exp(+cddf_err)``, computed on its own
         as for ``dndx``. NaN where ``cddf_err`` is NaN; None without an incidence record.
-    P_class_err : numpy.ndarray or None
+    P_class_validation_rms_log : numpy.ndarray or None
         Shape (4, K), in the order of ``P_class``. The held-out prediction residual of each class
         spectrum: the rms of ln(prediction / truth) over simulations the model was made without,
-        for the fidelity of this prediction. A number on the logarithm, not on ``P_class``; the
-        range on ``P_class`` itself is ``P_class_lower`` to ``P_class_upper``. It is an empirical
-        validation result, not a calibrated predictive uncertainty: read
-        ``labels["p1d_heldout_error"]`` for its sizes in three separate cases and for what it does
-        not cover. With a requested ``k`` it is carried to those wavenumbers by the operation that
-        carries ``P_class`` there. NaN at a redshift the record has no estimate for; never
-        interpolated between redshifts. None without a P1D held-out record.
-    P_class_lower : numpy.ndarray or None
-        Shape (4, K). The lower end of the held-out range of ``P_class``, on ``P_class`` itself:
-        ``P_class * exp(-P_class_err)``. None without a P1D held-out record.
-    P_class_upper : numpy.ndarray or None
-        Shape (4, K). The upper end: ``P_class * exp(+P_class_err)``. Each end is computed from
-        the logarithm on its own. Like ``P_class_err``, the range shows a size found in validation;
-        it is not an interval of a known distribution. None without a P1D held-out record.
-    P_mix_err : numpy.ndarray or None
+        for the fidelity of this prediction. It is a number on the logarithm, not a fraction of
+        ``P_class``: 0.02 means a range of about 2 per cent either way, 0.5 a range from 0.61 to
+        1.65 times the value. The range on ``P_class`` itself is ``P_class_validation_lower`` to
+        ``P_class_validation_upper``. An empirical validation diagnostic, not a calibrated
+        predictive uncertainty: read ``labels["p1d_validation"]`` for its sizes in three
+        separate cases and for what it does not cover. With a requested ``k`` it is carried to
+        those wavenumbers by the operation that carries ``P_class`` there. NaN at a redshift the
+        record has no estimate for; never interpolated between redshifts. None without a P1D
+        held-out record.
+    P_class_validation_lower : numpy.ndarray or None
+        Shape (4, K). The lower end of the validation range of ``P_class``, on ``P_class``
+        itself: ``P_class * exp(-P_class_validation_rms_log)``. None without a P1D held-out
+        record.
+    P_class_validation_upper : numpy.ndarray or None
+        Shape (4, K). The upper end: ``P_class * exp(+P_class_validation_rms_log)``. Each end is
+        computed from the logarithm on its own. Like ``P_class_validation_rms_log``, the range
+        shows a size found in validation; it is not an interval of a known distribution. None
+        without a P1D held-out record.
+    P_mix_validation_rms_log : numpy.ndarray or None
         Shape (K,). The same residual for the mixture of the class spectra, measured with each
         held-out simulation's own counted class fractions (prediction and truth mixed alike). The
         four class residuals cannot be combined without their correlations; this is the result
         for those fractions. For the result of ``add_hcd`` with other fractions it is an
-        indication only. None without a P1D held-out record.
+        indication only. An empirical validation diagnostic, not a calibrated predictive
+        uncertainty. None without a P1D held-out record.
     member_std : numpy.ndarray or None
         Shape (4, K). The standard deviation of ``P_class`` over the members. It shows how much the
         members disagree. It is not a calibrated emulator error and not a covariance. None for a
@@ -850,10 +855,10 @@ class Prediction:
     dndx_upper: np.ndarray | None = None
     cddf_lower: np.ndarray | None = None
     cddf_upper: np.ndarray | None = None
-    P_class_err: np.ndarray | None = None
-    P_mix_err: np.ndarray | None = None
-    P_class_lower: np.ndarray | None = None
-    P_class_upper: np.ndarray | None = None
+    P_class_validation_rms_log: np.ndarray | None = None
+    P_mix_validation_rms_log: np.ndarray | None = None
+    P_class_validation_lower: np.ndarray | None = None
+    P_class_validation_upper: np.ndarray | None = None
 
 
 class _PredictorBase:
@@ -1491,9 +1496,11 @@ class _PredictorBase:
           ``dndx`` has a held-out error beside it in ``dndx_err``, and so a range in ``dndx_lower``
           and ``dndx_upper`` (the per-bin gaps of ``cddf_err`` are NaN in that array and in the
           two bounds of ``cddf``).
-        - With a P1D held-out record: ``p1d_heldout_error_available``, every class and wavenumber
-          of ``P_class`` has a held-out prediction residual beside it in ``P_class_err``, and so
-          a range in ``P_class_lower`` and ``P_class_upper``.
+        - With a P1D held-out record: ``p1d_validation_available``, every class and wavenumber
+          of ``P_class`` has a held-out prediction residual beside it in
+          ``P_class_validation_rms_log``, and so a range in ``P_class_validation_lower`` and
+          ``P_class_validation_upper`` (empirical validation diagnostics, not calibrated
+          predictive uncertainties).
         - ``synthetic_build``: present, and True, only for a model package built with untrained
           networks for tests; ``labels["synthetic_build"]`` says so in words.
 
@@ -1725,8 +1732,8 @@ class _PredictorBase:
                         for i in range(len(zs))
                     ]
                 )
-            flags["p1d_heldout_error_available"] = bool(np.all(np.isfinite(p1d_err)))
-            labels["p1d_heldout_error"] = self._p1d.label(use_mf)
+            flags["p1d_validation_available"] = bool(np.all(np.isfinite(p1d_err)))
+            labels["p1d_validation"] = self._p1d.label(use_mf)
         # a mean flux outside what the model covers is served, flagged, and said aloud: once per call
         if flags["mean_flux_off_ladder"]:
             self._warn_off_ladder(zs, taus)
@@ -1745,10 +1752,10 @@ class _PredictorBase:
         if p1d_err is not None:
             # the same for the class spectra: the residual on the logarithm, and the range on the spectrum itself
             bounds.update(
-                P_class_err=p1d_err[:, :4, :],
-                P_mix_err=p1d_err[:, 4, :],
-                P_class_lower=Pm * np.exp(-p1d_err[:, :4, :]),
-                P_class_upper=Pm * np.exp(+p1d_err[:, :4, :]),
+                P_class_validation_rms_log=p1d_err[:, :4, :],
+                P_mix_validation_rms_log=p1d_err[:, 4, :],
+                P_class_validation_lower=Pm * np.exp(-p1d_err[:, :4, :]),
+                P_class_validation_upper=Pm * np.exp(+p1d_err[:, :4, :]),
             )
         return Prediction(
             z=zs[0] if single else _frozen(zs),
