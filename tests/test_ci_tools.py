@@ -1321,3 +1321,35 @@ def test_the_readme_links_into_this_repository_are_absolute_at_the_tag_of_this_v
         seen[kind] += 1
     images = re.findall(r"!\[[^\]]*\]\((https://raw\.githubusercontent\.com/[^)]+)\)", text)
     assert seen[None] == len(images) == 3 and seen["blob"] >= 30 and seen["tree"] >= 2
+
+
+def test_the_checklist_names_the_four_environments_and_the_order_of_publication():
+    """docs/release_checklist.md is what the maintainer follows: it names the environment of each package and
+    index as the workflow does, rehearses on the test index before the index, publishes the model package before
+    the code package, and brings the texts to their final wording before the tag, not after the upload.
+    """
+    text = open(os.path.join(REPO, "docs", "release_checklist.md"), encoding="utf-8").read()
+    # the table of the checklist: one row per package, its environment on the test index and on the index
+    table = re.findall(
+        r"(?m)^\s*\| `(hcd-priya(?:-models)?)` \| `([a-z-]+)` \| `([a-z-]+)` \|$", text
+    )
+    assert len(table) == 2
+    named = {(p, "testpypi"): a for p, a, _ in table} | {(p, "pypi"): b for p, _, b in table}
+    assert (
+        named == PUBLISH_ENVIRONMENTS
+    ), "the checklist's table and the workflow name different environments"
+    order = [
+        "The release pull request is merged",
+        "The nightly workflow is started by hand on the release commit",
+        "as a **pre-release**",
+        "Rehearsal on the test index, model package",
+        "Rehearsal on the test index, code package",
+        "**The upload to the index, which cannot be undone.**",
+        "un-marks the pre-release",
+    ]
+    places = [text.index(s) for s in order]
+    assert places == sorted(places), "the steps of publication are not in their order"
+    assert "After publication" not in text and "This is done before the tag, not after the" in text
+    assert (
+        "`k`,\n      `P_class`, `w_c` and `dndx`" in text
+    ), "the checklist says which arrays the reference compares"
