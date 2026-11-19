@@ -28,7 +28,9 @@ shape of pred.P_class, the P1D of clean, LLS, subDLA, DLA: (4, 172)
 - **How it is checked.** `hcd-priya` pins the sha256 of the release it accepts. `load_published` loads the files of
   this package only if they verify against that digest, file by file. This package loads nothing itself.
 - **How it is built.** The model files are not in git. `python model_package/prepare.py --release RELEASE_DIR
-  --release-sha256 SHA256` copies an accepted release in after checking its digest and verifies every file;
+  --release-sha256 SHA256 --allow-extra examples` copies an accepted release in after checking its digest and
+  verifies every file (the release holds an `examples` folder that `release.json` does not name, so the command
+  names it; without the option `prepare.py` stops);
   `python -m build --outdir <dir> model_package` then builds the wheel and the source archive. For tests,
   `prepare.py --synthetic` makes a stand-in with untrained networks (the pinned version with the label `+synthetic`,
   never published), which
