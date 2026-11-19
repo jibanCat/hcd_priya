@@ -1717,9 +1717,8 @@ class _PredictorBase:
         if self._p1d is not None:
             # the held-out prediction residual of this fidelity, (n_z, 5, K): the four classes, then the mixture
             p1d_err = np.stack([self._p1d.err(z, use_mf) for z in zs])
-            if (
-                binds is not None
-            ):  # carried to the requested k by the operation that carries P_class there
+            # carried to a requested k by the operation that carries P_class there
+            if binds is not None:
                 p1d_err = np.stack(
                     [
                         np.asarray(_K.at_data(binds[i], jnp.asarray(p1d_err[i])), dtype=np.float64)

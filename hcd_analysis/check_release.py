@@ -169,9 +169,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         cases = predictions(emu, args.z)
         held = getattr(emu, "_p1d", None)
-        if (
-            held is not None
-        ):  # the optional part: recompute its tables from its own residual vectors
+        # the optional part: recompute its tables from its own residual vectors
+        if held is not None:
             from hcd_analysis.emulator import p1d_heldout
 
             n_res = p1d_heldout.verify_tables(emu._p1d_dir, held)
