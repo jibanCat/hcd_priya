@@ -275,7 +275,7 @@ EBOSS_DLA_FORWARD_FRAC = 0.0
 # cosmology paper 2601.21432 Sec 2.1: the residual-HCD and resolution cov_syst terms are OMITTED
 # "as both effects are explicitly marginalized over"). DESI floats the PRIYA alpha_DLA mean model
 # (DESI_DLA_FORWARD_FRAC=1.0 above), so keeping syst_e_dla_completeness in C_data double-prices
-# that named unknown on the variance side (~10% whitened overlap, conservative -- the 2026-07-17
+# that named unknown on the variance side (a partial overlap, conservative: the 2026-07-17
 # cup1d cross-check). True => load_desi_leg removes it by default using the SHIPPED per-z-block
 # rank-1 convention (cov_syst is exactly z-block-diagonal): C -= sum_z outer(e_dla|z). Lives HERE
 # next to DESI_DLA_FORWARD_FRAC (not per-driver) so every DESI leg load -- real fit, SBC, dnuis
