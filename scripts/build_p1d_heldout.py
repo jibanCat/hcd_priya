@@ -9,7 +9,10 @@ reduced from. This script evaluates no model and computes no residual: the resid
 from the evidence file and prints the record's sha256 (the digest to publish).
 
   python scripts/build_p1d_heldout.py --version V --out-dir NEW \\
-      --residuals RESIDUALS.h5 --residuals-sha256 H --spec SPEC.json --spec-sha256 H
+      --residuals RESIDUALS.h5 --residuals-sha256 H --spec SPEC.json --spec-sha256 H [--without-evidence]
+
+With --without-evidence the record is written alone: its tables are reduced from the residual file as always, but
+the residual vectors are not shipped, and the record says so (its ``tables`` key is null).
 
 RESIDUALS.h5: an HDF5 file with the groups ``lf`` and ``lfmf``, each holding ``d`` (simulation, redshift, rung, 5,
 mode; the five rows are clean, LLS, subDLA, DLA and the mixture at the simulation's counted class fractions; NaN: no
@@ -52,6 +55,11 @@ def parse(argv=None):
     ap.add_argument("--residuals-sha256", required=True)
     ap.add_argument("--spec", required=True, help="the statements and inputs (.json)")
     ap.add_argument("--spec-sha256", required=True)
+    ap.add_argument(
+        "--without-evidence",
+        action="store_true",
+        help="write the record alone: its tables are reduced from the residual file, which is not shipped",
+    )
     return ap.parse_args(argv)
 
 
@@ -126,15 +134,18 @@ def main(argv=None):
         notes=spec["notes"],
         inputs=inputs,
         code=spec["code"],
+        with_evidence=not a.without_evidence,
     )
     held = H.load_record(a.out_dir, expected_record_sha256=digest)
-    n = H.verify_tables(a.out_dir, held)
     print(f"record: {path}")
     print(f"record sha256 (the digest to publish): {digest}")
-    print(
-        f"evidence file: {held.record['tables']['bytes']} bytes, sha256 {held.record['tables']['sha256']}"
-    )
-    print(f"tables recomputed from {n} residual values of the evidence file: equal")
+    if a.without_evidence:
+        print("no evidence file was written (--without-evidence): the record's tables key is null")
+    else:
+        n = H.verify_tables(a.out_dir, held)
+        tb = held.record["tables"]
+        print(f"evidence file: {tb['bytes']} bytes, sha256 {tb['sha256']}")
+        print(f"tables recomputed from {n} residual values of the evidence file: equal")
     for fid in H.FIDELITIES:
         print(
             f"{fid}: {len(held.record[fid]['sims'])} simulations, {len(held.record[fid]['z'])} redshifts"

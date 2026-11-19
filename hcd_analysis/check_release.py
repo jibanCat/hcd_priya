@@ -173,11 +173,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         if held is not None:
             from hcd_analysis.emulator import p1d_heldout
 
-            n_res = p1d_heldout.verify_tables(emu._p1d_dir, held)
-            print(
-                f"P1D held-out record {held.record_sha256[:12]}: its tables recomputed from {n_res} residual "
-                "values of its evidence file: equal"
-            )
+            if held.record["tables"] is None:
+                print(
+                    f"P1D held-out record {held.record_sha256[:12]}: shipped without its evidence file; its tables "
+                    "were not recomputed"
+                )
+            else:
+                n_res = p1d_heldout.verify_tables(emu._p1d_dir, held)
+                print(
+                    f"P1D held-out record {held.record_sha256[:12]}: its tables recomputed from {n_res} residual "
+                    "values of its evidence file: equal"
+                )
     except Exception as exc:  # any failure to load or predict is the result of this check
         print(f"FAILED: {type(exc).__name__}: {exc}")
         return 1

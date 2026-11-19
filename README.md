@@ -348,6 +348,12 @@ Not in this release:
   amplitudes, one per class per redshift, and fits nothing; the incidence law and its priors are research code.
 - **No prediction between snapshot redshifts.** Predictions exist at z = 2.0, 2.2, ..., 5.4 only; an LF+MF prediction
   is refused below the MF record's lower edge (z 2.2 by default) and flagged above z 4.6.
+- **Two defective training rows at z = 5.4.** The source spectra files of two low-fidelity simulations are incomplete
+  at z = 5.4 (in compact regions of the box the optical depth of the gas is missing; a defect of the spectra
+  extraction, not physical variation and not an effect of this package's processing). Both rows are in the training
+  data of the LF model, and one of them dominates the held-out prediction residual of the LF prediction at z = 5.4
+  at the largest scales; the model release's P1D held-out record states it and gives the residual without that
+  simulation beside it.
 - **No bandpower model.** A prediction is a per-class spectrum at points in k: no metal lines, no
   spectrograph-resolution correction and no bin window. `hcd_analysis.likelihood` brings it to a data set's bins by
   linear interpolation and an optional factor ([`docs/likelihood.md`](docs/likelihood.md)).

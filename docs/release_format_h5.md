@@ -576,6 +576,10 @@ the bias `<fid>_b` = mean(d) and `e` per rung `<fid>_e_rung`; and `k_com_hmpc`, 
 The simulations are in the sorted order of their names, as in the record. Every table of the record is computed from
 the residual values as stored, so anyone can recompute them from this file.
 
+A record may also be shipped without its evidence file: its `tables` key is then null and the directory holds the
+record alone. The tables a prediction uses are in the record either way; `check_release` then says that the tables
+were not recomputed, and the label says that the residual vectors are not shipped.
+
 **What is checked, and when.**
 - At a load (`load_release`): the record's bytes against the digest the manifest gives, before they are parsed; the
   closed schema; the constant statements; finite tables; that the summary is the reduction of the tables; the

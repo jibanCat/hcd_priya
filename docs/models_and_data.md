@@ -162,3 +162,11 @@ two modes; redshifts above 4.6), the record's notes, and what the numbers do not
 thing: the spread over the members' random seeds. The likelihood does not use these fields and adds no emulator
 term to the data covariance. Details: `docs/release_format_h5.md`,
 section "The P1D held-out record".
+
+**A known defect of the training data at z = 5.4.** The source spectra files of two low-fidelity simulations are
+incomplete at z = 5.4: in compact regions of the box the optical depth of the gas is missing, which gives those two
+rows several times the usual power at the largest scales. It is a defect of the spectra extraction, not physical
+variation and not an effect of this package's processing. Both rows are in the training data of the LF model, and
+the release is not retrained for it. One of the two simulations is held out by a fold, so the LF table of the P1D
+held-out record at z = 5.4 is dominated by it; the record states this and gives the table without that simulation
+beside it as a sensitivity test. Redshifts above 4.6 lie outside the validated range in any case.

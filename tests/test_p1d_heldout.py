@@ -323,6 +323,58 @@ def test_a_record_is_written_once(rel, tmp_path):
         )
 
 
+def test_a_record_may_be_shipped_without_its_evidence_file(rel, held, tmp_path):
+    """Then its ``tables`` key is null, the directory holds the record alone, the tables a prediction uses are the
+    same, and nothing can be recomputed: ``verify_tables`` refuses, and the label says the vectors are not shipped.
+    """
+    mf = json.loads((rel["root"] / "mf" / "mf_record.json").read_text())
+    kw = dict(
+        cache=rel["bundle"].lineage["cache"]["sha256"],
+        hr_cache=mf["caches"]["hr"]["sha256"],
+        hr_sims=mf["train_sims"],
+        n_modes=mf["tables"]["n_modes"],
+    )
+    sha = write_p1d_heldout(tmp_path / "alone", with_evidence=False, **kw)
+    assert os.listdir(tmp_path / "alone") == [PH.RECORD_FILE]
+    alone = PH.load_record(str(tmp_path / "alone"), expected_record_sha256=sha)
+    assert alone.record["tables"] is None and alone.provenance()["tables"] is None
+    for fid in PH.FIDELITIES:
+        assert np.array_equal(alone.e[fid], held.e[fid]) and np.array_equal(
+            alone.n[fid], held.n[fid]
+        )
+    assert np.array_equal(alone.e_sens, held.e_sens)
+    with pytest.raises(E, match="shipped without its evidence file"):
+        PH.verify_tables(str(tmp_path / "alone"), alone)
+    assert "not shipped with this record" in alone.label(True)
+    assert "not shipped with this record" not in held.label(True)
+    PH.reverify(alone)
+    # an evidence file beside such a record is a stray file
+    shutil.copyfile(
+        rel["root"] / "p1d_heldout" / PH.TABLES_FILE, tmp_path / "alone" / PH.TABLES_FILE
+    )
+    with pytest.raises(E, match="unexpected files"):
+        PH.load_record(str(tmp_path / "alone"), expected_record_sha256=sha)
+
+
+def test_check_release_says_when_the_evidence_file_is_not_shipped(tmp_path):
+    from hcd_analysis import check_release as CR
+    import contextlib
+    import io
+
+    root, anchor = _release_with(tmp_path, with_evidence=False)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = CR.main([str(root), anchor])
+    text = out.getvalue()
+    assert code == 0, text
+    assert "shipped without its evidence file; its tables were not recomputed" in text
+    pred = hp.load_release(str(root), anchor).predict(PARAMS, z=3.0, **CALL)
+    assert (
+        pred.flags["p1d_validation_available"] is True
+        and pred.P_class_validation_rms_log.shape[0] == 4
+    )
+
+
 # ----------------------------------------------------------------------------------------------- the words
 def test_the_statements_use_the_agreed_term_and_keep_three_cases_apart(held):
     """The term is "held-out prediction residual"; it is called an empirical validation diagnostic and never a

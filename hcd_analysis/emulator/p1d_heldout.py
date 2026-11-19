@@ -26,6 +26,10 @@ without their correlations; the mixture row holds the result for those fractions
 the constant statements; finite tables; the evidence file's size and sha256. ``verify_tables`` goes further and
 recomputes every table of the record from the residual vectors of the evidence file (``check_release`` runs it).
 
+**A record without its evidence file.** A record may be shipped alone: its ``tables`` key is then null, the
+directory holds the record only, and ``verify_tables`` refuses it (nothing can be recomputed). The tables a
+prediction uses are in the record either way.
+
 The record is written by ``write_record`` (scripts/build_p1d_heldout.py makes one from a residual file). Nothing here
 evaluates a model.
 """
@@ -351,6 +355,8 @@ def check_record(rec, where="P1D held-out record"):
     if sorted(f["hr_sim"] for f in folds if f["hr_sim"] is not None) != rec["lfmf"]["sims"]:
         raise MFRecordError(f"{where}: lfmf.sims must be the high-resolution runs of inputs.folds")
     tb = rec["tables"]
+    if tb is None:  # shipped without its evidence file
+        tb = {"file": TABLES_FILE, "sha256": "0" * 64, "bytes": 1}
     _MR._keys(tb, _TABLES_KEYS, f"{where}: tables")
     if tb["file"] != TABLES_FILE:
         raise MFRecordError(f"{where}: tables.file must be {TABLES_FILE!r}")
@@ -397,6 +403,10 @@ def verify_tables(record_dir, heldout, rtol=1e-12):
     tables a prediction uses, the counts, the sensitivity table, the bias and the per-rung tables of the file.
     Raises MFRecordError on the first difference. Returns the number of residual values read."""
     rec = heldout.record
+    if rec["tables"] is None:
+        raise MFRecordError(
+            f"{record_dir}: this record was shipped without its evidence file: its tables cannot be recomputed"
+        )
     path = os.path.join(os.fspath(record_dir), TABLES_FILE)
     try:
         arrays, _attrs = S.read_table_h5(path, table_datasets(rec))
@@ -440,6 +450,7 @@ def write_record(
     notes,
     inputs,
     code,
+    with_evidence=True,
 ):
     """Write a record directory ONCE: ``out_dir`` must not exist.
 
@@ -448,8 +459,10 @@ def write_record(
     rung) and ``counts`` (simulation, redshift, rung, 4). The simulations are stored in the sorted order of their
     names. ``sensitivity_without`` names one low-fidelity simulation: the LF table is also reduced without it and
     stored as the sensitivity table, with ``sensitivity_statement``. ``inputs`` and ``code`` are the record's blocks
-    of those names without the evidence file. Everything is validated before anything is written, and what is
-    written is read back. Returns (the record's path, its sha256: the digest to publish)."""
+    of those names without the evidence file. With ``with_evidence=False`` the evidence file is not written and the
+    record's ``tables`` is null: the residual vectors stay with whoever measured them. Everything is validated before
+    anything is written, and what is written is read back. Returns (the record's path, its sha256: the digest to
+    publish)."""
     out_dir = os.fspath(out_dir)
     if os.path.lexists(out_dir):
         raise FileExistsError(
@@ -518,14 +531,19 @@ def write_record(
         if a.dtype != np.dtype(dt) or a.shape != shape:
             raise MFRecordError(f"{name} is {a.dtype}{a.shape}, the record needs {dt}{shape}")
     os.makedirs(out_dir)  # no exist_ok: a race is refused too
-    tpath = os.path.join(out_dir, TABLES_FILE)
-    S.write_table_h5(tpath, {k: arrays[k] for k in want}, {"record_format": RECORD_FORMAT})
-    sha, size = S._sha256_regular(tpath)
-    rec["tables"] = {"file": TABLES_FILE, "sha256": sha, "bytes": size}
+    if with_evidence:
+        tpath = os.path.join(out_dir, TABLES_FILE)
+        S.write_table_h5(tpath, {k: arrays[k] for k in want}, {"record_format": RECORD_FORMAT})
+        sha, size = S._sha256_regular(tpath)
+        rec["tables"] = {"file": TABLES_FILE, "sha256": sha, "bytes": size}
+    else:
+        rec["tables"] = None
     raw = json.dumps(rec, indent=1, sort_keys=True, allow_nan=False).encode("utf-8")
     path = os.path.join(out_dir, RECORD_FILE)
     digest = S._write_exclusive(path, [raw])
-    verify_tables(out_dir, load_record(out_dir, expected_record_sha256=digest))
+    held = load_record(out_dir, expected_record_sha256=digest)
+    if with_evidence:
+        verify_tables(out_dir, held)
     return path, digest
 
 
@@ -586,6 +604,11 @@ class P1DHeldout(NamedTuple):
             " ".join(r["notes"][k] for k in sorted(_NOTE_KEYS)),
             " WHAT IT DOES NOT COVER. ",
             r["what_it_does_not_cover"],
+            (
+                " The residual vectors behind these tables are not shipped with this record."
+                if r["tables"] is None
+                else ""
+            ),
             " P_mix_validation_rms_log is the residual of the mixture at the held-out simulations' own class fractions; for other "
             "fractions it is an indication only. With a requested k, e is carried to the requested wavenumbers by "
             "the operation that carries P_class there.",
@@ -673,10 +696,14 @@ def load_record(record_dir, *, expected_record_sha256):
     except (S.SafeFormatError, OSError) as e:
         raise MFRecordError(f"{record_dir}: no readable {RECORD_FILE} ({e})") from None
     held = parse_record(raw, p, expected_sha256=expected_record_sha256)
-    extra = sorted(set(os.listdir(d)) - {RECORD_FILE, TABLES_FILE})
+    tb = held.record["tables"]
+    extra = sorted(
+        set(os.listdir(d)) - ({RECORD_FILE} if tb is None else {RECORD_FILE, TABLES_FILE})
+    )
     if extra:
         raise MFRecordError(f"{record_dir}: unexpected files {extra}")
-    tb = held.record["tables"]
+    if tb is None:  # shipped without its evidence file: the record alone
+        return held
     try:
         sha, _ = S._sha256_regular(os.path.join(d, TABLES_FILE), expected_bytes=tb["bytes"])
     except (S.SafeFormatError, OSError) as e:
