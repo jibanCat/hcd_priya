@@ -1,5 +1,9 @@
-"""The publishing workflow cannot publish: it starts only by hand, and every job is switched off. This test changes
-only with the maintainer's release approval. It reads the workflow file from the repository."""
+"""The publishing workflow publishes only on the maintainer's approval: it starts only by hand, it holds no
+credential, only its upload job may ask for an identity, and no other workflow can publish. It was switched on for
+the release of 1.0.0 with the maintainer's approval (until then every job carried `if: false`, and this file was
+named test_publish_workflow_is_disabled.py). What the workflow does once started (one protected environment per
+package and index, the upload action pinned to a commit, the check of the tag and of the release date) is tested
+in tests/test_ci_tools.py. It reads the workflow file from the repository."""
 
 import os
 
@@ -20,12 +24,17 @@ def test_it_starts_only_by_hand():
     assert list(on) == ["workflow_dispatch"]
 
 
-def test_every_job_is_switched_off_and_nothing_has_a_token_by_default():
+def test_no_job_is_switched_off_and_nothing_has_a_token_by_default():
     doc, _on = _workflow()
     assert doc["permissions"] == {}
     assert set(doc["jobs"]) == {"build", "publish"}
     for name, job in doc["jobs"].items():
-        assert job.get("if") is False, f"job {name} is not disabled"
+        assert "if" not in job, f"job {name} carries a condition of its own"
+    # the upload job runs in a protected environment (a required reviewer), never without one
+    assert doc["jobs"]["publish"][
+        "environment"
+    ], "the upload job must run in a protected environment"
+    assert doc["jobs"]["publish"]["needs"] == "build"
     assert doc["jobs"]["publish"]["permissions"] == {"id-token": "write"}
     assert doc["jobs"]["build"]["permissions"] == {"contents": "read"}
 

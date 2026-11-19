@@ -161,11 +161,11 @@ release = "only with the real assets, before a release (the assets job); listed 
 "tests/test_predict_physical_grid.py" = { tier = "wheel", level = "nightly" }
 "tests/test_predictor.py" = { tier = "wheel", level = "pr" }
 "tests/test_predictor_mf.py" = { tier = "wheel", level = "pr" }
-"tests/test_publish_workflow_is_disabled.py" = { tier = "source", level = "pr" }
 "tests/test_prod_forward_wiring.py" = { tier = "source", level = "nightly" }
 "tests/test_prod_sbc_checkpoint.py" = { tier = "source", level = "nightly" }
 "tests/test_product_manifest.py" = { tier = "wheel", level = "nightly" }
 "tests/test_products_mf_loader.py" = { tier = "wheel", level = "nightly" }
+"tests/test_publish_workflow.py" = { tier = "source", level = "pr" }
 "tests/test_rcinj_oos_spec.py" = { tier = "source", level = "nightly" }
 "tests/test_readme_first_example.py" = { tier = "source", level = "pr" }
 "tests/test_real_fit_export.py" = { tier = "source", level = "nightly" }

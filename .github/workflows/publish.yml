@@ -1,28 +1,32 @@
 # Publishing the two packages to the package index: hcd-priya-models (the trained models) and hcd-priya (the code).
 #
-# DISABLED, AND A DRAFT. Nothing here can publish:
+# ENABLED, AND MANUAL. What stands between a start of this workflow and an upload:
 #   - it starts only by hand (workflow_dispatch): no push, tag or release starts it;
-#   - both jobs carry `if: false`, so a manual start does nothing either;
-#   - no trusted publisher is configured on the index for this repository, so an upload would be refused anyway.
-# It is enabled only with the maintainer's release approval, one package at a time, in this order: the accepted
-# model's entry is added to hcd_analysis/published_models.py; the code is merged and tagged with that entry;
-# hcd-priya-models on the test index, then on the index; then hcd-priya (docs/release_checklist.md, section 7).
+#   - the build job refuses to go on unless the latest nightly run on the commit passed (tools/ci/nightly_gate.py);
+#   - an upload to the real index starts only from the tag of this version (v<version>): the build job checks it,
+#     and the two environments of the real index accept tags v* only;
+#   - the publish job runs in a protected environment of this repository with a required reviewer, so every upload
+#     waits for the maintainer's approval. There is one environment per package and index, because the index
+#     allows only one pending trusted publisher per owner, repository, workflow and environment:
+#         hcd-priya-models:  testpypi-models, pypi-models          hcd-priya:  testpypi, pypi
+#   - the upload action is pinned to a commit, not to a branch.
+# The order of a release is in docs/release_checklist.md: the test index first, the model package before the code
+# package, each step on the maintainer's approval. An upload to the index cannot be replaced or withdrawn.
 #
-# Before it is enabled: pin the publish action to a commit; bind the trusted publisher on the index to protected
-# environments of this repository with a required reviewer (a copy of this file edited on a branch could otherwise
-# be started by anyone with write access); decide where the accepted release archive is kept.
-#
-# How it is meant to work once enabled:
-#   - "trusted publishing": the index accepts an upload from this workflow of this repository, identified by a
-#     short-lived token that GitHub issues to the job (id-token: write). No password or API token is stored.
+# How it works:
+#   - "trusted publishing": the index accepts an upload from this workflow of this repository in the environment
+#     named there, identified by a short-lived token that GitHub issues to the job (id-token: write). No password
+#     or API token is stored.
 #   - the model package is built from an accepted release that is NOT in git. The release archive is given by its
 #     URL and its sha256; model_package/prepare.py checks the sha256 of release.json and verifies every file before
 #     anything is built. The reference predictions published beside the release are given the same way (URL and
 #     sha256); the fresh install compares the installed model's predictions with them (check_release --reference).
-#     Where the archive and the reference are kept is decided at publication: the inputs below are placeholders.
+#     Both files are on the GitHub release of the version, which is created first, as a pre-release:
+#         https://github.com/jibanCat/hcd_priya/releases/download/v<version>/hcd_priya_lfmf_release_<version>.tar.gz
+#         https://github.com/jibanCat/hcd_priya/releases/download/v<version>/reference_predictions.json
 #   - a model package built with a synthetic bundle (version X.Y.Z+synthetic) cannot be uploaded: the index refuses
 #     a version with a local label.
-name: publish (disabled)
+name: publish
 
 on:
   workflow_dispatch:
@@ -39,7 +43,7 @@ on:
         default: testpypi
         required: true
       release_archive_url:
-        description: "hcd-priya-models only: https URL of the accepted release (a .tar.gz of the release directory)"
+        description: "hcd-priya-models only: https URL of the release archive on the GitHub release of the version (hcd_priya_lfmf_release_<version>.tar.gz)"
         required: false
       release_archive_sha256:
         description: "hcd-priya-models only: sha256 of that archive"
@@ -48,7 +52,7 @@ on:
         description: "hcd-priya-models only: sha256 of the release's release.json"
         required: false
       reference_url:
-        description: "hcd-priya-models only: https URL of the reference predictions published beside the release"
+        description: "hcd-priya-models only: https URL of reference_predictions.json on the same GitHub release"
         required: false
       reference_sha256:
         description: "hcd-priya-models only: sha256 of that reference file"
@@ -62,7 +66,6 @@ defaults:
 
 jobs:
   build:
-    if: false  # DISABLED: remove only with the maintainer's release approval
     name: Build ${{ inputs.package }}
     runs-on: ubuntu-24.04
     permissions:
@@ -77,10 +80,20 @@ jobs:
         with:
           python-version: "3.11"
       # Nightly failures block a release: the latest nightly run on this commit must have passed. The repository is
-      # public, so the runs are read without a token and this disabled workflow keeps its permissions as they are. An
+      # public, so the runs are read without a token and this workflow keeps its permissions as they are. An
       # anonymous request can meet GitHub's rate limit on a shared runner: that is a refusal, never a pass; run again.
       - name: The latest nightly run on this commit passed
         run: python tools/ci/nightly_gate.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
+      # An upload to the index cannot be replaced: it is made from the tag of this version and from nothing else.
+      # The test index takes any ref, so that a rehearsal can be made before or from the tag.
+      - name: The real index takes the tag of this version only
+        if: ${{ inputs.index == 'pypi' }}
+        run: |
+          version="$(python -c "import re; print(re.search(r'__version__ = \"([^\"]+)\"', open('hcd_analysis/__init__.py').read()).group(1))")"
+          if [ "$GITHUB_REF" != "refs/tags/v$version" ]; then
+            echo "an upload to the index starts from the tag v$version, not from $GITHUB_REF"
+            exit 1
+          fi
       - name: Build the code package
         if: ${{ inputs.package == 'hcd-priya' }}
         run: |
@@ -135,11 +148,11 @@ jobs:
           retention-days: 7
 
   publish:
-    if: false  # DISABLED: remove only with the maintainer's release approval
     name: Publish ${{ inputs.package }} to ${{ inputs.index }}
     needs: build
     runs-on: ubuntu-24.04
-    environment: ${{ inputs.index }}
+    # one protected environment per package and index: testpypi-models, pypi-models, testpypi, pypi
+    environment: ${{ inputs.package == 'hcd-priya-models' && format('{0}-models', inputs.index) || inputs.index }}
     permissions:
       id-token: write  # trusted publishing: the index checks this job's identity; no stored token
     steps:
@@ -149,9 +162,9 @@ jobs:
           path: dist
       - name: Publish to the test index
         if: ${{ inputs.index == 'testpypi' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
         with:
           repository-url: https://test.pypi.org/legacy/
       - name: Publish to the index
         if: ${{ inputs.index == 'pypi' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3

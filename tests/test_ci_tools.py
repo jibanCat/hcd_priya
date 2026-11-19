@@ -1051,9 +1051,9 @@ def _gate_steps(job):
 
 def test_a_release_is_refused_unless_the_latest_nightly_run_on_its_commit_passed():
     """The release validation workflow starts only by hand, reads Actions with its own token (read access only),
-    and checks the gate before anything else. The publishing workflow (publish.yml), disabled until the maintainer
-    approves a release, checks the same gate first in its build job, without a token (the repository is public), so its
-    permissions stay as they are."""
+    and checks the gate before anything else. The publishing workflow (publish.yml) checks the same gate first in
+    its build job, without a token (the repository is public), so its permissions stay as they are.
+    """
     flow = _workflow("release-validation.yml")
     # YAML 1.1 reads the workflow key `on` as the boolean True, so the parsed dict may hold it under either name
     on = flow.get("on", flow.get(True))
@@ -1097,3 +1097,122 @@ def test_a_release_is_refused_unless_the_latest_nightly_run_on_its_commit_passed
     assert len(prepare) == 1 and "--allow-extra examples" in " ".join(
         prepare[0].split()
     ), "publish.yml: prepare.py must be told of the release's examples folder, or it stops"
+
+
+# ---- the publishing workflow, as it is enabled
+PUBLISH_ENVIRONMENTS = {
+    ("hcd-priya-models", "testpypi"): "testpypi-models",
+    ("hcd-priya-models", "pypi"): "pypi-models",
+    ("hcd-priya", "testpypi"): "testpypi",
+    ("hcd-priya", "pypi"): "pypi",
+}
+
+
+def _publish_text():
+    return open(os.path.join(REPO, ".github", "workflows", "publish.yml"), encoding="utf-8").read()
+
+
+def test_the_publishing_workflow_starts_only_by_hand_and_no_job_is_switched_off():
+    flow = _workflow("publish.yml")
+    on = flow.get("on", flow.get(True))
+    assert list(on) == ["workflow_dispatch"], "publish.yml must start only by hand"
+    assert flow["name"] == "publish"
+    assert set(flow["jobs"]) == {"build", "publish"}
+    for name, job in flow["jobs"].items():
+        assert (
+            "if" not in job
+        ), f"publish.yml job {name}: a job-level condition would switch it off or on by itself"
+    assert flow["jobs"]["publish"]["needs"] == "build"
+    inputs = on["workflow_dispatch"]["inputs"]
+    assert inputs["package"]["options"] == ["hcd-priya-models", "hcd-priya"]
+    assert (
+        inputs["index"]["options"] == ["testpypi", "pypi"]
+        and inputs["index"]["default"] == "testpypi"
+    )
+    assert "DISABLED" not in _publish_text() and "if: false" not in _publish_text()
+
+
+def test_the_publishing_workflow_holds_no_token_and_only_the_upload_job_may_ask_for_an_identity():
+    flow = _workflow("publish.yml")
+    assert flow["permissions"] == {}, "publish.yml: no permission at the workflow level"
+    assert flow["jobs"]["build"]["permissions"] == {"contents": "read"}
+    assert flow["jobs"]["publish"]["permissions"] == {"id-token": "write"}
+    text = _publish_text()
+    for word in ("secrets.", "PYPI_API_TOKEN", "password:", "TWINE_"):
+        assert word not in text, f"publish.yml must not use a stored credential ({word})"
+
+
+def test_each_package_and_index_has_its_own_protected_environment():
+    """The index allows one pending trusted publisher per owner, repository, workflow and environment, so the two
+    packages cannot share an environment. The expression is evaluated here as GitHub evaluates it: `a && b || c`
+    gives b when a is true (b is a non-empty string) and c otherwise."""
+    expression = _workflow("publish.yml")["jobs"]["publish"]["environment"]
+    assert expression == (
+        "${{ inputs.package == 'hcd-priya-models' && format('{0}-models', inputs.index) || inputs.index }}"
+    )
+
+    def evaluate(package, index):
+        return f"{index}-models" if package == "hcd-priya-models" else index
+
+    got = {key: evaluate(*key) for key in PUBLISH_ENVIRONMENTS}
+    assert got == PUBLISH_ENVIRONMENTS and len(set(got.values())) == 4
+    for name in PUBLISH_ENVIRONMENTS.values():
+        assert (
+            name in _publish_text()
+        ), f"the header of publish.yml must name the environment {name}"
+
+
+def test_the_upload_action_is_pinned_to_a_commit_with_its_tag_beside_it():
+    steps = _workflow("publish.yml")["jobs"]["publish"]["steps"]
+    uploads = [s for s in steps if s.get("uses", "").startswith("pypa/gh-action-pypi-publish@")]
+    assert len(uploads) == 2 and {s["if"] for s in uploads} == {
+        "${{ inputs.index == 'testpypi' }}",
+        "${{ inputs.index == 'pypi' }}",
+    }
+    refs = {s["uses"].split("@", 1)[1] for s in uploads}
+    assert len(refs) == 1 and re.fullmatch(
+        r"[0-9a-f]{40}", refs.pop()
+    ), "the upload action must be pinned to a commit"
+    test_index = [s for s in uploads if s["if"] == "${{ inputs.index == 'testpypi' }}"][0]
+    assert test_index["with"] == {"repository-url": "https://test.pypi.org/legacy/"}
+    real = [s for s in uploads if s["if"] == "${{ inputs.index == 'pypi' }}"][0]
+    assert "with" not in real, "the upload to the index uses the action's default, the real index"
+    lines = [ln for ln in _publish_text().split("\n") if "pypa/gh-action-pypi-publish@" in ln]
+    assert len(lines) == 2 and all(
+        re.search(r"@[0-9a-f]{40}  # v\d+\.\d+\.\d+$", ln) for ln in lines
+    )
+
+
+@pytest.mark.parametrize(
+    "ref, passes",
+    [("refs/tags/v{version}", True), ("refs/heads/main", False), ("refs/tags/v0.0.0", False), ("refs/tags/{version}", False)],
+)  # fmt: skip
+def test_an_upload_to_the_index_starts_from_the_tag_of_this_version_only(ref, passes, tmp_path):
+    """The step is run here as GitHub runs it (bash -eo pipefail, in the repository), with the ref GitHub would set."""
+    import shutil
+    import subprocess
+    import sys
+
+    import hcd_analysis
+
+    build = _workflow("publish.yml")["jobs"]["build"]["steps"]
+    (step,) = [
+        s for s in build if s.get("name") == "The real index takes the tag of this version only"
+    ]
+    assert step["if"] == "${{ inputs.index == 'pypi' }}"
+    runs = [s for s in build if "run" in s]
+    assert (
+        runs.index(step) == 1
+    ), "the tag check comes right after the nightly gate, before anything is built"
+    bash = shutil.which("bash")
+    assert bash is not None, "the supported platform is Linux: bash is there"
+    out = subprocess.run(
+        [bash, "-eo", "pipefail", "-c", step["run"]],
+        cwd=REPO,
+        env=dict(os.environ, GITHUB_REF=ref.format(version=hcd_analysis.__version__), PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")),
+        capture_output=True,
+        text=True,
+    )  # fmt: skip
+    assert (out.returncode == 0) is passes, out.stdout + out.stderr
+    if not passes:
+        assert f"starts from the tag v{hcd_analysis.__version__}" in out.stdout
