@@ -1,4 +1,4 @@
-# hcd_priya: a Lyman-α forest P1D emulator with high-column-density absorber classes
+# hcd_priya: A High-Column-Density Absorber Emulator for Lyman-α Forest Cosmology
 
 ![Python](https://img.shields.io/badge/python-3.11-blue)
 ![JAX](https://img.shields.io/badge/JAX%20%2F%20Equinox-float64-orange)
