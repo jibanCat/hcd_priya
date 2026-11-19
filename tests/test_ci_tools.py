@@ -1183,36 +1183,107 @@ def test_the_upload_action_is_pinned_to_a_commit_with_its_tag_beside_it():
     )
 
 
+DATED = "2026-01-31"  # a made-up day, for the tests below
+
+
+def _release_files(tmp_path, changelog_date, citation_date):
+    """A folder with the three files the tag check reads: the package's version, the changelog whose first heading
+    carries `changelog_date`, and the citation file with a real `date-released` line (or, for None, the commented
+    placeholder line as committed)."""
+    import hcd_analysis
+
+    (tmp_path / "hcd_analysis").mkdir()
+    (tmp_path / "hcd_analysis" / "__init__.py").write_text(
+        f'__version__ = "{hcd_analysis.__version__}"\n', encoding="utf-8"
+    )
+    (tmp_path / "CHANGELOG.md").write_text(
+        f"# Changelog\n\n## {hcd_analysis.__version__} ({changelog_date})\n\n- a change\n",
+        encoding="utf-8",
+    )
+    line = (
+        "# date-released: RELEASE_DATE (the day of publication)\n"
+        if citation_date is None
+        else f"date-released: {citation_date}\n"
+    )
+    (tmp_path / "CITATION.cff").write_text(
+        f"cff-version: 1.2.0\nversion: {hcd_analysis.__version__}\n{line}license: MIT\n",
+        encoding="utf-8",
+    )
+    return hcd_analysis.__version__
+
+
 @pytest.mark.parametrize(
-    "ref, passes",
-    [("refs/tags/v{version}", True), ("refs/heads/main", False), ("refs/tags/v0.0.0", False), ("refs/tags/{version}", False)],
-)  # fmt: skip
-def test_an_upload_to_the_index_starts_from_the_tag_of_this_version_only(ref, passes, tmp_path):
-    """The step is run here as GitHub runs it (bash -eo pipefail, in the repository), with the ref GitHub would set."""
+    "ref, changelog_date, citation_date, passes, says",
+    [
+        ("refs/tags/v{version}", DATED, DATED, True, ""),
+        ("refs/heads/main", DATED, DATED, False, "starts from the tag v{version}"),
+        ("refs/tags/v0.0.0", DATED, DATED, False, "starts from the tag v{version}"),
+        ("refs/tags/{version}", DATED, DATED, False, "starts from the tag v{version}"),
+        (
+            "refs/tags/v{version}",
+            "RELEASE_DATE",
+            DATED,
+            False,
+            "still the placeholder RELEASE_DATE",
+        ),
+        ("refs/tags/v{version}", DATED, None, False, "still the placeholder RELEASE_DATE"),
+    ],
+)
+def test_an_upload_to_the_index_starts_from_the_tag_of_this_version_with_its_date_written(
+    ref, changelog_date, citation_date, passes, says, tmp_path
+):
+    """The step is run here as GitHub runs it (bash -eo pipefail, in a folder with the three files it reads), with
+    the ref GitHub would set."""
     import shutil
     import subprocess
     import sys
 
-    import hcd_analysis
-
     build = _workflow("publish.yml")["jobs"]["build"]["steps"]
     (step,) = [
-        s for s in build if s.get("name") == "The real index takes the tag of this version only"
+        s
+        for s in build
+        if s.get("name")
+        == "The real index takes the tag of this version only, with its release date written"
     ]
     assert step["if"] == "${{ inputs.index == 'pypi' }}"
     runs = [s for s in build if "run" in s]
     assert (
         runs.index(step) == 1
     ), "the tag check comes right after the nightly gate, before anything is built"
+    version = _release_files(tmp_path, changelog_date, citation_date)
     bash = shutil.which("bash")
     assert bash is not None, "the supported platform is Linux: bash is there"
+    path = os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
     out = subprocess.run(
         [bash, "-eo", "pipefail", "-c", step["run"]],
-        cwd=REPO,
-        env=dict(os.environ, GITHUB_REF=ref.format(version=hcd_analysis.__version__), PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")),
+        cwd=tmp_path,
+        env=dict(os.environ, GITHUB_REF=ref.format(version=version), PATH=path),
         capture_output=True,
         text=True,
-    )  # fmt: skip
+    )
     assert (out.returncode == 0) is passes, out.stdout + out.stderr
-    if not passes:
-        assert f"starts from the tag v{hcd_analysis.__version__}" in out.stdout
+    assert says.format(version=version) in out.stdout
+
+
+def test_the_release_date_is_one_line_in_each_of_two_files_and_the_two_agree():
+    """Either both files hold the placeholder RELEASE_DATE (before the day of publication is known), or both hold the
+    same day: the heading of the version in CHANGELOG.md and `date-released` in CITATION.cff."""
+    import hcd_analysis
+
+    changelog = open(os.path.join(REPO, "CHANGELOG.md"), encoding="utf-8").read()
+    headings = re.findall(r"(?m)^## (\d+\.\d+\.\d+) \(([^)]*)\)$", changelog)
+    assert (
+        headings and headings[0][0] == hcd_analysis.__version__
+    ), "the first heading is this version's"
+    day = headings[0][1]
+    assert day == "RELEASE_DATE" or re.fullmatch(r"\d{4}-\d{2}-\d{2}", day), day
+    citation = open(os.path.join(REPO, "CITATION.cff"), encoding="utf-8").read()
+    real = re.findall(r'(?m)^date-released: "?(\d{4}-\d{2}-\d{2})"?$', citation)
+    commented = re.findall(r"(?m)^# date-released: RELEASE_DATE\b", citation)
+    assert changelog.count("RELEASE_DATE") == (1 if day == "RELEASE_DATE" else 0)
+    if day == "RELEASE_DATE":
+        assert (
+            real == [] and len(commented) == 1
+        ), "the placeholder stands in both files or in neither"
+    else:
+        assert real == [day] and commented == [] and "RELEASE_DATE" not in citation

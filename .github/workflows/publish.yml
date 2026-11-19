@@ -3,8 +3,9 @@
 # ENABLED, AND MANUAL. What stands between a start of this workflow and an upload:
 #   - it starts only by hand (workflow_dispatch): no push, tag or release starts it;
 #   - the build job refuses to go on unless the latest nightly run on the commit passed (tools/ci/nightly_gate.py);
-#   - an upload to the real index starts only from the tag of this version (v<version>): the build job checks it,
-#     and the two environments of the real index accept tags v* only;
+#   - an upload to the real index starts only from the tag of this version (v<version>), and only when the release
+#     date is written in CHANGELOG.md and CITATION.cff: the build job checks both, and the two environments of the
+#     real index accept tags v* only;
 #   - the publish job runs in a protected environment of this repository with a required reviewer, so every upload
 #     waits for the maintainer's approval. There is one environment per package and index, because the index
 #     allows only one pending trusted publisher per owner, repository, workflow and environment:
@@ -84,14 +85,19 @@ jobs:
       # anonymous request can meet GitHub's rate limit on a shared runner: that is a refusal, never a pass; run again.
       - name: The latest nightly run on this commit passed
         run: python tools/ci/nightly_gate.py --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
-      # An upload to the index cannot be replaced: it is made from the tag of this version and from nothing else.
+      # An upload to the index cannot be replaced: it is made from the tag of this version and from nothing else,
+      # and only when the release date is written (the placeholder RELEASE_DATE is gone from both files).
       # The test index takes any ref, so that a rehearsal can be made before or from the tag.
-      - name: The real index takes the tag of this version only
+      - name: The real index takes the tag of this version only, with its release date written
         if: ${{ inputs.index == 'pypi' }}
         run: |
           version="$(python -c "import re; print(re.search(r'__version__ = \"([^\"]+)\"', open('hcd_analysis/__init__.py').read()).group(1))")"
           if [ "$GITHUB_REF" != "refs/tags/v$version" ]; then
             echo "an upload to the index starts from the tag v$version, not from $GITHUB_REF"
+            exit 1
+          fi
+          if grep -n "RELEASE_DATE" CHANGELOG.md CITATION.cff; then
+            echo "the release date is still the placeholder RELEASE_DATE (the lines above): write the day of publication first"
             exit 1
           fi
       - name: Build the code package
