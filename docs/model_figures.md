@@ -286,7 +286,8 @@ ax.fill_between(pred.k, pred.P_class_validation_lower[c], pred.P_class_validatio
 ax.set(xlabel="k (s/km)", ylabel="P1D (km/s)"); ax.legend(); fig.savefig("my_prediction.png")
 ```
 
-The record itself, with its tables per fidelity and its texts, is `emu.p1d_heldout_record()`.
+The record itself, with its tables per fidelity and its texts, is `hp.p1d_heldout_record(emu)`
+(`import hcd_analysis.predictor as hp`).
 
 ## References
 

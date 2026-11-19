@@ -350,8 +350,10 @@ def main(argv=None) -> int:
     )
     ap.add_argument("--out-dir", default=C.FIGURES, help="where the three images are written")
     args = ap.parse_args(argv)
+    import hcd_analysis.predictor as hp
+
     emu, model = C.load_model(args)
-    held, record_dir = emu.p1d_heldout_record()
+    held, record_dir = hp.p1d_heldout_record(emu)
     if held is None:
         raise SystemExit(
             "this model carries no P1D held-out record: there is no held-out prediction residual to draw"

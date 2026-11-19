@@ -119,7 +119,8 @@ diagnostics, not calibrated predictive uncertainties: they rest on five or six s
 of the residual is present for simulations the model was trained on. ``labels["p1d_validation"]`` says what the
 numbers are and keeps three cases apart: the typical residual (z 2.2 to 4.6, above the two largest modes of the
 box), those two modes, and redshifts above 4.6. ``member_std`` is another thing, the spread over the members'
-random seeds. The likelihood (``hcd_analysis.likelihood``) does not use any of these fields.
+random seeds. The likelihood (``hcd_analysis.likelihood``) does not use any of these fields. The module function
+``p1d_heldout_record(emu)`` returns the record of a loaded model and the directory that holds it.
 
 **Inputs.** ``params``: a dict of the nine PRIYA parameters (``PARAM_NAMES``): ``ns`` and ``Ap`` at the PRIYA pivot
 k_p = 0.78 Mpc^-1, ``herei``, ``heref``, ``alphaq``, ``hub``, ``omegamh2``, ``hireionz``, ``bhfeedback``. ``z``: a PRIYA
@@ -1142,16 +1143,6 @@ class _PredictorBase:
     # ------------------------------------------------------------------ the held-out residual of the class P1D
     _p1d = None
     _p1d_dir = None
-
-    def p1d_heldout_record(self):
-        """The P1D held-out record of this model and the directory that holds it with its evidence file:
-        ``(record, directory)``, or ``(None, None)`` for a model without one. ``record`` is a
-        ``hcd_analysis.emulator.p1d_heldout.P1DHeldout`` (read-only tables ``e`` and ``n`` per fidelity, the
-        sensitivity table, the record's texts); the evidence file ``p1d_heldout_tables.h5`` in ``directory``
-        holds every residual vector. It is what ``P_class_validation_rms_log`` of a prediction is read from:
-        empirical validation diagnostics, not calibrated predictive uncertainties
-        (scripts/figures/fig_p1d_validation.py draws them)."""
-        return self._p1d, self._p1d_dir
 
     def _attach_p1d_heldout(self, held):
         """Bind a loaded P1D held-out record (``p1d_heldout.load_record``, anchored; re-derived from its sealed
@@ -2749,6 +2740,18 @@ def _predictor(pred, what):
 def native_modes(pred):
     """The predictor's comoving box modes 2 pi n / L (h/Mpc): the axis of ``P_class`` before any k placement."""
     return _predictor(pred, "native_modes")._k_com.copy()
+
+
+def p1d_heldout_record(pred):
+    """The P1D held-out record of a loaded model and the directory that holds it with its evidence file:
+    ``(record, directory)``, or ``(None, None)`` for a model without one. ``record`` is a
+    ``hcd_analysis.emulator.p1d_heldout.P1DHeldout`` (read-only tables ``e`` and ``n`` per fidelity, the
+    sensitivity table, the record's texts); the evidence file ``p1d_heldout_tables.h5`` in ``directory`` holds
+    every residual vector. It is what ``P_class_validation_rms_log`` of a prediction is read from: empirical
+    validation diagnostics, not calibrated predictive uncertainties (scripts/figures/fig_p1d_validation.py draws
+    them). A module function, so the public surface of ``Bundle`` is unchanged."""
+    pred = _predictor(pred, "p1d_heldout_record")
+    return pred._p1d, pred._p1d_dir
 
 
 def backbone_identity(pred):

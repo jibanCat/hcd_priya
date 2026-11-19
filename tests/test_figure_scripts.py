@@ -1016,7 +1016,7 @@ def test_the_p1d_validation_tables_are_drawn_as_the_record_holds_them(
 
     val = _script("fig_p1d_validation")
     assert val.Z_BY_SIMULATION == (2.2, 3.0, 4.0, 5.4) and val.ROW_CHOICES == PH.ROWS
-    held, _ = hp.load_release(str(release_p1d["root"]), release_p1d["sha"]).p1d_heldout_record()
+    held, _ = hp.p1d_heldout_record(hp.load_release(str(release_p1d["root"]), release_p1d["sha"]))
     calls = _spy_on_plot(monkeypatch)
     assert val.main(_args(release_p1d) + ["--out-dir", str(tmp_path)]) == 0
     figures = _figures(calls)
@@ -1093,7 +1093,7 @@ def test_the_p1d_validation_figure_per_simulation_draws_the_residual_vectors(
     # the synthetic record holds LF at z 2, 3 and 5 and LF+MF at z 3 and 5: three of its redshifts and one it lacks
     monkeypatch.setattr(val, "Z_BY_SIMULATION", (2.0, 3.0, 5.0, 5.4))
     emu = hp.load_release(str(release_p1d["root"]), release_p1d["sha"])
-    held, record_dir = emu.p1d_heldout_record()
+    held, record_dir = hp.p1d_heldout_record(emu)
     rec = held.record
     arrays, _ = S.read_table_h5(os.path.join(record_dir, PH.TABLES_FILE), PH.table_datasets(rec))
     calls = _spy_on_plot(monkeypatch)

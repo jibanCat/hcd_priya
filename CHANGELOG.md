@@ -28,7 +28,7 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   changes, and the likelihood is unchanged: it adds no emulator term (`docs/release_format_h5.md`, section "The P1D
   held-out record"; `scripts/build_p1d_heldout.py`). Three figures show it against wavenumber and redshift for
   each class and the mixture, and per held-out simulation (`scripts/figures/fig_p1d_validation.py`;
-  `docs/model_figures.md`), and `emu.p1d_heldout_record()` returns the record of a loaded model.
+  `docs/model_figures.md`), and `hp.p1d_heldout_record(emu)` returns the record of a loaded model.
 - **Science tests without a model**, at the pr level: the wavenumber convention of the native modes, the mean-flux
   law, the refusal of wavenumbers in h/Mpc above the modes, the statistics of the Gaussian likelihood over seeded
   draws, the interpolation error, the decode of the incidence outputs, the normalisation of the CDDF, the CDDF

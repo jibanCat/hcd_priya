@@ -168,7 +168,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"release.json sha256 {release.get('release_sha256')}, {emu.n_members} members"
         )
         cases = predictions(emu, args.z)
-        held, held_dir = emu.p1d_heldout_record()
+        held, held_dir = hp.p1d_heldout_record(emu)
         # the optional part: recompute its tables from its own residual vectors
         if held is not None:
             from hcd_analysis.emulator import p1d_heldout

@@ -478,7 +478,7 @@ def test_a_prediction_carries_the_residual_of_its_own_fidelity(emu, held):
 
 
 def test_a_loaded_model_gives_its_record_and_the_directory_that_holds_it(rel, emu, held, tmp_path):
-    record, directory = emu.p1d_heldout_record()
+    record, directory = hp.p1d_heldout_record(emu)
     assert record.record_sha256 == held.record_sha256 == rel["p1d_heldout_sha"]
     assert np.array_equal(record.e["lf"], held.e["lf"]) and not record.e["lf"].flags.writeable
     assert os.path.samefile(directory, rel["root"] / "p1d_heldout")
@@ -486,7 +486,11 @@ def test_a_loaded_model_gives_its_record_and_the_directory_that_holds_it(rel, em
     assert PH.verify_tables(directory, record) > 0
     # a model without the part has neither
     plain = make_release(tmp_path / "plain")
-    assert hp.load_release(str(plain["root"]), plain["sha"]).p1d_heldout_record() == (None, None)
+    assert hp.p1d_heldout_record(hp.load_release(str(plain["root"]), plain["sha"])) == (None, None)
+    # a module function: the model object gains no public name, and only a loaded predictor is taken
+    assert not hasattr(emu, "p1d_heldout_record")
+    with pytest.raises(TypeError, match="takes a loaded predictor"):
+        hp.p1d_heldout_record(str(rel["root"]))
 
 
 def test_the_range_is_on_the_spectrum_each_end_from_the_logarithm_on_its_own(emu):

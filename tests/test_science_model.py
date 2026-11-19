@@ -271,7 +271,7 @@ def test_the_validation_range_of_the_spectra_is_the_record_s_and_the_record_reco
     the record equals its recomputation from the residual vectors of the evidence file."""
     from hcd_analysis.emulator import p1d_heldout as PH
 
-    held, held_dir = emu.p1d_heldout_record()
+    held, held_dir = hp.p1d_heldout_record(emu)
     assert held is not None, "the configured model carries no P1D held-out record"
     n_cells = 0
     for pred in preds.values():
