@@ -1,0 +1,8 @@
+{
+ "data": "none: no data set enters this figure",
+ "figure": "the relative error |line / actual - 1| of a straight line drawn through every second, third or fourth mode and read at the modes left out, against k: median and 95th percentile over the spectra, in three redshift bands",
+ "made_by": "a check of the project outside this package; its script and the simulated spectra are not in this repository, so this figure cannot be redrawn from it",
+ "not_tested": "the true spectrum between modes, the simulations' sample variance, the measurements' windows, correlated errors, the emulator",
+ "quantities": "dimensionless ratios from the PRIYA simulations' spectra and published data errors; no spectrum value",
+ "spectra": "the PRIYA simulations' own flux power (the total P1D) at their box modes: the low-resolution runs, every snapshot from z 2.2 to 4.6, every mean-flux level; no emulator and no measured spectrum"
+}

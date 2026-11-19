@@ -11,7 +11,9 @@ All figures here are inline and live under
 Summary HDF5s and CSVs are under
 [`figures/analysis/data/`](../figures/analysis/data/).
 
-> **Quick status**: *preliminary* — 3 matched HR↔LF pairs are the current
+> **April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF.**
+>
+> **Quick status** (2026-04): *preliminary* — 3 matched HR↔LF pairs are the current
 > training sample, which saturates a per-z 2-parameter fit and leaves no
 > residual DOF for proper error bars.  The global (across-z) fit is
 > stable; a 4th matched HR sim would unlock proper uncertainties.  A
@@ -84,9 +86,8 @@ For each LF sim, resample sightlines (using `catalog.skewer_idx`)
 with replacement.  The analytical CLT form
 `σ(dN/dX) = std(counts_per_sightline) / √n_sightlines / dX_per_sightline`
 gives cosmic-variance error bars per sim — typically 0.3–0.7 %.
-Then slice the 60 sims to the 10 nearest the eBOSS PRIYA best-fit
-(A_p=1.7e-9, n_s=1.0; Fernandez+2024 after PRIYA post-publication
-extension to n_s up to ~1.05).
+Then slice the 60 sims to the 10 nearest the eBOSS fit of Fernandez,
+Bird and Ho (2024, arXiv:2309.03943, Table 3: A_p = 1.7e-9, n_s = 1.0).
 
 ![Per-sim cosmic-variance bootstrap + fiducial slice](../figures/analysis/04_hcd_mf/bootstrap_dndx_per_sim.png)
 
@@ -178,15 +179,45 @@ PW09, Noterdaeme+12 (× 0.76 He correction), Crighton+15, Berg+19 (XQ-100).
 All cluster at **0.4–1.0 × 10⁻³**; PRIYA LF sits near the low edge,
 PRIYA HR closer to the centre.
 
-Source for Berg+19 values: `~/data/omega_hi_tableB4_full_sample.csv`.
-Source for PW09: `~/DLA_data/dndx.txt` via the standard
-`rho_hi · conv / ρ_crit` conversion.  N12, C15 from the inline arrays
-in `sbird/dla_data/dla_data.py`.
+These two figures were made by a research script that is not in this repository
+(`scripts/plot_hcd_vs_obs_with_hr.py`), so they cannot be regenerated from it. The release's own
+dN/dX comparison, drawn from committed and traceable files by `scripts/figures/fig_dndx_vs_ho21.py`,
+is `docs/figures/dndx_vs_ho21.png` (see [`model_figures.md`](model_figures.md)).
 
-LLS dN/dz → dN/dX conversion uses Planck cosmology
-(Ω_M=0.315, Ω_Λ=0.685) via `dX/dz = (1+z)² H₀/H(z)`.  Local file:
-`~/data/lofz_literature.txt` (Prochaska+10, Fumagalli+13, Crighton+18,
-O'Meara+13, Ribaudo+11, BOSS).
+Where the measurements come from:
+
+- **Berg et al. (2019)**, the XQ-100 survey, MNRAS 488, 4356, doi:10.1093/mnras/stz2012
+  (arXiv:1907.07703): the Omega_HI curves of subDLAs and DLAs of its Table B4 (median and
+  percentiles in sliding redshift bins), copied into a local file that is not in this repository.
+- **Prochaska and Wolfe (2009)** (PW09), ApJ 696, 1543, doi:10.1088/0004-637X/696/2/1543: the
+  line density and the HI mass density of DLAs in the file `dndx.txt` of the DLA data collection
+  https://github.com/sbird/DLA_data, turned into Omega_HI as `rho_HI · conv / ρ_crit` by that
+  collection's reader.
+- **Noterdaeme et al. (2012)** (N12), A&A 547, L1, doi:10.1051/0004-6361/201220259, and
+  **Crighton et al. (2015)** (C15), MNRAS 452, 217, doi:10.1093/mnras/stv1182: the values written
+  into `dla_data.py` of the same collection.
+- **Ho, Bird and Garnett (2021)** (Ho21), MNRAS 507, 704, doi:10.1093/mnras/stab2169: the DLA
+  dN/dX tables of the same collection.
+- **The LLS incidences of the dN/dX figure:** Prochaska, O'Meara and Worseck (2010), O'Meara et
+  al. (2013) with Ribaudo, Lehner and Howk (2011), Fumagalli et al. (2013), Crighton et al. (2019)
+  and Fumagalli, Fotopoulou and Thomson (2020) (labelled "BOSS"), read from a local compilation that
+  is not in this repository. The published values, each traced to its paper's table, are in
+  `docs/figures/data/lls_incidence/` (PROVENANCE.md there).
+
+How to read the comparisons:
+
+- **Omega_HI** in these panels is the HI mass density without helium (μ = 1). The figure multiplies
+  N12 and C15 by 0.76 (its legend says so) and draws PW09 as pure HI.
+- **dN/dX of DLAs** (PW09, N12, Ho21) counts the absorbers with N_HI >= 10^20.3 cm^-2, the same set
+  as the DLA class.
+- **The LLS points** count every absorber with tau_912 >= 2, that is N_HI >= 10^17.5 cm^-2, counted
+  cumulatively (subDLAs and DLAs included). The LLS class of these figures is
+  10^17.2 <= N_HI < 10^19, a different set of absorbers: the model quantity these points measure is
+  the count above 10^17.5, the dashed line of `docs/figures/dndx_vs_ho21.png`.
+- **The conversion of the LLS points** from dN/dz to dN/dX in these figures used
+  `dX/dz = (1+z)² H₀/H(z)` in a flat cosmology with Ω_M = 0.315, Ω_Λ = 0.685 (Planck). The release
+  figure instead converts each published bin with Delta z / Delta X over the bin, in the cosmology
+  of its model line.
 
 ### 4.2 Per-class P1D templates
 
@@ -380,7 +411,7 @@ In-window median |fractional error|:
 | Ω_HI(subDLA) | 2.2% | 2.5% | 16.7% |
 | Ω_HI(DLA) | 4.3% | 4.5% | 20.2% |
 
-**Verdict**: `nearest-LF + G1` recovers HR at ns0.914 to 1.5–4.3 %
+**Verdict** (April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF): `nearest-LF + G1` recovers HR at ns0.914 to 1.5–4.3 %
 across all 6 quantities.  A_p-only regression is too coarse (10–20 %) —
 expected, since it ignores n_s, herei, heref, etc.  This is
 out-of-sample validation that the global MF *does* generalise.
@@ -410,7 +441,7 @@ absorption-path scaling, so `dN/dX = n_DLA / (n_sky · dX_per_sightline)`
 falls.  At high A_p, counts grow faster than (1+z)² and dN/dX rises
 (matching PW09 / N12 / Ho21).
 
-The observed universe sits at A_p ≈ 1.7e-9, just above the turnover,
+The observed universe sits at A_p ≈ 1.7e-9 (the eBOSS fit of Fernandez et al. 2024), just above the turnover,
 giving the gentle 1.5–2× rise in observed dN/dX between z = 2 and z = 5.
 
 **Emulator implication**: dN/dX(DLA) has a non-trivial ridge structure
@@ -431,7 +462,7 @@ for a proper (A_p × z)-coupled emulator rather than a scalar correction.
   sims to maximise Fisher info.
 - **GP MF emulator** is the natural next step after more HR sims land
   and parameter sensitivity is nailed down.  Deferred per current
-  plan — the analytical global fit does 1.5–4 % out-of-sample already.
+  plan — the analytical global fit does 1.5–4 % out-of-sample already (April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF).
 - **Parameter sensitivity scan for HCD emulator** — separate exercise,
   per-parameter Δθ experiments to map the ridge structure in §7.
   User-specified plan pending.

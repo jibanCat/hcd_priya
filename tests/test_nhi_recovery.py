@@ -39,6 +39,7 @@ import time
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -51,12 +52,12 @@ from hcd_analysis.catalog import (
 )
 from hcd_analysis.voigt_utils import tau_voigt, fit_nhi_from_tau, _SIGMA_PREFACTOR
 
-
 # ---------------------------------------------------------------------------
 # Independent physical tau(v) — does NOT share the codebase's _SIGMA_PREFACTOR.
 # Used to verify the fitter recovers true NHI from *externally* generated tau,
 # which is the situation with real fake_spectra output.
 # ---------------------------------------------------------------------------
+
 
 def tau_voigt_physical(v_kms, NHI, b_kms, v0_kms=0.0):
     """
@@ -68,19 +69,21 @@ def tau_voigt_physical(v_kms, NHI, b_kms, v0_kms=0.0):
     This matches the normalisation used by fake_spectra.
     """
     from scipy.special import wofz
-    e = 4.80320427e-10          # esu
-    m_e = 9.10938e-28           # g
-    c = 2.99792458e10           # cm/s
+
+    e = 4.80320427e-10  # esu
+    m_e = 9.10938e-28  # g
+    c = 2.99792458e10  # cm/s
     f_lu = 0.4164
-    lam = 1.21567e-5            # cm
-    Gamma = 6.265e8             # s^-1
+    lam = 1.21567e-5  # cm
+    Gamma = 6.265e8  # s^-1
 
     b_cms = b_kms * 1e5
-    u = (np.asarray(v_kms) - v0_kms) / b_kms   # dimensionless
+    u = (np.asarray(v_kms) - v0_kms) / b_kms  # dimensionless
     a = Gamma * lam / (4.0 * np.pi * b_cms)
     H = wofz(u + 1j * a).real
     sigma0 = np.sqrt(np.pi) * e * e * f_lu * lam / (m_e * c * b_cms)
     return NHI * sigma0 * H
+
 
 # Production values from config/default.yaml
 DV_KMS = 10.0
@@ -97,6 +100,7 @@ VOIGT_MAX_ITER = 200
 # ---------------------------------------------------------------------------
 # Test 1 — direct fitter, clean Voigt input (no pipeline wrapping)
 # ---------------------------------------------------------------------------
+
 
 def run_fitter_direct(
     log_nhi_true: np.ndarray,
@@ -121,8 +125,12 @@ def run_fitter_direct(
     for i, logN in enumerate(log_nhi_true):
         tau = synth(v, 10.0**logN, b_true, v0_kms=0.0)
         NHI_fit, _, _ = fit_nhi_from_tau(
-            tau, v, b_init=B_INIT, b_bounds=B_BOUNDS,
-            tau_cap=TAU_FIT_CAP, max_iter=VOIGT_MAX_ITER,
+            tau,
+            v,
+            b_init=B_INIT,
+            b_bounds=B_BOUNDS,
+            tau_cap=TAU_FIT_CAP,
+            max_iter=VOIGT_MAX_ITER,
         )
         recovered[i] = np.log10(max(NHI_fit, 1.0))
     return recovered
@@ -131,6 +139,7 @@ def run_fitter_direct(
 # ---------------------------------------------------------------------------
 # Test 2 — full pipeline path, synthetic sightline with/without forest
 # ---------------------------------------------------------------------------
+
 
 def synthesise_sightline(
     log_nhi_true: float,
@@ -196,15 +205,22 @@ def run_pipeline_path(
 
     for i, logN in enumerate(log_nhi_true):
         tau = synthesise_sightline(
-            logN, b_true, v_center,
-            nbins=NBINS, dv_kms=DV_KMS,
-            forest_tau=forest_tau, seed=seed + i,
+            logN,
+            b_true,
+            v_center,
+            nbins=NBINS,
+            dv_kms=DV_KMS,
+            forest_tau=forest_tau,
+            seed=seed + i,
             kinematic_sigma_kms=kinematic_sigma_kms,
             n_components=n_components,
         ).astype(np.float64)
 
         systems = find_systems_in_skewer(
-            tau, TAU_THRESHOLD, merge_gap_pixels, MIN_PIXELS,
+            tau,
+            TAU_THRESHOLD,
+            merge_gap_pixels,
+            MIN_PIXELS,
         )
         n_found[i] = len(systems)
         if not systems:
@@ -221,9 +237,14 @@ def run_pipeline_path(
 
         pix_start, pix_end = best
         NHI, _, _ = measure_nhi_for_system(
-            tau, pix_start, pix_end, DV_KMS,
-            b_init=B_INIT, b_bounds=B_BOUNDS,
-            tau_fit_cap=TAU_FIT_CAP, max_iter=VOIGT_MAX_ITER,
+            tau,
+            pix_start,
+            pix_end,
+            DV_KMS,
+            b_init=B_INIT,
+            b_bounds=B_BOUNDS,
+            tau_fit_cap=TAU_FIT_CAP,
+            max_iter=VOIGT_MAX_ITER,
             fast_mode=False,
         )
         recovered[i] = np.log10(max(NHI, 1.0))
@@ -234,6 +255,7 @@ def run_pipeline_path(
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
+
 
 def plot_recovery(
     log_nhi_true: np.ndarray,
@@ -286,6 +308,7 @@ def plot_recovery(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--quick", action="store_true", help="small grid, fast")
@@ -306,20 +329,27 @@ def main():
     # formula (= fake_spectra convention), then fit with the codebase.
     # Must round-trip under the fix.
     rec_direct_phys = run_fitter_direct(
-        log_nhi_grid, b_true=args.b, wing_kms=2000.0, use_physical_tau=True,
+        log_nhi_grid,
+        b_true=args.b,
+        wing_kms=2000.0,
+        use_physical_tau=True,
     )
     print(f"  done in {time.time()-t0:.1f}s")
 
     # Report agreement
     disagreement = np.abs(rec_direct_phys - log_nhi_grid)
-    print(f"  cross-norm max |log N_rec - log N_true| over grid = {np.nanmax(disagreement):.2f} dex")
+    print(
+        f"  cross-norm max |log N_rec - log N_true| over grid = {np.nanmax(disagreement):.2f} dex"
+    )
     print(f"  (pre-fix: ~5 dex; post-fix: < 0.3 dex expected)")
 
     plot_recovery(
         log_nhi_grid,
-        {"codebase synth (self-consistent)": rec_direct_2k,
-         "wing ±8000 km/s": rec_direct_8k,
-         "physical synth → codebase fit (cross-norm)": rec_direct_phys},
+        {
+            "codebase synth (self-consistent)": rec_direct_2k,
+            "wing ±8000 km/s": rec_direct_8k,
+            "physical synth → codebase fit (cross-norm)": rec_direct_phys,
+        },
         title=f"Direct Voigt fit on synthetic tau (b={args.b} km/s)",
         outpath=out_dir / "nhi_recovery_clean.png",
     )
@@ -328,7 +358,9 @@ def main():
     print("Test 2: pipeline path (find + measure), no forest...")
     t0 = time.time()
     rec_pipe_clean, nfound_clean = run_pipeline_path(
-        log_nhi_grid, b_true=args.b, forest_tau=0.0,
+        log_nhi_grid,
+        b_true=args.b,
+        forest_tau=0.0,
     )
     print(f"  done in {time.time()-t0:.1f}s, systems found: {nfound_clean}")
 
@@ -337,14 +369,16 @@ def main():
     print("Test 3: pipeline path, forest_tau=0.4 (z≈3)...")
     t0 = time.time()
     rec_pipe_forest, nfound_forest = run_pipeline_path(
-        log_nhi_grid, b_true=args.b, forest_tau=0.4, seed=42,
+        log_nhi_grid,
+        b_true=args.b,
+        forest_tau=0.4,
+        seed=42,
     )
     print(f"  done in {time.time()-t0:.1f}s")
 
     plot_recovery(
         log_nhi_grid,
-        {"pipeline, clean": rec_pipe_clean,
-         "pipeline, forest τ=0.4 (z≈3)": rec_pipe_forest},
+        {"pipeline, clean": rec_pipe_clean, "pipeline, forest τ=0.4 (z≈3)": rec_pipe_forest},
         title=f"Full pipeline NHI recovery (b_true={args.b} km/s, wing=±2000 km/s)",
         outpath=out_dir / "nhi_recovery_pipeline.png",
     )
@@ -358,8 +392,12 @@ def main():
     for sigma_kms in (50.0, 100.0, 200.0):
         t0 = time.time()
         rec_kin, _ = run_pipeline_path(
-            log_nhi_grid, b_true=args.b, forest_tau=0.4, seed=7,
-            kinematic_sigma_kms=sigma_kms, n_components=8,
+            log_nhi_grid,
+            b_true=args.b,
+            forest_tau=0.4,
+            seed=7,
+            kinematic_sigma_kms=sigma_kms,
+            n_components=8,
         )
         print(f"  sigma={sigma_kms:3.0f} km/s: {time.time()-t0:.1f}s")
         # collect for combined plot
@@ -372,22 +410,28 @@ def main():
 
     plot_recovery(
         log_nhi_grid,
-        {"σ_v=50 km/s, 8 components": rec_kin_50,
-         "σ_v=100 km/s, 8 components": rec_kin_100,
-         "σ_v=200 km/s, 8 components": rec_kin_200,
-         "clean single Voigt (ref)": rec_pipe_clean},
+        {
+            "σ_v=50 km/s, 8 components": rec_kin_50,
+            "σ_v=100 km/s, 8 components": rec_kin_100,
+            "σ_v=200 km/s, 8 components": rec_kin_200,
+            "clean single Voigt (ref)": rec_pipe_clean,
+        },
         title=f"NHI recovery with velocity-broadened cores (b_true={args.b}, forest τ=0.4)",
         outpath=out_dir / "nhi_recovery_kinematic.png",
     )
 
     # -- Summary ------------------------------------------------------------
     print("\n" + "=" * 72)
-    print(f"{'true log N':>12}  {'direct 2k':>10}  {'direct 8k':>10}  "
-          f"{'pipe clean':>11}  {'pipe forest':>12}")
+    print(
+        f"{'true log N':>12}  {'direct 2k':>10}  {'direct 8k':>10}  "
+        f"{'pipe clean':>11}  {'pipe forest':>12}"
+    )
     print("-" * 72)
     for i, ln in enumerate(log_nhi_grid):
-        print(f"{ln:>12.2f}  {rec_direct_2k[i]:>10.2f}  {rec_direct_8k[i]:>10.2f}  "
-              f"{rec_pipe_clean[i]:>11.2f}  {rec_pipe_forest[i]:>12.2f}")
+        print(
+            f"{ln:>12.2f}  {rec_direct_2k[i]:>10.2f}  {rec_direct_8k[i]:>10.2f}  "
+            f"{rec_pipe_clean[i]:>11.2f}  {rec_pipe_forest[i]:>12.2f}"
+        )
     print("=" * 72)
 
     # Quick verdicts
@@ -398,13 +442,15 @@ def main():
         return float(np.nanmean(rec_lN[is_dla] - true_lN[is_dla]))
 
     print("\nMean bias on injected DLAs (log N_rec - log N_true):")
-    for label, rec in [("direct 2k-wing", rec_direct_2k),
-                        ("direct 8k-wing", rec_direct_8k),
-                        ("pipeline clean", rec_pipe_clean),
-                        ("pipeline forest", rec_pipe_forest),
-                        ("pipeline kinematic σ=50", rec_kin_50),
-                        ("pipeline kinematic σ=100", rec_kin_100),
-                        ("pipeline kinematic σ=200", rec_kin_200)]:
+    for label, rec in [
+        ("direct 2k-wing", rec_direct_2k),
+        ("direct 8k-wing", rec_direct_8k),
+        ("pipeline clean", rec_pipe_clean),
+        ("pipeline forest", rec_pipe_forest),
+        ("pipeline kinematic σ=50", rec_kin_50),
+        ("pipeline kinematic σ=100", rec_kin_100),
+        ("pipeline kinematic σ=200", rec_kin_200),
+    ]:
         b = pile_up_bias(log_nhi_grid, rec)
         if b is not None:
             print(f"  {label:>24s}: {b:+.2f} dex")
@@ -414,11 +460,13 @@ def main():
     print("\nProduction pile-up signature: frac(true DLA) that recovers as subDLA (19 ≤ rec < 20):")
     is_true_dla = log_nhi_grid >= 20.3
     if is_true_dla.any():
-        for label, rec in [("pipeline clean", rec_pipe_clean),
-                            ("pipeline forest", rec_pipe_forest),
-                            ("pipeline kinematic σ=50", rec_kin_50),
-                            ("pipeline kinematic σ=100", rec_kin_100),
-                            ("pipeline kinematic σ=200", rec_kin_200)]:
+        for label, rec in [
+            ("pipeline clean", rec_pipe_clean),
+            ("pipeline forest", rec_pipe_forest),
+            ("pipeline kinematic σ=50", rec_kin_50),
+            ("pipeline kinematic σ=100", rec_kin_100),
+            ("pipeline kinematic σ=200", rec_kin_200),
+        ]:
             r = rec[is_true_dla]
             mis = np.isfinite(r) & (r >= 19.0) & (r < 20.0)
             print(f"  {label:>24s}: {int(mis.sum())}/{int(np.isfinite(r).sum())}")

@@ -1,27 +1,194 @@
-# hcd_priya — measuring cosmology from the Lyman-α forest, with the contaminants marginalised
+# hcd_priya: A High-Column-Density Absorber Emulator for Lyman-α Forest Cosmology
 
 ![Python](https://img.shields.io/badge/python-3.11-blue)
 ![JAX](https://img.shields.io/badge/JAX%20%2F%20Equinox-float64-orange)
-![numpyro](https://img.shields.io/badge/numpyro-NUTS-9cf)
-![tests](https://img.shields.io/badge/tests-passing-brightgreen)
-![phase](https://img.shields.io/badge/Phase--C-likelihood%20%26%20inference-blueviolet)
-![data](https://img.shields.io/badge/data-DESI%20DR1%20%C2%B7%20KODIAQ--SQUAD%20%C2%B7%20eBOSS-informational)
+[![tests](https://github.com/jibanCat/hcd_priya/actions/workflows/tests.yml/badge.svg)](https://github.com/jibanCat/hcd_priya/actions/workflows/tests.yml)
 
-This repository implements an end-to-end pipeline that measures two cosmological
-parameters, the forest power amplitude A_p and the tilt n_s, from the
-one-dimensional flux power spectrum (P1D) of the Lyman-α (Lyα) forest, while
-accounting for the high-column-density (HCD) absorbers that contaminate it. It is
-built on the PRIYA suite of cosmological hydrodynamic simulations.
+This repository holds the code of an emulator of the one-dimensional flux power spectrum
+(P1D) of the Lyman-α (Lyα) forest that models the high-column-density (HCD)
+absorbers contaminating it, together with the research pipeline it was built
+for: measuring two cosmological parameters, the forest power amplitude A_p and
+the tilt n_s, from the P1D. The supported interface of this release is the
+predictor of the per-class P1D; the measurement itself is research code that does
+not run at this commit (see
+[Scope and limitations of this release](#scope-and-limitations-of-this-release)).
+It is built on the PRIYA suite of cosmological hydrodynamic simulations.
 
-This document describes what the project does, how to set up the two software
-environments it requires, how to run the smallest useful piece, and what each
-stage of the pipeline produces. Each stage is illustrated with the figure it
-generates.
+---
+
+## Install
+
+<!-- docs:install:start -->
+`hcd-priya` installs the Python package `hcd_analysis` and the command `hcd`. It requires `hcd-priya-models`, a
+data-only package that holds the trained models. It needs Python 3.11 or later on Linux (x86-64).
+
+**What works today: an install from a clone, with a stand-in model.** Neither package is on a package index yet, and
+no trained model is published yet. What someone outside the project can install today is the code together with a
+stand-in model package: a synthetic bundle of untrained networks. It shows that the installation and the interface
+work; its numbers are not science. These are the commands that continuous integration runs:
+
+```bash
+git clone https://github.com/jibanCat/hcd_priya && cd hcd_priya
+python3.11 -m venv .venv && source .venv/bin/activate
+pip install build && python -m build --wheel --outdir dist .
+# builds the stand-in model wheel into dist/models and installs both wheels, with pinned dependencies
+tools/ci/install_with_synthetic_models.sh python "$(ls dist/*.whl)[test]" dist/models \
+    -c tools/ci/constraints-devenv.txt
+export HCD_PRIYA_ALLOW_SYNTHETIC=1      # the stand-in loads only with this switch, and with a warning
+python -c "import hcd_analysis; print(hcd_analysis.__version__)"
+hcd --help
+```
+
+- **The switch.** `load_published` refuses the stand-in unless `HCD_PRIYA_ALLOW_SYNTHETIC=1` is set, so that untrained
+  networks are never taken for a model. With it, the first example of the README runs and prints the shapes and
+  flags of the stand-in, which differ from those of the trained model.
+- **With a model wheel in hand.** The model wheel is built in this repository
+  ([`model_package/`](model_package/README.md)) from an accepted release. Whoever holds one installs it as a file,
+  which is never looked up on an index: `pip install . path/to/hcd_priya_models-VERSION-py3-none-any.whl`.
+- **The supported install** pins every dependency to the versions the test suite is developed and run with
+  ([`tools/ci/constraints-devenv.txt`](tools/ci/constraints-devenv.txt)), on CPython 3.11, as the commands above
+  do. [`CONTRIBUTING.md`](CONTRIBUTING.md) adds the editable install for development.
+
+**What will work after publication (not available yet).** Once both packages are published, the whole install will
+be one line. It does not work today:
+
+```bash
+pip install hcd-priya        # NOT AVAILABLE YET: neither package is on a package index
+```
+
+It will install the code and the trained LF+MF model together, and the first example of the README will then run as
+written, with no switch and no warning.
+
+**Notes.**
+
+- Newer dependency versions and Python 3.12 are tested in the nightly continuous integration but not supported yet; macOS and
+  Windows are not tested. [`docs/compatibility.md`](docs/compatibility.md) lists what is tested and what is not.
+- **Extras:** `test` (pytest), `tutorials` (jupyter, nbformat) and `dev`. `pyproject.toml` declares the
+  dependencies; `requirements.txt` only points to the install above.
+- **Working in a clone.** To run the scripts or the pipeline from the clone, make the install editable after the
+  commands above: `pip install --no-deps -e .`. The pipeline records the clone's commit, and only
+  an editable install makes that commit the code that runs (with your changes committed); a plain install runs the
+  copy made when it was installed. The scripts under `scripts/` are not part of the installed package; run them from
+  the repository root.
+- **JAX on the CPU, in double precision.** Importing `hcd_analysis.emulator` enables float64, which several
+  structural identities of the model need: they hold only to bit-level accuracy and break under JAX's default
+  float32. Run scripts with `JAX_PLATFORMS=cpu python <your_script.py>`.
+- **The simulation side** (building absorber catalogs and P1D from raw spectra) also needs `fake_spectra`, installed
+  separately ([`docs/fake_spectra_integration.md`](docs/fake_spectra_integration.md)); the predictor does not. On
+  the Great Lakes cluster, `bash scripts/install_greatlakes.sh` creates a conda environment with both.
+<!-- docs:install:end -->
+
+---
+
+## Quickstart
+
+Load the LF+MF model and predict the P1D of each class of sightlines at one redshift. The nine parameters of the
+model are written out, so that you see which point the prediction is for:
+
+```python
+import hcd_analysis.predictor as hp
+
+emu = hp.load_published()        # the LF+MF model, from the installed model package
+
+# The nine PRIYA parameters, by name. These values are the midpoint of the range each parameter
+# was trained on: a point to try the model at. It is not a fiducial cosmology, not a best fit
+# and not a simulation. Put your own values here.
+params = {
+    "ns": 0.925,           # slope of the primordial power spectrum at k = 0.78 / Mpc
+    "Ap": 1.9e-9,          # its amplitude at the same wavenumber
+    "herei": 4.0,          # redshift at which helium reionization starts
+    "heref": 2.7,          # redshift at which helium reionization ends
+    "alphaq": 2.15,        # quasar spectral index, which sets the heating of helium reionization
+    "hub": 0.70,           # dimensionless Hubble parameter h
+    "omegamh2": 0.143,     # Omega_m h^2
+    "hireionz": 7.25,      # redshift of hydrogen reionization
+    "bhfeedback": 0.05,    # black-hole feedback strength
+}
+
+# z is a PRIYA snapshot redshift. The mean flux is PRIYA's model at its centre:
+# tau0_amp = 1 and dtau0 = 0 give the fit of Kim et al. (2007).
+pred = emu.predict(params, z=3.0, tau0_amp=1.0, dtau0=0.0)
+
+print("model:", pred.labels["product"])
+print("classes, in the order of P_class:", hp.CLASSES)
+print("shape of pred.P_class, the P1D in km/s of each class:", pred.P_class.shape)
+print("shape of pred.k, the wavenumbers in s/km:", pred.k.shape)
+print("flags that are set (read them before you use the numbers):", sorted(n for n, v in pred.flags.items() if v is True))
+```
+
+With the trained LF+MF model this prints (the model has 172 wavenumbers; no spectrum value is shown here). The
+stand-in model of today's install has another number of wavenumbers, carries no incidence record and no P1D
+held-out record (so none of the three flags of those records), and its predictions carry the flag
+`synthetic_build`:
+
+```text
+model: LF+MF
+classes, in the order of P_class: ('clean', 'LLS', 'subDLA', 'DLA')
+shape of pred.P_class, the P1D in km/s of each class: (4, 172)
+shape of pred.k, the wavenumbers in s/km: (172,)
+flags that are set (read them before you use the numbers): ['incidence_heldout_error_available', 'incidence_mf_applied', 'k_downweighted', 'mf_applied', 'p1d_validation_available']
+```
+
+The five flags say that the multi-fidelity correction was applied to the class spectra (`mf_applied`) and to the
+incidence (`incidence_mf_applied`), that the release carries the held-out error of the incidence
+(`incidence_heldout_error_available`), that every class spectrum has a held-out prediction residual beside it
+(`p1d_validation_available`: `pred.P_class_validation_rms_log`, an empirical validation diagnostic, not a
+calibrated predictive uncertainty; `pred.labels["p1d_validation"]` says what it is), and that some of the model's
+own wavenumbers lie below 1e-3 s/km, where training gave less weight (`k_downweighted`).
+
+- **What "LF+MF" is.** The emulator trained on the low-fidelity (low-resolution) PRIYA simulations, with the
+  multi-fidelity correction that calibrates its class spectra to the high-resolution simulations
+  ([`docs/models_and_data.md`](docs/models_and_data.md); which validation summaries are public is listed under
+  "Status" below). It is the model this package publishes, and
+  `hp.load_published()` loads it without a name.
+- **Where the model comes from.** The trained model is in a companion package, `hcd-priya-models`, which `hcd-priya`
+  requires. Nothing is downloaded when you load it. **Neither package is published yet**: [Install](#install) says
+  what works today, and [Models and data](#models-and-data) what `load_published` checks. With a release's files
+  in hand, the same model loads from its directory and the sha256 published with it:
+
+  ```python
+  emu = hp.load_release("path/to/release", "<published release sha256>")
+  ```
+
+What goes in and what comes out:
+
+- **Parameters.** `params` is a dict of the nine PRIYA parameters by name (`hp.PARAM_NAMES`), as above. A value
+  outside the range the model was trained on (`hp.PARAM_LIMITS`) is predicted and flagged, not refused.
+- **Redshift.** `z` is one of the PRIYA snapshot redshifts 2.0, 2.2, ..., 5.4; `emu.predict_many` takes several.
+- **Mean flux.** Give either `tau0_amp` and `dtau0` (PRIYA's model), or `tau_eff` from any other mean-flux model
+  (`help(hp.tau_eff_priya)` shows how, with a published fit as the example). A mean flux outside the range the model
+  was trained on is predicted with a warning and a flag. The warning checks the range only. A `tau_eff` of your own
+  must be that of the PRIYA-filtered forest, the quantity the model was trained on: a measurement made with
+  another treatment of metals or of DLAs is another quantity, and nothing in the package can tell.
+- **Result.** `pred.k`, `pred.P_class` (clean, LLS, subDLA, DLA), `pred.w_c` and `pred.dndx` (the model's
+  sightline fractions and incidence of the three HCD classes). `hp.add_hcd(pred, pred.w_c)` mixes the class spectra
+  with those fractions. **That mixture is not the full P1D of a sightline sample.** Under LF+MF the class spectra
+  carry the multi-fidelity correction, while `pred.dndx` and `pred.w_c` are those of the low-fidelity model unless
+  the release carries an incidence record (then they are corrected too, flag `incidence_mf_applied`); and the
+  mixture leaves out two contributions that the filter removed, the power of the subDLA cores and the DLA
+  damping-wing core (`pred.labels["omissions"]`).
+- **Conventions.** `pred.k` is the angular wavenumber, 2 pi divided by the wavelength in velocity, in s/km.
+  `pred.P_class` is the power spectrum of `F / mean(F) - 1`, with `mean(F)` the mean flux of the whole sample, in
+  km/s ([`docs/p1d_definition.md`](docs/p1d_definition.md); that page writes k in the other common convention, one
+  over the wavelength). A spectrum in that other convention has a k smaller by a factor of 2 pi and the same P at
+  the corresponding k: only k is converted, never P. Wavenumbers given to the likelihood must be in s/km too: a
+  data set in h/Mpc with a bin at or above about 0.1 is refused, but one whose bins all lie below that may pass
+  undetected ([`docs/likelihood.md`](docs/likelihood.md)).
+- **Read `pred.flags` before using the numbers**: a parameter outside the training box, or an LF+MF prediction
+  above z 4.6, is returned and flagged, not refused.
+
+Without any model file, the same calls run on a synthetic bundle (untrained networks, so it shows the interface and
+behaviour, not science): `hcd_analysis.emulator.release_testing.write_synthetic_bundle` writes one that
+`hp.load_bundle` loads, and the tutorial
+[`docs/tutorials/production_and_research_bundles.md`](docs/tutorials/production_and_research_bundles.md) walks
+through production and research bundles on synthetic data. Every function named above has a docstring with an
+example that a test runs (for instance `help(hp.Prediction)`).
 
 ---
 
 ## What this is
 
+<!-- docs:about:start -->
 The Lyα forest is the series of absorption lines seen blueward of a distant
 quasar's Lyα emission, each produced by intergalactic hydrogen along the line of
 sight. The statistics of that absorption, and in particular its one-dimensional
@@ -35,10 +202,11 @@ DLA), known collectively as HCDs. They imprint broad damped wings on the
 spectrum and bias the measured P1D if they are not modelled. We split the three
 classes by neutral-hydrogen column density N_HI (`hcd_analysis/catalog.py`):
 LLS at 10^17.2–10^19, subDLA at 10^19–10^20.3, and DLA at N_HI ≥ 10^20.3 cm⁻².
-The pipeline measures P1D from the PRIYA simulations, trains a fast
+The pipeline measures P1D from the PRIYA simulations and trains a fast
 differentiable emulator that carries an explicit free-amplitude model of the HCD
-contamination, and feeds that emulator into a gradient-based likelihood, so that
-(A_p, n_s) can be inferred while marginalising over the HCD incidence. Treating
+contamination. The research code then feeds that emulator into a gradient-based
+likelihood, with the aim of inferring (A_p, n_s) while marginalising over the HCD
+incidence; that last step is not part of this release. Treating
 the HCDs correctly is what allows a forest P1D analysis to remain unbiased at the
 sub-percent precision that DESI now delivers.
 
@@ -47,334 +215,198 @@ PRIYA: Bird, Fernandez, Ho et al. 2023, JCAP 10 037
 Fernandez, Bird & Ho 2024, JCAP 07 029
 ([arXiv:2309.03943](https://arxiv.org/abs/2309.03943)).
 
----
-
-## Install / environment
-
-The repository has two halves, each with its own environment.
-
-The first is the catalog, P1D and CDDF pipeline, the simulation-side code that
-turns raw spectra into per-class P1D and absorber catalogs. It installs with:
-
-```bash
-# Great Lakes / cluster — the supported one-shot installer:
-bash scripts/install_greatlakes.sh
-
-# Generic / laptop:
-conda create -n hcd_env python=3.11 -y && conda activate hcd_env
-pip install -r requirements.txt
-pip install -e .
-```
-
-Verify it imported:
-
-```bash
-python -c "import hcd_analysis; print(hcd_analysis.__file__)"
-```
-
-The second is the emulator and likelihood, written in JAX/Equinox. It lives in a
-dedicated float64 conda environment, `emu-jax`, and must be run with the exact
-environment string below. Double precision is required because several
-structural identities in the model hold only to bit-level accuracy and break
-under JAX's default float32:
-
-```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
-    /home/mfho/.conda/envs/emu-jax/bin/python3  <your_script.py>
-```
-
-- `PYTHONNOUSERSITE=1` keeps stray user-site packages out of the import path.
-- `JAX_PLATFORMS=cpu` runs on CPU (this pipeline is CPU-only).
-- `import hcd_analysis.emulator` enables x64 on import; the environment string
-  above is still required so JAX picks up the right interpreter and path.
+hcd_priya is the continuation of the analysis of Ho et al. 2026,
+"Small-scale Lyman alpha forest cosmology with PRIYA: constraints from XQ100 and KODIAQ-SQUAD one-dimensional flux
+power spectra", JCAP 2026 (07) 094
+([doi:10.1088/1475-7516/2026/07/094](https://doi.org/10.1088/1475-7516/2026/07/094),
+[arXiv:2509.18271](https://arxiv.org/abs/2509.18271)). How to cite the software: [`CITATION.cff`](CITATION.cff).
+<!-- docs:about:end -->
 
 ---
 
-## Data and checkpoints
+## How the HCD catalogues are built
 
-The repository ships the code, not the data or the trained models. To set
-expectations before the Quickstart:
-
-- **The raw catalogs and skewers are not distributed here.** The PRIYA τ skewers
-  and the per-(sim, snap) absorber catalogs are large and live on the cluster;
-  they are gitignored (`outputs/`, `*.h5`). Building them is a Great Lakes job.
-- **The full τ₀ training cache is not distributed here.** The v3.3 LF cache,
-  `hcd_analysis/_emulator_data/observables_tau0_lf.h5`, is 1.1 GB and gitignored.
-- **The trained checkpoints are not distributed here.** A checkpoint bundle is
-  only ~6 MB, but its binary leaves (`checkpoints/*.eqx`, `*.norm.pkl`,
-  `*.meta.json`) are gitignored, so a usable checkpoint is not present in a fresh
-  clone either.
-
-What you actually need to run the emulator or the likelihood yourself is modest:
-a trained checkpoint bundle plus at least a slice of the τ₀ cache — one LOSO fold
-is enough to exercise the forward model and the likelihood on real cache rows.
-You do not need the full 1.1 GB cache or a cluster for that.
-
-A data and model release is planned but not yet available (work in progress). The
-natural home for the one-fold cache slice and a checkpoint is a dedicated data
-repository, which the PI (M. Ho) will create; it is deferred for now. Until then,
-request the checkpoint and a cache slice from the PI (mfho@umich.edu) or open an
-issue. Please do not commit any large data or model artefacts to this code
-repository.
-
-Throughout the rest of this README, each stage is marked with what it needs:
-**requires the full data / Great Lakes (not in this repo)** for anything that
-builds the catalogs, the full cache, or trains the emulator; and
-**runnable anywhere with a checkpoint + a cache slice** for the portable pieces
-(the forward-model API, reading the data structure).
-
----
-
-## Quickstart
-
-**Runnable anywhere with a checkpoint + a cache slice** (one LOSO fold of the
-cache is sufficient; see [Data and checkpoints](#data-and-checkpoints)). It does
-not require the full 1.1 GB cache or a cluster, but it does need the trained
-checkpoint and at least the one cache row it reads, neither of which is in the
-repository.
-
-The smallest end-to-end example loads the trained emulator and calls the forward
-model to predict a contaminated P1D. Run it with the `emu-jax` environment string
-given above.
+The emulator is trained on absorber catalogues, made by running the HCD finder of this repository on the
+`fake_spectra` sightline files of the PRIYA snapshots. Those files are not distributed, and none of this is needed
+to use the predictor.
 
 ```python
-import hcd_analysis.emulator                       # enables JAX float64 on import
-import jax.numpy as jnp
-from hcd_analysis.emulator import train as T
-from hcd_analysis.emulator.data import load_cache
-from hcd_analysis.emulator.predict import predict_P_obs, predict_P_filt
+from hcd_analysis.catalog import build_catalog
+from hcd_analysis.io import pixel_dv_kms, read_header
 
-# 1. load a trained emulator checkpoint (the canonical stand-in default)
-model, meta, norm = T.load_checkpoint("checkpoints/final_fold0")
-pf = norm["P_filt"]                                 # structured P_filt norm dict
-
-# 2. grab one example input row from the training cache
-d   = load_cache("hcd_analysis/_emulator_data/observables_tau0_lf.h5")
-row = 0
-theta9   = jnp.asarray(d["params_unit"][row])       # (9,) cosmology+astro, UNIT cube
-z_unit   = float(d["x"][row, 9])                    # (z - 2.0) / 3.4
-tau0     = float(d["tau0"][row])                    # mean-flux optical depth = -ln(<F>)
-alpha    = jnp.asarray(d["w_c_cache"][row, 1:])     # (3,) HCD incidence: LLS, subDLA, DLA
-dla_core = jnp.asarray(d["delta"][row, 2])          # (K,) DLA-core add-back
-
-# 3. predict
-P_filt = predict_P_filt(model, theta9, z_unit, tau0, pf)                  # (4,K) per class
-P_obs  = predict_P_obs(model, theta9, z_unit, tau0, alpha, pf, dla_core)  # (K,)  total, contaminated
-print(P_obs.shape)
+# One fake_spectra file: the Lyman-alpha optical depth of every sightline of one snapshot.
+spectra = "SIMULATION/output/SPECTRA_017/lya_forest_spectra_grid_480.hdf5"
+header = read_header(spectra)
+catalog = build_catalog(
+    spectra, sim_name="SIMULATION", snap=17, z=header.redshift, dv_kms=pixel_dv_kms(header),
+    # the production settings, as in config/default.yaml under "absorber:"
+    tau_threshold=100.0,  # a system is a run of pixels with tau above this
+    merge_dv_kms=100.0,   # runs closer than this, in km/s, are one system
+    min_pixels=2,         # a system has at least this many pixels
+    fast_mode=True,       # N_HI from the integral of tau over the system; False fits a Voigt profile
+    min_log_nhi=17.2,     # a system below the LLS edge is forest and is dropped
+)
+print("systems found, by class:", catalog.summary())
+catalog.save_npz("catalog.npz")
 ```
 
-Every input to the emulator is mapped onto the unit cube `[0,1]`. The full input
-contract, including parameter order, the z and τ₀ maps, and how to construct your
-own inputs, is given in the emulator README linked below.
+On a made-up file of four sightlines, two of which hold one system each (the real files are not distributed), this
+prints:
+
+```text
+systems found, by class: {'LLS': 2, 'subDLA': 0, 'DLA': 0, 'forest': 0}
+```
+
+The command line runs the same finder with the settings of the config file, and also writes the P1D of each class
+of sightlines and the CDDF:
+
+```bash
+hcd run-one --sim SIMULATION --snap 17 --config config/default.yaml   # one snapshot
+hcd run-sim --sim SIMULATION --config config/default.yaml             # every snapshot of one simulation
+```
+
+How the finder works, its settings, its products and the checks of a catalogue are in
+[`docs/pipeline.md`](docs/pipeline.md).
 
 ---
 
-## HCD catalog construction (quickstart)
+## Figures
 
-**Requires the full data / Great Lakes (not in this repo).** This step reads the
-raw PRIYA τ skewers, which are large and not distributed here; it is a cluster
-job. The structure of the products it describes can still be read for reference.
+Drawn by the scripts in [`scripts/figures/`](scripts/figures/); the data files are in
+[`docs/figures/data/`](docs/figures/data/). The class-ratio figure regenerates from the repository alone. The dN/dX
+and CDDF figures need a model with an incidence record; their measured points and the 60
+design points of their bands are in the repository. No model is published yet: the two model figures were drawn
+from the candidate LF+MF release (staged, not yet public). The full captions and what each figure does not test:
+[`docs/model_figures.md`](docs/model_figures.md). That page also shows the model's held-out prediction residual of
+the class P1D against wavenumber and redshift, and per held-out simulation
+(`scripts/figures/fig_p1d_validation.py`): empirical validation diagnostics, not calibrated predictive
+uncertainties.
 
-The HCD catalog is the foundation the rest of the pipeline rests on: it records,
-for every PRIYA simulation and redshift, which sightlines intersect a dense
-absorber and how much neutral hydrogen that absorber carries. From the catalog we
-derive the column-density distribution function and the per-class P1D, and those
-products are what the emulator is ultimately trained on.
+![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS and of every absorber above 10^17.5 cm^-2 against redshift, with the DLA measurement of Ho, Bird and Garnett (2021) and five published measurements of the incidence of Lyman limit systems](docs/figures/dndx_vs_ho21.png)
 
-The catalog is built directly from the optical-depth (τ) skewers produced by
-`fake_spectra`. For each sightline, `hcd_analysis/catalog.py` locates connected
-velocity regions where τ exceeds a detection threshold, merges regions separated
-by less than a velocity gap, and estimates the column density N_HI of each system.
-In production the column density is obtained by the sum-rule inversion (the fast
-estimator, `absorber.fast_mode: true` in the config); a full Voigt fit with a
-±2000 km/s wing window is available as an alternative. Each system is then placed
-into one of three classes by its N_HI, with everything below the LLS threshold
-discarded as forest:
+**The incidence dN/dX against redshift.** Lines: the LF+MF model (`pred.dndx`) for DLAs, subDLAs and LLS, bins of
+column density (10^20.3 cm^-2 and above, 10^19 to 10^20.3, 10^17.2 to 10^19), at the midpoint of each parameter's
+training range (the nine values are written in the script; nothing is fitted), at the snapshots from z = 2.2 to 4.6,
+the range that the grouped validation of the model's P1D correction covers (the correction of the incidence drawn
+here is not validated at any redshift). Dashed line: the model's count of every absorber with N_HI >= 10^17.5 cm^-2,
+the quantity the LLS points measure. Bands: the lowest and the highest value over the 60 design points of the
+training simulations; they are not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
+[arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals, from the tables of the DLA data
+collection [sbird/DLA_data](https://github.com/sbird/DLA_data) ([provenance](docs/figures/data/ho21/PROVENANCE.md));
+and the incidence of Lyman limit systems (tau_912 >= 2) of five published samples: Prochaska, O'Meara and Worseck
+(2010), O'Meara et al. (2013) with Ribaudo, Lehner and Howk (2011), Fumagalli et al. (2013), Crighton et al. (2019)
+and Fumagalli, Fotopoulou and Thomson (2020) ([provenance](docs/figures/data/lls_incidence/PROVENANCE.md)). Read the
+LLS points against the dashed line, not against the LLS line: they count every absorber above 10^17.5, subDLAs and
+DLAs included. At z = 3.45 the points of Prochaska et al. and of Fumagalli et al. (2020) overlap; the two samples
+share quasars. Every point is drawn per unit X in the cosmology of the model line; the bands are not converted.
+Bars on the lines: the model's held-out range, from dN/dX times exp(-e) to dN/dX times exp(+e), with e the rms over
+five held-out simulations of ln(prediction / truth); each bound is computed on its own, so the bars are asymmetric.
+They are an indication of size, not a standard deviation. [Full caption](docs/model_figures.md).
 
-- LLS:    10^17.2 ≤ N_HI < 10^19.0 cm⁻²
-- subDLA: 10^19.0 ≤ N_HI < 10^20.3 cm⁻²
-- DLA:    N_HI ≥ 10^20.3 cm⁻²
+![The column-density distribution f(N_HI) of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021) in three redshift bins and three measurements below the DLA threshold](docs/figures/cddf_vs_ho21.png)
 
-These boundaries are defined in `hcd_analysis/catalog.py` (`classify_system`), and
-the detection and measurement parameters (τ threshold, merge gap, the N_HI floor)
-live under `absorber:` in `config/default.yaml`.
+**The column-density distribution f(N_HI).** Line: the LF+MF model (`pred.cddf`) at the midpoint of each
+parameter's training range (the nine values are written in the script; nothing is fitted), at the snapshots z = 2.2,
+2.8 and 3.4. Band: the lowest and the highest value over the 60 design points of the training simulations; it is
+not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
+[arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) in three redshift bins, with 68 per cent intervals (bins
+where the measured value is zero are not drawn). Below the DLA threshold: the subDLAs of Zafar et al. (2013) in every
+panel and, in the panel 3 < z < 4, the points of O'Meara et al. (2007) and the region allowed for LLS by Prochaska,
+O'Meara and Worseck (2010) ([provenance](docs/figures/data/lls_subdla/PROVENANCE.md)). Every measurement is drawn per
+unit X in the cosmology of the model line; the band is not converted. One snapshot stands beside each bin (z = 3.4
+for the bin 3 to 4). The bin 4 to 5 is left out because it reaches beyond z = 4.6, the edge of the range that the
+grouped validation of the model's P1D correction covers; the correction of the CDDF itself is not validated at any
+redshift. The model's held-out range is not drawn here; a prediction carries it per bin (`pred.cddf_lower` to
+`pred.cddf_upper`). [Full caption](docs/model_figures.md).
 
-Build the catalog as part of the per-simulation pipeline (`hcd_env`):
+![The class power ratio at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](docs/figures/class_ratio_vs_rogers18.png)
 
-```bash
-hcd run-sim --sim ns0.803Ap2.2e-09 --config config/default.yaml   # one sim, all snaps
-hcd run-all --n-workers 36                                         # full 60-sim LF campaign
-```
-
-On Great Lakes the full campaign runs as a SLURM array, one task per simulation:
-
-```bash
-sbatch --array=0-59 scripts/batch_greatlakes.sh run-one-array
-```
-
-The input is the τ skewer HDF5 for each (sim, snap), read alongside the
-`SimulationICs.json` that records the simulation's cosmology. The output is one
-`catalog.npz` per (sim, snap) under `outputs/{sim}/snap_{NNN}/`, holding, for
-every detected absorber, its sightline index, pixel range, N_HI, Doppler
-parameter and class. The same run also writes the per-class P1D (`p1d.npz`) and
-the per-snapshot CDDF (`cddf.npz`), which `cddf.py` stacks per redshift bin into
-`cddf_stacked.npz`. Those per-class P1D and CDDF products, resampled across the
-mean-flux ladder, are what `scripts/build_emulator_cache_tau0.py` assembles into
-the τ₀ training cache described in Stage 1.
+**The class power ratio P_class / P_clean at z = 3.** Blue: the low-resolution PRIYA training simulations with the
+filtered troughs restored (z = 3.0): the range over the 60 simulations at all mean-flux rungs (lighter), the range
+over the 60 simulations at the rung nearest 1 (darker) and its median (line). Orange line: Eq. 6 of Rogers et al.
+(2018, [arXiv:1706.08532](https://arxiv.org/abs/1706.08532)) as published, from
+`hcd_analysis.hcd_template.class_ratio` at z = 3.0 (their snapshot is at z = 3.01). Orange band: the same with the
+amplitude of its k-dependent term between 0.5 and 2 times; a fit leaves that amplitude free, and the range is this
+figure's choice, not a prior from the paper. Shaded: below 7.85e-4 s/km, the lowest mode of their 8000 km/s box, where
+the template is evaluated by extrapolation. This figure holds no emulator prediction: the emulator predicts the
+filtered class spectra and was not tested with the troughs restored
+([`docs/rogers_comparison.md`](docs/rogers_comparison.md)).
 
 ---
 
-## The pipeline, stage by stage
+## Scope and limitations of this release
 
-The pipeline has four stages, described in order. Each stage notes the product it
-yields, shows the figure it produces, and gives the command that generated or
-exercises it. The emulator environment string is abbreviated to `<emu-env>`
-below; expand it to the full string from
-[Install / environment](#install--environment).
+The supported public interface of this release is the predictor (`hcd_analysis.predictor`): the per-class P1D
+(clean, LLS, subDLA, DLA) from an LF+MF model, and a linear mix of the HCD classes (`add_hcd`).
+`hcd_analysis.likelihood` is a public DATA likelihood with a mock-recovery example, supported in this release (no
+emulator covariance is added). The research likelihood and the fit scripts of the pipeline stay outside the supported
+scope, with the rest of the research code (the catalogue pipeline and training).
 
-### Stage 1 — the simulation P1D, absorber catalog and τ₀ cache
+Not in this release:
 
-**Requires the full data / Great Lakes (not in this repo).** This stage reads the
-raw PRIYA spectra and builds the 1.1 GB τ₀ cache; neither the inputs nor the
-assembled cache is distributed here (both are gitignored).
+- **No fit to measured data is supported:** the example fits a simulated mock; any fit to a measurement is the
+  user's, with the data likelihood as documented. The research fits (Stages 3 and 4 of
+  [`docs/pipeline.md`](docs/pipeline.md); [`tests/DEFERRED.md`](tests/DEFERRED.md)) are not part of the release.
+- **No HCD fitting, and no model of how the HCD content changes with redshift.** `add_hcd` evaluates any physical
+  amplitudes, one per class per redshift, and fits nothing; the incidence law and its priors are research code.
+- **No prediction between snapshot redshifts.** Predictions exist at z = 2.0, 2.2, ..., 5.4 only; an LF+MF prediction
+  is refused below the MF record's lower edge (z 2.2 by default) and flagged above z 4.6.
+- **Two defective training rows at z = 5.4.** The source spectra files of two low-fidelity simulations are incomplete
+  at z = 5.4 (in compact regions of the box the optical depth of the gas is missing; a defect of the spectra
+  extraction, not physical variation and not an effect of this package's processing). Both rows are in the training
+  data of the LF model, and one of them dominates the held-out prediction residual of the LF prediction at z = 5.4
+  at the largest scales; the model release's P1D held-out record states it and gives the residual without that
+  simulation beside it.
+- **No bandpower model.** A prediction is a per-class spectrum at points in k: no metal lines, no
+  spectrograph-resolution correction and no bin window. `hcd_analysis.likelihood` brings it to a data set's bins by
+  linear interpolation and an optional factor ([`docs/likelihood.md`](docs/likelihood.md)).
+- **No calibrated emulator error.** `member_std` is the spread over ensemble members that differ only in their random
+  seed; it is not an error bar and not a covariance. With the model release, each class spectrum carries a held-out
+  prediction residual (`P_class_validation_rms_log`: the rms of ln(prediction / truth) over simulations the model
+  was made without). It is an empirical validation diagnostic from five or six simulations, not a calibrated
+  predictive uncertainty, and the likelihood adds no emulator term to the data covariance.
+- **No trained model, catalogue or derived product of this project is public yet** (see
+  [Models and data](#models-and-data)).
 
-The first stage turns raw PRIYA spectra into the products everything downstream
-depends on: the per-sightline P1D, the absorber catalog (which sightlines
-intersect an LLS, subDLA or DLA, as described in the section above), the
-column-density distribution function CDDF = f(N_HI, X), and the per-class P1D
-split between the clean forest and each HCD class. We resample these measurements
-across a ladder of mean-flux rescalings to form the τ₀ cache that trains the
-emulator. Here τ₀ is the mean-flux optical depth, τ₀ = −ln⟨F⟩; scanning it on a
-ladder lets the emulator learn the mean-flux dependence directly.
+---
 
-This stage yields an absorber catalog, the per-class P1D and a CDDF for each
-(sim, z), along with the assembled τ₀ training cache. The figure below compares
-PRIYA's CDDF with the Ho et al. 2021 observations, a check that the simulated HCD
-population is realistic.
+## Models and data
 
-![PRIYA CDDF vs Ho+2021 observations, four redshift bins](figures/analysis/01_catalog_obs/cddf_priya_vs_ho21.png)
+<!-- docs:data:start -->
+**Data availability.** The data products of this project are HCD absorber catalogues and the products derived from
+them; it does not provide raw simulation data. Researchers who need the raw PRIYA simulation outputs can request them
+from the authors of Bird et al. 2023, JCAP 2023 (10) 037
+([doi:10.1088/1475-7516/2023/10/037](https://doi.org/10.1088/1475-7516/2023/10/037),
+[arXiv:2306.05471](https://arxiv.org/abs/2306.05471)). The catalogues and derived products are not in this code
+repository, and their release is planned but not yet available.
+<!-- docs:data:end -->
 
-Run it (catalog/P1D side, `hcd_env`):
+**Trained models.** They come in the companion package `hcd-priya-models` (data only, MIT licence), which
+`hcd-priya` requires. `hp.load_published()` finds the model in the installed package and loads it only against
+the sha256 that `hcd-priya` itself lists for that model version (`hcd_analysis/published_models.py`): for a
+published model the digest comes from the code package, never from the model package, so changed model files are
+refused, and so is a model version this version of the code does not list. That list holds the model release that
+`pyproject.toml` pins, the LF+MF model to be published with this version of the code; it is not published yet.
+`hp.load_release(release_dir, sha256)` loads a release whose files you hold yourself. To check a model from a fresh
+install, run `python -I -m hcd_analysis.check_release --published`, or with `RELEASE_DIR SHA256` for a release
+directory (`-I` keeps a clone in the current directory out of the import path, so the installation is what is
+tested); add `--reference FILE` to compare the numbers with the reference predictions published beside the release
+(without it the last line reads `PASSED (no reference compared)`).
 
-```bash
-hcd run-sim --sim ns0.803Ap2.2e-09 --config config/default.yaml   # one sim, all snaps
-hcd run-all --n-workers 36                                         # full campaign
-```
-
-Build the τ₀ cache for the emulator:
-
-```bash
-<emu-env> scripts/build_emulator_cache_tau0.py     # -> hcd_analysis/_emulator_data/observables_tau0_lf.h5
-```
-
-### Stage 2 — the HCD-marginalised emulator
-
-**Training requires the full data / Great Lakes (not in this repo)** — the LOSO
-sweep needs the full τ₀ cache. **Using a trained emulator is runnable anywhere
-with a checkpoint + a cache slice** (the [Quickstart](#quickstart) above and the
-emulator README's forward-model API), once a checkpoint and at least one cache
-row are obtained from the PI.
-
-A differentiable JAX/Equinox network learns the per-class P1D as a smooth
-function of the cosmology θ, the redshift z and τ₀. The central design choice is
-that the HCD contamination enters as a free per-class amplitude on top of the
-clean forest, so that the inference can marginalise over the HCD incidence rather
-than assuming the simulation reproduced it exactly. We validate the emulator with
-leave-one-simulation-out (LOSO) cross-validation: for each fold we train on all
-simulations but one and test on the held-out simulation, which is how we estimate
-the emulator's own error budget.
-
-This stage yields a fast, autodifferentiable forward model
-`P_obs(θ, z, τ₀, α_HCD)` whose held-out per-fold cosmology bias sits well inside
-the ±0.2σ inference gate. The figure below shows the per-fold A_p and n_s Fisher
-bias across all eight LOSO folds. By Fisher bias we mean the emulator residual
-projected onto the directions the data actually constrain (the Fisher-information
-eigendirections) and read off as a cosmology shift in units of σ along those
-directions; this is the cosmology-relevant bias rather than a raw spectral error.
-
-![Per-fold A_p and n_s Fisher-bias across the 8 LOSO folds, inside the 0.2 sigma gate](figures/analysis/06_performance_walkthrough/B5_fisher_bias_perfold.png)
-
-Train it (the 8-fold LOSO sweep; `--smoke` for a fast shape check):
-
-```bash
-<emu-env> scripts/run_loso_sweep.py --out checkpoints/final --histdir checkpoints
-```
-
-The emulator has its own detailed README, covering the architecture, the τ₀
-ladder, the forward model, the conventions and the input contract. It is the
-reference for anything emulator-specific:
-[`hcd_analysis/emulator/README.md`](hcd_analysis/emulator/README.md).
-
-### Stage 3 — the differentiable likelihood
-
-**Runnable anywhere with a checkpoint + a cache slice.** The likelihood is a pure
-Python/JAX API that runs on top of a loaded checkpoint; it needs the DESI/KS data
-bindings and a cache slice but not the full cache or a cluster.
-
-The emulator's `P_obs` is wired into a Gaussian log-likelihood that compares the
-prediction to the data (the DESI DR1 and KODIAQ-SQUAD P1D) through an
-emulator-error covariance and physically motivated priors. The HCD incidence
-prior is centred on the observed dN/dX rather than the simulation's, and it is
-constructed so that an incorrect prior centre does not propagate into the
-cosmology.
-
-This stage yields a fully differentiable `log_posterior` suitable for a gradient
-sampler, together with the HCD-incidence prior. The figure below verifies that
-the HCD incidence prior does not bias the cosmology: the θ bias from a
-mis-centred prior stays inside the 0.2σ gate, and the prior tightens θ rather
-than shifting it.
-
-![HCD incidence prior does not bias cosmology: bias inside the gate, prior tightens not shifts](figures/analysis/06_validation_summary/hcd_prior_cosmology.png)
-
-The likelihood is a Python API rather than a one-shot script. The snippet below
-shows the import only; it does not produce output on its own, and the full call
-signature is given in the emulator README §8 and §5:
-
-```python
-from hcd_analysis.emulator.inference import log_lik_multiz, hcd_incidence_prior
-# illustrative import only — full call signature in the emulator README §8 / §5
-```
-
-### Stage 4 — inference and closure
-
-**Requires a checkpoint + a cache slice (not in this repo); not a cluster.** A
-short closure or eBOSS chain runs on CPU once a checkpoint and a cache slice are
-in place; the production all-sims ensemble is heavier and was run on the cluster.
-
-The final stage samples the posterior with NUTS, the No-U-Turn Sampler, a
-gradient-based MCMC method that exploits the differentiable likelihood, and
-validates the pipeline with closure tests: we fit mock data drawn from a known
-truth and confirm that it is recovered within the stated error bars. Closure on
-mocks and on public archival data (eBOSS DR14, KODIAQ-SQUAD) may be committed;
-the DESI cosmology result itself remains local and blinded.
-
-This stage yields posterior constraints on (A_p, n_s) and a closure verdict: how
-many of the held-out mocks recover the truth within ±1σ, with no sampler
-divergences. The figure below is the Leg-B closure coverage summary, combining
-the HCD mock closure, the subDLA degeneracy diagnostic and the eBOSS DR14 low-k
-recovery.
-
-![Leg-B closure coverage summary: mock recovery in-gate, 0 divergences, eBOSS DR14 recovery](figures/analysis/06_validation_summary/coverage_summary.png)
-
-*This is the Leg-B / closure coverage headline (the production-readiness summary
-panel). It is distinct from the per-mock closure-coverage detail shown in the
-emulator README's Demo A, even though the filenames are similar.*
-
-What these closures do and do not certify is worth stating plainly. They validate
-the architecture, that is the forward model, the covariance and the sampler, that
-the production all-sims N=5 ensemble inherits. The ensemble-level production SBC
-(rank-based simulation-based calibration on the production ensemble itself) is the
-final inference-calibration gate, and it remains pending before the real fit (see
-notes `2026-06-14-validation-likelihood-production.md` §6).
-
-The SBC / closure machinery (PIT-ECDF bands, coverage, whitening tests) lives in
-`hcd_analysis/emulator/closure_diagnostics.py`; the validation writeups are in
-the notes repo (see below).
+The details are in [`docs/models_and_data.md`](docs/models_and_data.md): what is and is not distributed, the release
+format (HDF5 + JSON, no pickle), the LF+MF correction, and the environment variables of the observed P1D files that
+the research code reads.
 
 ---
 
 ## Where to go next
 
+- To report an issue, ask for help or contribute: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- The API reference of the predictor and the loaders is on the documentation site, built from
+  [`docs/api.md`](docs/api.md); a step-by-step guide to production and research bundles with executable examples
+  is [`docs/tutorials/production_and_research_bundles.md`](docs/tutorials/production_and_research_bundles.md).
+- The research pipeline (catalogue construction, and the four stages from the simulation P1D to inference, a
+  historical record) is described in [`docs/pipeline.md`](docs/pipeline.md).
 - The emulator deep-dive covers the architecture, the τ₀ cache, the training
   recipe, the forward model, the input contract and the conventions:
   [`hcd_analysis/emulator/README.md`](hcd_analysis/emulator/README.md).
@@ -386,52 +418,64 @@ the notes repo (see below).
   [`docs/bugs_found.md`](docs/bugs_found.md),
   [`docs/data_layout.md`](docs/data_layout.md) and
   [`docs/p1d_definition.md`](docs/p1d_definition.md).
-- The validation results (held-out LOSO error, coverage, the closure gates and
-  the Fisher checks) are kept in the private notes repository, indexed from
-  `hcd_priya_notes/docs/superpowers/INDEX.md`. Begin with
-  `hcd_priya_notes/docs/superpowers/2026-06-14-validation-loso-emulator-lf-mf.md` for the emulator
-  validation and `hcd_priya_notes/docs/superpowers/2026-06-14-validation-likelihood-production.md`
-  for the likelihood and closure.
+- The public validation summaries, all on simulations or mocks: the held-out errors of dN/dX and the CDDF that the
+  model carries (`pred.dndx_err`, `pred.cddf_err`); the emulator-covariance check on the example's mock and the
+  interpolation checks ([`docs/likelihood.md`](docs/likelihood.md)); the comparison with the template of Rogers et
+  al. (2018) ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)). The full validation of the class spectra
+  (held-out LOSO error, coverage and the Fisher checks) is not public, and no result from real data is in this
+  release; the closure gates belong to the research path and are not part of it.
 
 ---
 
 ## Tests / status
 
-The catalog/P1D test suite locks the post-audit science claims: the τ sum rule,
-N_HI recovery, Voigt normalisation, the absorption-distance formula, the Rogers
-HCD template, the LF/HR z-matching and an end-to-end pipeline regression. Run it
-with:
+Install the test extra (above), then run a test file with pytest, one file per process:
 
 ```bash
-for t in tests/test_*.py; do python3 "$t"; done
+JAX_PLATFORMS=cpu python -m pytest -q tests/test_cli_config.py
 ```
 
-Status (2026-06-14): the catalog/P1D pipeline is merged and audited, with the
-PRIYA CDDF tracking Prochaska et al. 2014 to within 0.1–0.3 dex. The Phase-2
-emulator (the τ₀ cache and the Equinox emulator, validated over eight LOSO folds)
-is merged to `main`. The current branch `phase2c-likelihood` carries the
-differentiable likelihood and the inference and closure work; these closures
-validate the architecture that the production N=5 ensemble inherits, but the
-ensemble-level production SBC is the final inference-calibration gate and remains
-pending before the real fit. The live process-level state is tracked in the
-private notes repository (`hcd_priya_notes/docs/superpowers/`, latest
-`2026-06-21-session-handoff.md`; the older dated handovers are archived under
-`hcd_priya_notes/docs/code-repo-archive/handovers/`).
+Many tests need real assets that are not in this repository (the training cache, trained emulator members,
+observational data, raw simulation outputs). [`tests/ci_tiers.toml`](tests/ci_tiers.toml) assigns every test
+file to a tier and a level (pr, nightly or release) and says why a file or test is not run in continuous
+integration. The workflow [`.github/workflows/tests.yml`](.github/workflows/tests.yml) builds the wheel and the
+source archive, checks their contents against the commit, installs the wheel into a fresh environment and runs the
+"wheel" and "source" tiers at the pr level with [`tools/ci/run_test_tier.py`](tools/ci/run_test_tier.py), which
+reports every skipped, deferred or deselected test as not run, never as passed; the nightly level runs in
+[`.github/workflows/nightly.yml`](.github/workflows/nightly.yml) ([`docs/compatibility.md`](docs/compatibility.md)
+says what runs where). The same runner works from a clone:
+
+```bash
+JAX_PLATFORMS=cpu python tools/ci/run_test_tier.py --tier source --level pr --out <new_results_dir>
+python tools/ci/run_test_tier.py --list-not-run --level pr
+```
+
+Status: research code under active development. The public validation summaries are listed above, all on
+simulations or mocks; no result from real data is in this release.
 
 ---
 
 ## Repository map
 
 ```
-hcd_analysis/            catalog/P1D/CDDF pipeline (catalog.py, p1d.py, cddf.py, hcd_template.py, ...)
-hcd_analysis/emulator/   the JAX/Equinox emulator + likelihood + inference (see its own README)
-cli/run.py               the `hcd` command-line entry point
-config/default.yaml      default pipeline config
-scripts/                 install, SLURM batch, cache build, LOSO sweep, plotting
-notebooks/tutorials/     five starter notebooks for new students
-tests/                   science-claim regression tests
-docs/                    analysis.md, bugs_found.md, data_layout.md, handover, ...
-figures/analysis/        all analysis + validation figures
-checkpoints/             trained emulator bundles (final_fold0.*) + error_vector.npz — gitignored, not in this repo (see Data and checkpoints)
-hcd_analysis/_emulator_data/  the 1.1 GB τ₀ cache — gitignored, not in this repo (see Data and checkpoints)
+hcd_analysis/predictor.py     the public predictor: load a model, predict per-class P1D, w_c, dN/dX and the CDDF
+hcd_analysis/likelihood.py    the Gaussian P1D likelihood and the reading and writing of data sets
+hcd_analysis/check_release.py checking an installed model release (python -I -m hcd_analysis.check_release)
+hcd_analysis/                 the catalogue, P1D and CDDF pipeline (catalog.py, p1d.py, cddf.py, ...)
+hcd_analysis/emulator/        the JAX/Equinox emulator and its research inference (see its own README)
+hcd_analysis/cli/run.py       the `hcd` command-line entry point
+examples/                     the mock-recovery example (examples/mock_recovery.py)
+model_package/                the companion package hcd-priya-models (the trained models; data only)
+config/default.yaml           default pipeline config
+scripts/                      install, SLURM batch, cache build, LOSO sweep, plotting (research; tests/DEFERRED.md
+                              lists the ones that do not run as they stand)
+notebooks/tutorials/          five starter notebooks for new students
+tests/                        the test suite; tests/ci_tiers.toml says when CI runs each file
+tools/ci/                     the CI tools: the test-tier runner, the distribution checks and content scan
+docs/                         the documentation (index.md; likelihood.md, models_and_data.md, release_checklist.md, ...)
+figures/analysis/             historical research outputs made before the 2026-10 k-coordinate fix; they validate no
+                              release model
+checkpoints/                  the production ensemble's manifests (the trained files themselves are not in git; see
+                              docs/models_and_data.md)
+hcd_analysis/_emulator_data/  the 1.1 GB τ₀ cache; gitignored, not in this repo (see docs/models_and_data.md)
 ```

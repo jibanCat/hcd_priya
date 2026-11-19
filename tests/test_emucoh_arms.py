@@ -10,16 +10,19 @@ It also pins that the validation mocks ISOLATE emucoh: no MF resolution floor (m
 no shape floor (mf_shape=0), no diagonal-floor-on-DESI (desi_floor=False) — so the ON arm adds
 ONLY the 60-sim emucoh term.
 """
+
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import sys
 from pathlib import Path
 
 import pytest
 
-ROOT = Path("/home/mfho/hcd_priya")
+ROOT = Path(_REPO_ROOT)
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import run_stepA  # noqa: E402
-
 
 # the 8 baselines mirrored as a matched (OFF control, ON) pair by the EMUCOH validation block.
 BASES = ["D_f3", "D_f4", "D_f6", "D_f7", "D_lmed3_15", "D_lmed5_15", "D_lmed7_15", "D_llsmed"]
@@ -82,15 +85,17 @@ def test_ON_copy_is_byte_identical_to_OFF_except_emucoh(by_mock):
                     continue
                 assert co.get(key) == cn.get(key), (
                     f"{on} chain {cid} field {key!r}={cn.get(key)!r} != OFF {off} {co.get(key)!r} "
-                    f"(ON/OFF must be byte-identical except emucoh)")
+                    f"(ON/OFF must be byte-identical except emucoh)"
+                )
             # and the mock-identifying fields that fix the noise draw are the ones we just checked:
             assert co["fold"] == cn["fold"] and co["sim"] == cn["sim"] and co["seed"] == cn["seed"]
 
 
 def test_total_config_grew_by_80_chains(by_mock):
     # 8 baselines × (EC0 + EC1) + 4 EC2 = (16 + 4) mocks × 4 chains. Sanity vs drop/dup.
-    ec_chains = (sum(len(by_mock[off]) + len(by_mock[on]) for off, on in PAIRS)
-                 + sum(len(by_mock[f"{b}_EC2"]) for b in ODA_BASES))
+    ec_chains = sum(len(by_mock[off]) + len(by_mock[on]) for off, on in PAIRS) + sum(
+        len(by_mock[f"{b}_EC2"]) for b in ODA_BASES
+    )
     assert ec_chains == 80
 
 
@@ -106,7 +111,9 @@ def test_EC2_is_EC1_plus_offdiag_only(by_mock):
             assert c1.get("mf_emucoh_offdiag_only") is False
             assert c2.get("mf_emucoh_offdiag_only") is True
             assert float(c1["mf_emucoh"]) == float(c2["mf_emucoh"]) == 1.0
-            for key in (set(c1) | set(c2)):
+            for key in set(c1) | set(c2):
                 if key in {"id", "mock_id", "mf_emucoh_offdiag_only"}:
                     continue
-                assert c1.get(key) == c2.get(key), f"{b}_EC2 chain {cid} field {key!r} differs from EC1"
+                assert c1.get(key) == c2.get(
+                    key
+                ), f"{b}_EC2 chain {cid} field {key!r} differs from EC1"

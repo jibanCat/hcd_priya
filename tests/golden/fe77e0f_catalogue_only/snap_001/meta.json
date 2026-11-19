@@ -1,0 +1,80 @@
+{
+  "sim_name": "synthsim",
+  "snap": 1,
+  "z": 3.0,
+  "dv_kms": 2.0910663771745748,
+  "nbins": 64,
+  "n_skewers": 4,
+  "box_kpc_h": 1200.0,
+  "hubble": 0.7,
+  "n_absorbers": {
+    "LLS": 2,
+    "subDLA": 0,
+    "DLA": 0,
+    "forest": 0
+  },
+  "timing_s": {
+    "header": 0.002,
+    "catalog": 0.139,
+    "cddf": 0.0
+  },
+  "code_commit": "fe77e0f",
+  "code_dirty": false,
+  "mode": "catalogue",
+  "products": {
+    "catalog.npz": {
+      "sha256": "52f9053978bf7d8a8d7c9bc6320d4041857e7758a20117eb76d8ab6d73c57547",
+      "size": 8808
+    },
+    "cddf.npz": {
+      "sha256": "06d98063b6d9133449271927ee0c27540fe36377fbc3aa3ab381d06b9e4f286d",
+      "size": 7500
+    }
+  },
+  "lineage": {
+    "code": {
+      "commit": "fe77e0f33ea07d0b28154882b47d2135a5030eda",
+      "dirty": false
+    },
+    "created_utc": "2026-10-30T14:18:09Z",
+    "finder_ids": [
+      "hcd_priya.finder/2"
+    ],
+    "format": "hcd_priya.lineage/1",
+    "inputs": [
+      {
+        "finder_ids": [
+          "hcd_priya.finder/2"
+        ],
+        "kind": "catalog",
+        "release_eligible": true,
+        "role": "catalog.npz",
+        "sha256": "52f9053978bf7d8a8d7c9bc6320d4041857e7758a20117eb76d8ab6d73c57547",
+        "size": 8808
+      },
+      {
+        "finder_ids": [
+          "hcd_priya.finder/2"
+        ],
+        "kind": "cddf",
+        "release_eligible": true,
+        "role": "cddf.npz",
+        "sha256": "06d98063b6d9133449271927ee0c27540fe36377fbc3aa3ab381d06b9e4f286d",
+        "size": 7500
+      }
+    ],
+    "kind": "snapshot",
+    "kind_version": 1,
+    "product": {
+      "sim_name": "synthsim",
+      "snap": 1,
+      "z": 3.0
+    },
+    "run_settings_sha256": "6c6d5de8643e9f28693d8cfd053bb91a718aea0cc7937eab3ec9bc5423c94fa4",
+    "settings": {
+      "mode": "catalogue"
+    },
+    "release_eligible": true,
+    "ineligible_reasons": []
+  }
+}

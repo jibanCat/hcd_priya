@@ -1,16 +1,17 @@
 """
 Rogers+2018 HCD contamination template for P1D (arXiv:1706.08532).
 
-Two forms from Rogers, Bird, Peiris, Pontzen (2018), *MNRAS* 474(3), 3032-3042
-(arXiv:1706.08532, the 1D template paper; NOT the 3D companion MNRAS 476, 3716) (coeffs Table 2):
+Two forms from Rogers, Bird, Peiris, Pontzen, Font-Ribera, Leistedt (2018), *MNRAS* 474(3), 3032-3042
+(arXiv:1706.08532) (coeffs Table 2; the exponent -3.55 is in their Eq. 6, the pivot z0 = 2.00 is stated with Eq. 7):
 
   • `template_factor` — the MULTI-CLASS model (their Eq. 8) with FLOATING amplitudes:
 
         P_total/P_forest = 1 + Σ_i  α_i · f_z(z) · g_i(k, z)
 
-    Here α₀ is fixed to 1 and the per-class high-k plateaus c_i(z) are absorbed into the
-    floating normalization (Rogers: "c(z) is degenerate with α_Forest"). Use this when the
-    α_i are free nuisance parameters fit/marginalized against data.
+    Here α₀ is set to 1 and the per-class high-k plateaus c_i(z) are left out. In a fit to data
+    the overall normalisation is free and takes them up (Rogers et al., Section 6: the constant
+    "will be absorbed into a free parameter"). Use this when the α_i are free nuisance
+    parameters fit/marginalized against data.
 
   • `class_ratio` — the FIXED per-class ratio (their Eq. 6) INCLUDING the c(z) plateau:
 
@@ -38,6 +39,7 @@ angular grid (`kf *= 2π·npix/vmax`), so pass cache kfkms DIRECTLY (no /2π).
 Use `template_factor_from_cyclic_k(k_cyc, ...)` only if your k is a raw cyclic
 `rfftfreq`-style k (e.g. our `p1d.P1DAccumulator`, NOT the angular emulator cache).
 """
+
 from __future__ import annotations
 
 from typing import Dict, Tuple
@@ -56,7 +58,8 @@ _C1 = np.array([-0.0631, 0.0196, 0.1169, 0.4653])
 
 _CLASS_LABELS = ("LLS", "Sub-DLA", "Small-DLA", "Large-DLA")
 
-# Pivot redshift for the class-weight scaling (arXiv:1706.08532, eq. 4).
+# Pivot redshift z0 = 2.00 of the template's redshift scaling (arXiv:1706.08532, stated after Eq. 7; used in Eqs. 6
+# to 8).
 _Z_PIVOT = 2.0
 
 # Fixed power-law index of the z-scaling of the per-class amplitude.
@@ -70,8 +73,8 @@ def _az_bz(z: float) -> Tuple[np.ndarray, np.ndarray]:
     (LLS, Sub-DLA, Small-DLA, Large-DLA).
     """
     zfac = (1.0 + z) / (1.0 + _Z_PIVOT)
-    a_z = _A0 * zfac ** _A1
-    b_z = _B0 * zfac ** _B1
+    a_z = _A0 * zfac**_A1
+    b_z = _B0 * zfac**_B1
     return a_z, b_z
 
 
@@ -100,7 +103,7 @@ def template_contributions(
     k = np.asarray(k_angular, dtype=np.float64)
     a_z, b_z = _az_bz(z)
     zfac = (1.0 + z) / (1.0 + _Z_PIVOT)
-    z_weight = zfac ** _Z_SCALING_INDEX
+    z_weight = zfac**_Z_SCALING_INDEX
 
     contribs = {}
     for i, name in enumerate(_CLASS_LABELS):
@@ -122,7 +125,7 @@ def template_factor(
     c = template_contributions(k_angular, z, alpha)
     factor = np.ones_like(np.asarray(k_angular, dtype=np.float64))
     for name in _CLASS_LABELS:
-        factor += (c[name] - 1.0)
+        factor += c[name] - 1.0
     return factor
 
 
@@ -143,8 +146,8 @@ def class_ratio(k_angular: np.ndarray, z: float) -> Dict[str, np.ndarray]:
     k = np.asarray(k_angular, dtype=np.float64)
     a_z, b_z = _az_bz(z)
     zfac = (1.0 + z) / (1.0 + _Z_PIVOT)
-    z_weight = zfac ** _Z_SCALING_INDEX
-    c_z = _C0 * zfac ** _C1
+    z_weight = zfac**_Z_SCALING_INDEX
+    c_z = _C0 * zfac**_C1
     out = {}
     for i, name in enumerate(_CLASS_LABELS):
         g = (a_z[i] * np.exp(b_z[i] * k) - 1.0) ** -2
@@ -164,6 +167,7 @@ def template_factor_from_cyclic_k(
 # ---------------------------------------------------------------------------
 # α fitting
 # ---------------------------------------------------------------------------
+
 
 def fit_alpha(
     k_angular: np.ndarray,
@@ -186,7 +190,8 @@ def fit_alpha(
     P_total   : (n_k,) measured P1D on the full (HCD-containing) sample.
     P_forest  : (n_k,) reference P1D on the HCD-free sample (or post-PRIYA-mask).
     z         : redshift scalar.
-    alpha0    : initial guess; default 0.1 for each component (Rogers prior).
+    alpha0    : initial guess; default 0.1 for each component (a starting value of this code; the
+                paper gives no prior).
     weights   : per-k weights; default uniform.
     bounds    : (lower, upper) length-4 arrays to restrict each α_i.
                 Default: (0, +∞) — HCDs only add power.
@@ -214,7 +219,8 @@ def fit_alpha(
     else:
         alpha0 = np.asarray(alpha0, dtype=np.float64).copy()
     if bounds is None:
-        lo = np.zeros(4); hi = np.full(4, 10.0)
+        lo = np.zeros(4)
+        hi = np.full(4, 10.0)
     else:
         lo, hi = np.asarray(bounds[0]), np.asarray(bounds[1])
 
@@ -236,8 +242,10 @@ def fit_alpha(
         alpha_best[free_i] = res.x
         alpha_best[fixed_mask] = 0.0
     else:
+
         def residual(alpha):
             return weights * (template_factor(k, z, alpha) - r_obs)
+
         res = least_squares(residual, alpha0, bounds=(lo, hi))
         alpha_best = res.x
 
@@ -248,7 +256,7 @@ def fit_alpha(
     try:
         J = res.jac
         dof = max(1, len(r_obs) - len(res.x))
-        sigma2 = (np.sum(residual_arr ** 2) / dof)
+        sigma2 = np.sum(residual_arr**2) / dof
         cov = sigma2 * np.linalg.inv(J.T @ J)
         alpha_err = np.sqrt(np.abs(np.diag(cov)))
         # pad to length 4 if only_dlas
@@ -273,6 +281,7 @@ def fit_alpha(
 # ---------------------------------------------------------------------------
 # Apply the correction (template subtraction)
 # ---------------------------------------------------------------------------
+
 
 def correct_p1d(
     k_angular: np.ndarray,

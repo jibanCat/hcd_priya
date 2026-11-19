@@ -1,8 +1,8 @@
 {
   "_meta": {
     "emulator_mode": "ensemble",
-    "loso_ckpt": "/home/mfho/hcd_priya/checkpoints/final_fold{f}",
-    "prod_ensemble": "/home/mfho/hcd_priya/checkpoints/final_prod_seed{k}",
+    "loso_ckpt": "checkpoints/final_fold{f}",
+    "prod_ensemble": "checkpoints/final_prod_seed{k}",
     "framing": "loso_held_out = out-of-sample generalization (the accuracy claim); ensemble_in_sample = the deployed all-sims ensemble's in-sample fit (NOT a generalization claim)"
   },
   "loso_held_out": {

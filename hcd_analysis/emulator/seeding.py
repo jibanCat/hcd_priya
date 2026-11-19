@@ -17,6 +17,7 @@ isolation. Do NOT add imports here.
 CHANGING THIS FUNCTION CHANGES EVERY FUTURE CHAIN STREAM. It is a forward-affecting
 definition: alter it only as a new lock era.
 """
+
 import zlib
 
 # The 31-bit mask keeps the result inside jax.random.fold_in's non-negative int32 domain.
@@ -24,8 +25,10 @@ _FOLD_MASK = 0x7FFFFFFF
 
 # Recorded verbatim in every driver's export meta, so a reader can re-derive the stream from the
 # seed alone. Keep in sync with the implementation below; tests/test_seed_determinism.py pins it.
-SEED_DERIVATION = ("fold_in(PRNGKey(seed), crc32(label) & 0x7fffffff) then fold_in(chain_id); "
-                   "label = survey name (single-leg) or '+'.join(leg_names) (joint)")
+SEED_DERIVATION = (
+    "fold_in(PRNGKey(seed), crc32(label) & 0x7fffffff) then fold_in(chain_id); "
+    "label = survey name (single-leg) or '+'.join(leg_names) (joint)"
+)
 
 
 def nuts_fold_int(label):

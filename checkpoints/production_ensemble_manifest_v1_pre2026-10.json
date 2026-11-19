@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-07-22T14:43:09.867284+00:00",
+  "description": "The deployed N=5 production emulator ensemble (final_prod_seed0..4): all-sims-trained Equinox checkpoints + paired normalizers, pinned by SHA256. The deployed forward is the ensemble MEAN over members of the reconstructed post-exp P_filt (ensemble.load_ensemble).",
+  "n_members": 5,
+  "normalizers_byte_identical": true,
+  "normalizers_byte_identical_note": "The five .norm.pkl files are byte-identical by construction: every member is trained on the same data with the same recipe (only the network init seed differs), so they share one normalization; checkpoint<->normalizer pairing is therefore pinned STRUCTURALLY (basename per index), not by digest.",
+  "members": [
+    {
+      "index": 0,
+      "name": "final_prod_seed0",
+      "eqx": "final_prod_seed0.eqx",
+      "eqx_sha256": "718bd9306f9864e907d766f1765ed802e3581c39a53c7679151960fceb018057",
+      "norm": "final_prod_seed0.norm.pkl",
+      "norm_sha256": "b9d224fc9ca52558169660d195424ed75d1e3096881fb1ac49f151035b7a0454",
+      "meta": "final_prod_seed0.meta.json",
+      "meta_sha256": "61d15e7659f316f2125880e8ec7a278ea76b10e36af7a134bef0df35dd71d4e3",
+      "hist": "final_prod_seed0.hist.json"
+    },
+    {
+      "index": 1,
+      "name": "final_prod_seed1",
+      "eqx": "final_prod_seed1.eqx",
+      "eqx_sha256": "d1097fff6880cde3616979014977bfd8107383c05579cb6334f411efc6908047",
+      "norm": "final_prod_seed1.norm.pkl",
+      "norm_sha256": "b9d224fc9ca52558169660d195424ed75d1e3096881fb1ac49f151035b7a0454",
+      "meta": "final_prod_seed1.meta.json",
+      "meta_sha256": "7d598fc91990b91d03b9c86dda23d2c2df88dc1b0cb9cf5f3ac58ea92bb3be9c",
+      "hist": "final_prod_seed1.hist.json"
+    },
+    {
+      "index": 2,
+      "name": "final_prod_seed2",
+      "eqx": "final_prod_seed2.eqx",
+      "eqx_sha256": "c99b59eb45298810ef3011121333147a7206f32c6957fac825899bd3d00a6a46",
+      "norm": "final_prod_seed2.norm.pkl",
+      "norm_sha256": "b9d224fc9ca52558169660d195424ed75d1e3096881fb1ac49f151035b7a0454",
+      "meta": "final_prod_seed2.meta.json",
+      "meta_sha256": "62a5c215253bbc7cbbbb6c1d1bb38f708d6a3b51f7d8e6ad01a670aed6d04387",
+      "hist": "final_prod_seed2.hist.json"
+    },
+    {
+      "index": 3,
+      "name": "final_prod_seed3",
+      "eqx": "final_prod_seed3.eqx",
+      "eqx_sha256": "3a811ccb63e5bf90d3215122b3fe91a8a9c737668d1cb5c2d01b73ba4b1bbdf3",
+      "norm": "final_prod_seed3.norm.pkl",
+      "norm_sha256": "b9d224fc9ca52558169660d195424ed75d1e3096881fb1ac49f151035b7a0454",
+      "meta": "final_prod_seed3.meta.json",
+      "meta_sha256": "56dd59efc905a9d3a75fbafcfa95ca30b4943fcfc89aec6875a6718ca1cb0df2",
+      "hist": "final_prod_seed3.hist.json"
+    },
+    {
+      "index": 4,
+      "name": "final_prod_seed4",
+      "eqx": "final_prod_seed4.eqx",
+      "eqx_sha256": "b4100eb26928f2cb3f68e7292e06e9f6533de7100c05c5fb57bccfa8685f924d",
+      "norm": "final_prod_seed4.norm.pkl",
+      "norm_sha256": "b9d224fc9ca52558169660d195424ed75d1e3096881fb1ac49f151035b7a0454",
+      "meta": "final_prod_seed4.meta.json",
+      "meta_sha256": "5fae44cac6327a33a17cd8b4c1f70cb5f2f8ab0b8f71908a23baeb1510a1d752",
+      "hist": "final_prod_seed4.hist.json"
+    }
+  ],
+  "provenance": {
+    "training_script": "scripts/train_production_emulator.py",
+    "note": "The .eqx/.norm.pkl/.meta.json binaries are gitignored (they live only at /home/mfho/hcd_priya/checkpoints/) and are pinned here by SHA256. Per-member training config/history: final_prod_seed<i>.meta.json (digest-pinned here) and the git-tracked final_prod_seed<i>.hist.json.",
+    "replacement_procedure": "Intentional replacement ONLY: retrain via scripts/train_production_emulator.py (once per seed), regenerate this manifest via scripts/gen_ensemble_manifest.py (NEVER hand-edit), obtain PI sign-off, and regenerate analysis.lock. See checkpoints/README_production_ensemble.md."
+  }
+}

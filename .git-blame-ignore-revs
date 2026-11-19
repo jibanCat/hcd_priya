@@ -1,0 +1,6 @@
+# Commits that only reformat the code, skipped by `git blame` so that each line keeps the commit that last changed
+# what it does. Use it with `git blame --ignore-revs-file .git-blame-ignore-revs`, or once per clone with
+# `git config blame.ignoreRevsFile .git-blame-ignore-revs`; GitHub's blame view reads this file by itself.
+# One full commit SHA per line.
+# black 26.10.1 at line length 100, applied to every Python file (format only)
+3f58b5eeff7d5be10549be5bac7455fed093c8f6

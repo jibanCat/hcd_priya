@@ -33,7 +33,7 @@ index with one short block per figure.
 6. `02_param_sensitivity/param_sens_{dndx,omega_hi}.png` — 9-parameter scan, A_p dominance.
 7. `04_hcd_mf/mf_global_fit_visual.png` — G1/G2 global fit at 3 representative z.
 8. `04_hcd_mf/mf_slope_stability.png` — the 4th-HR-sim argument.
-9. `04_hcd_mf/mf_fourth_sim_test.png` — held-out validation on ns0.914.
+9. `04_hcd_mf/mf_fourth_sim_test.png` — held-out validation on ns0.914 (April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF).
 
 ---
 
@@ -60,11 +60,26 @@ with bootstrap (see 04_hcd_mf/bootstrap_dndx_per_sim.png).
 
 ### `dndx_hr_vs_lf_vs_obs_per_class.png`
 LLS / subDLA / DLA vs z, both LF suite (circles, 60 sims) and HR suite
-(dashed squares, 4 sims), with all observational overlays.  LLS panel
-adds Prochaska+10, Fumagalli+13, Crighton+18 etc. from
-`~/data/lofz_literature.txt` (dN/dz converted to dN/dX with Planck
-cosmology).  HR sits ~20–40 % above LF across all classes; HR DLA
+(dashed squares, 4 sims), with all observational overlays.  HR sits ~20–40 % above LF across all classes; HR DLA
 reaches the obs band at z ≈ 3.
+
+- **The LLS panel's points** are published incidences of Lyman limit systems: Prochaska, O'Meara and Worseck
+  (2010), O'Meara et al. (2013) with Ribaudo, Lehner and Howk (2011), Fumagalli et al. (2013), Crighton et al. (2019;
+  the legend says 2018) and, labelled "BOSS", the SDSS-DR16 value of Fumagalli, Fotopoulou and Thomson (2020). They
+  were read from a local compilation that is not in this repository. The published values, each traced to its
+  paper's table, are in `docs/figures/data/lls_incidence/` (PROVENANCE.md there gives the papers, DOIs, tables and
+  lines).
+- **How to read them:** each point counts every absorber with tau_912 >= 2, that is N_HI >= 10^17.5 cm^-2, counted
+  cumulatively (subDLAs and DLAs included). The panel's curves are the LLS class, 10^17.2 <= N_HI < 10^19, which is
+  a different set of absorbers. The model quantity these points measure is the count above 10^17.5, the dashed line
+  of `docs/figures/dndx_vs_ho21.png`. In this panel dN/dz was turned into dN/dX with dX/dz = (1+z)^2 H_0 / H(z) in a
+  flat cosmology with Omega_m = 0.315 (Planck), as its title says.
+- **The DLA panel's points** (PW09, N12, Ho21) are those of the DLA data collection https://github.com/sbird/DLA_data:
+  Prochaska and Wolfe (2009), Noterdaeme et al. (2012), Ho, Bird and Garnett (2021).
+- **This figure cannot be regenerated from this repository:** it was made by a research script,
+  `scripts/plot_hcd_vs_obs_with_hr.py`, that is not in it. The release's own dN/dX comparison, drawn from committed
+  and traceable files by `scripts/figures/fig_dndx_vs_ho21.py`, is `docs/figures/dndx_vs_ho21.png` (see
+  [`model_figures.md`](model_figures.md)).
 
 ### `omega_hi_hr_vs_lf_vs_obs.png`
 Ω_HI per class vs z, LF + HR suite, with Berg+19 (XQ-100) as filled
@@ -130,6 +145,8 @@ resolution fall-off).
 
 ## 04_hcd_mf/ — HCD multi-fidelity development
 
+April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF.
+
 All 12 figures in this subdir are catalogued in detail in
 [`hcd_mf_analysis.md`](hcd_mf_analysis.md).  Compact index here:
 
@@ -171,7 +188,7 @@ All 12 figures in this subdir are catalogued in detail in
 - `mf_global_fit_visual.png` — global G1 (1-slope) vs G2 (+ z-drift)
   fit at 3 representative z.  Shows the stable, over-determined fit.
 - `mf_fourth_sim_test.png` — held-out validation on ns0.914 (no LF
-  counterpart).  `Q_HR_pred = Q_LF_nearest · R_MF` recovers all six
+  counterpart; April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF).  `Q_HR_pred = Q_LF_nearest · R_MF` recovers all six
   quantities to 1.5–4.3 %.
 
 ---

@@ -7,9 +7,13 @@ lost the WHOLE shard. ``run_prod_sbc_shard._run_mock`` now runs ONE mock, writes
 globs ``mock_*.pkl`` (mock index from the FILENAME) alongside ``shard_*.pkl``, per-mock files
 winning a conflict.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_sbc_checkpoint.py -q
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+     python -m pytest tests/test_prod_sbc_checkpoint.py -q
 """
+
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
 import pickle
@@ -19,8 +23,9 @@ import numpy as np
 import pytest
 
 from hcd_analysis.emulator import closure_legb as LB
+from tests.gate_helpers import raise_if_deferred  # noqa: E402
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def _load_script(name):
@@ -45,8 +50,9 @@ def merger():
 @pytest.fixture(scope="module")
 def ctx_d():
     try:
-        return LB.build_legb_ctx(use_xclass=True)        # light baseline (xclass ρ; no MF/eBOSS)
-    except Exception as e:                               # data/checkpoint absent in this env
+        return LB.build_legb_ctx(use_xclass=True)  # light baseline (xclass ρ; no MF/eBOSS)
+    except Exception as e:  # data/checkpoint absent in this env
+        raise_if_deferred(e)  # a retired interface is deferred, not absent
         pytest.skip(f"build_legb_ctx unavailable: {e}")
 
 
@@ -59,13 +65,14 @@ def _rec_close(a, b):
     assert np.allclose(float(a["ll_true"]), float(b["ll_true"]), rtol=0, atol=1e-8)
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_run_one_mock_writes_skips_and_reproduces(runner, ctx_d, tmp_path):
     ctx, d = ctx_d
     out = str(tmp_path / "armB")
     m = 0
     kw = dict(n_mocks=4, n_warmup=6, n_samples=6, max_tree_depth=6, seed=123, verbose=False)
 
-    rec = runner._run_mock(ctx, d, m, out, **kw)            # (a) first call → writes the pkl
+    rec = runner._run_mock(ctx, d, m, out, **kw)  # (a) first call → writes the pkl
     path = runner._mock_path(out, m)
     assert os.path.exists(path), "per-mock pkl not written"
     mtime0 = os.path.getmtime(path)
@@ -73,32 +80,53 @@ def test_run_one_mock_writes_skips_and_reproduces(runner, ctx_d, tmp_path):
         on_disk = pickle.load(f)
     _rec_close(rec, on_disk)
 
-    rec2 = runner._run_mock(ctx, d, m, out, **kw)           # (b) second call → SKIPS (no re-NUTS)
+    rec2 = runner._run_mock(ctx, d, m, out, **kw)  # (b) second call → SKIPS (no re-NUTS)
     assert os.path.getmtime(path) == mtime0, "pkl rewritten on skip (should be a no-op load)"
     _rec_close(rec, rec2)
 
     # (c) REPRODUCIBILITY: the per-mock record == the m-th record of a full run_legb (the per-mock
     # RNG is fold_in(seed, m), so the single-index call reproduces the full run's mock m exactly).
-    ref = LB.run_legb(ctx, d, n_mocks=kw["n_mocks"], mock_indices=[m], return_per_mock=True,
-                      leg_a=True, n_warmup=kw["n_warmup"], n_samples=kw["n_samples"],
-                      seed=kw["seed"], dense_mass=True, max_tree_depth=kw["max_tree_depth"],
-                      verbose=False)[0]
+    ref = LB.run_legb(
+        ctx,
+        d,
+        n_mocks=kw["n_mocks"],
+        mock_indices=[m],
+        return_per_mock=True,
+        leg_a=True,
+        n_warmup=kw["n_warmup"],
+        n_samples=kw["n_samples"],
+        seed=kw["seed"],
+        dense_mass=True,
+        max_tree_depth=kw["max_tree_depth"],
+        verbose=False,
+    )[0]
     _rec_close(rec, ref)
 
 
+@pytest.mark.deferred_legacy("CTX_SIGNATURE")
 def test_merge_globs_mock_pkls(merger, runner, ctx_d, tmp_path):
     """merge_prod_sbc_shards reads bare mock_*.pkl (no shard pkl needed) and aggregates."""
     ctx, d = ctx_d
     out = str(tmp_path / "armB_mockonly")
-    runner._run_mock(ctx, d, 0, out, n_mocks=1, n_warmup=6, n_samples=6, max_tree_depth=6,
-                     seed=7, verbose=False)
+    runner._run_mock(
+        ctx, d, 0, out, n_mocks=1, n_warmup=6, n_samples=6, max_tree_depth=6, seed=7, verbose=False
+    )
     assert os.path.exists(runner._mock_path(out, 0))
     # the merge loader path: glob mock_*.pkl, parse the index from the filename, aggregate.
     import sys
+
     argv = sys.argv
-    sys.argv = ["merge_prod_sbc_shards.py", "--shard-dir", out, "--prob", "0.95"]
+    sys.argv = [
+        "merge_prod_sbc_shards.py",
+        "--shard-dir",
+        out,
+        "--prob",
+        "0.95",
+        "--figdir",
+        str(tmp_path),
+    ]  # never rewrite the tracked figure
     try:
-        merger.main()      # raises if the glob/aggregate path is broken
+        merger.main()  # raises if the glob/aggregate path is broken
     finally:
         sys.argv = argv
 
@@ -109,10 +137,12 @@ def test_merge_dedups_mock_in_both_shard_and_mockpkl(merger, tmp_path):
     out = tmp_path / "armB_overlap"
     out.mkdir()
     n_z = 3
+
     def _stub(tag):
         # minimal record shape aggregate_leg_a tolerates is not exercised here — we only test the
         # glob/dedup, so stash a marker the test can read back.
         return dict(_marker=tag, kept_global=np.ones(n_z, bool))
+
     # shard pkl: mock 0 with marker "shard"; mock_0000.pkl: mock 0 with marker "permock"
     with open(out / "shard_000.pkl", "wb") as f:
         pickle.dump(dict(idxs=[0], n_z=n_z, per_mock=[_stub("shard")], meta={}), f)
@@ -122,6 +152,7 @@ def test_merge_dedups_mock_in_both_shard_and_mockpkl(merger, tmp_path):
     # re-implement the merge loader's glob/dedup the way merger.main does, then assert the winner.
     import glob as _glob
     import re as _re
+
     by_mock = {}
     mock_re = _re.compile(r"mock_(\d+)\.pkl$")
     for fn in sorted(_glob.glob(str(out / "mock_*.pkl"))):
@@ -145,8 +176,15 @@ def test_merge_dedups_mock_in_both_shard_and_mockpkl(merger, tmp_path):
 # skip branch, RAISES on a stamp mismatch. These exercise that skip-branch guard ONLY — the clash
 # check precedes run_legb, so they need no ctx/NUTS (ctx=d=None) and run fast + deterministically.
 
-_FULL_SELFDRAW = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="all", fold=0,
-                      tau0_prior_sigma=0.0, subdla_truth_boost=1.0)
+_FULL_SELFDRAW = dict(
+    leg_a=True,
+    cemu_variant="current",
+    amp_sigma=0.0,
+    leg="all",
+    fold=0,
+    tau0_prior_sigma=0.0,
+    subdla_truth_boost=1.0,
+)
 # the 2026-06-19 stamp, written BEFORE the leg/fold/tau0/subdla keys were added (a pre-stamp resume):
 _PARTIAL_2026_06_19 = dict(leg_a=True, cemu_variant="current", amp_sigma=0.0)
 # unused-but-required kwargs (consumed only on the run_legb path, which the guard never reaches):
@@ -168,7 +206,7 @@ def test_config_clash_raises_on_leg_a_mismatch(runner, tmp_path):
     not a silent wrong-config skip-load."""
     out = str(tmp_path / "clash_leg_a")
     _write_stub_mock(runner, out, 0, _FULL_SELFDRAW)
-    req = dict(_FULL_SELFDRAW, leg_a=False)                  # held-out over a self-draw pkl
+    req = dict(_FULL_SELFDRAW, leg_a=False)  # held-out over a self-draw pkl
     with pytest.raises(RuntimeError, match="config CLASH"):
         runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
 
@@ -195,15 +233,27 @@ def test_config_clash_nondefault_over_prestamp(runner, tmp_path):
     back-compat pop excuses a MISSING key only when the request is ALSO at that key's default."""
     out = str(tmp_path / "clash_informative")
     _write_stub_mock(runner, out, 0, _PARTIAL_2026_06_19)
-    req = dict(_FULL_SELFDRAW, tau0_prior_sigma=0.05)        # informative τ₀ over an un-stamped uniform pkl
+    req = dict(
+        _FULL_SELFDRAW, tau0_prior_sigma=0.05
+    )  # informative τ₀ over an un-stamped uniform pkl
     with pytest.raises(RuntimeError, match="config CLASH"):
         runner._run_mock(None, None, 0, out, run_cfg=req, **_DUMMY)
 
 
+@pytest.mark.deferred_legacy("RETIRED_BUILDER")
 def test_inject_spec_held_out_guard():
     """inject_spec on a HELD-OUT (leg_a=False) run_legb call must FAIL LOUD — the held-out branch
     ignores inject_spec, so honouring it would silently drop the injection. PR#12 review follow-up (b).
-    The guard is the first statement in run_legb, so it fires before any ctx use (ctx=d=None here)."""
+    The guard is the first statement in run_legb, so it fires before any ctx use (ctx=d=None here).
+    """
     with pytest.raises(ValueError, match="inject_spec is honoured only on the Leg-A"):
-        LB.run_legb(None, None, n_mocks=1, n_warmup=1, n_samples=1, seed=0,
-                    inject_spec={"metal_misspec": 1.0}, leg_a=False)
+        LB.run_legb(
+            None,
+            None,
+            n_mocks=1,
+            n_warmup=1,
+            n_samples=1,
+            seed=0,
+            inject_spec={"metal_misspec": 1.0},
+            leg_a=False,
+        )

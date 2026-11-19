@@ -1,0 +1,38 @@
+"""The model versions that this version of hcd_priya accepts, with the digest each must have.
+
+The trained models come in the companion package ``hcd-priya-models``, which ``hcd-priya`` requires, so installing
+``hcd-priya`` installs them. ``hcd_analysis.predictor.load_published`` loads a model from that package only if the
+package's version is listed here, and then only against the digest listed here: the trust is in this file, which
+ships with the code, never in the model package. (The one exception is a synthetic test build, which holds untrained
+networks and loads only with an explicit switch; see ``load_published``.)
+
+``MODELS``: one entry per accepted model and version::
+
+    {"name": "lfmf", "version": "<version>", "format": "hcd_priya.release/1",
+     "anchor_sha256": "<64 hex digits>"}
+
+- ``name``: the model's name, as the model package spells it (``lfmf`` for the LF+MF model). It is compared
+  without case and punctuation, like the name a user passes to ``load_published``, so ``LF+MF`` is the same name.
+- ``version``: the version of ``hcd-priya-models`` that holds it, which is the version of the model bundle.
+- ``format``: the release's own format, ``hcd_priya.release/1``: an LF+MF release directory, with or without the
+  optional parts (the incidence MF record, the P1D held-out record). A release listed under another format than
+  its own is refused.
+- ``anchor_sha256``: the sha256 of the release's ``release.json``. Loading verifies every file of the release
+  against it.
+
+The versioning rule: the version of ``hcd-priya-models`` is the version of the bundle it holds; a version of
+``hcd-priya`` lists here the exact versions and digests it accepts, and its dependency on ``hcd-priya-models``
+(``pyproject.toml``) is pinned to exactly that version. ``model_package/prepare.py`` prints the entry for a release.
+
+``MODELS`` holds one entry: the LF+MF model release to be published with this version of the code, the version that
+``pyproject.toml`` pins.
+"""
+
+MODELS = [
+    {
+        "name": "lfmf",
+        "version": "1.0.0",
+        "format": "hcd_priya.release/1",
+        "anchor_sha256": "c81c33ce65455098620a6e7e54e95bc87f10b06ac10970082ffbc9c6fe5470ad",
+    },
+]

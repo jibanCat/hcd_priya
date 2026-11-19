@@ -1,0 +1,345 @@
+{
+ "cosmology": {
+  "band": "not converted: each design point is per unit X of its own cosmology",
+  "conversion": "values and limits per unit X multiplied by Delta X(own Omega_m) / Delta X(line Omega_m) over the measurement's redshift range, flat cosmologies; Delta X = integral of (1+z)^2 / sqrt(Omega_m (1+z)^3 + 1 - Omega_m) dz",
+  "factors_ho21": [
+   {
+    "factor": 1.0202136078678605,
+    "z_range": [
+     1.9999999999999996,
+     2.1666666666666665
+    ]
+   },
+   {
+    "factor": 1.0205581502207135,
+    "z_range": [
+     2.1666666666666665,
+     2.3333333333333335
+    ]
+   },
+   {
+    "factor": 1.0208447823353446,
+    "z_range": [
+     2.3333333333333335,
+     2.5000000000000004
+    ]
+   },
+   {
+    "factor": 1.0210847473891607,
+    "z_range": [
+     2.4999999999999996,
+     2.6666666666666665
+    ]
+   },
+   {
+    "factor": 1.021286881067379,
+    "z_range": [
+     2.6666666666666665,
+     2.8333333333333335
+    ]
+   },
+   {
+    "factor": 1.0214581584910858,
+    "z_range": [
+     2.833333333333333,
+     3.0
+    ]
+   },
+   {
+    "factor": 1.0216041148138417,
+    "z_range": [
+     2.9999999999999996,
+     3.1666666666666665
+    ]
+   },
+   {
+    "factor": 1.0217291672175084,
+    "z_range": [
+     3.1666666666666665,
+     3.3333333333333335
+    ]
+   },
+   {
+    "factor": 1.0218368612168995,
+    "z_range": [
+     3.333333333333333,
+     3.5
+    ]
+   },
+   {
+    "factor": 1.0219300593522862,
+    "z_range": [
+     3.4999999999999996,
+     3.6666666666666665
+    ]
+   },
+   {
+    "factor": 1.0220110861867004,
+    "z_range": [
+     3.6666666666666665,
+     3.8333333333333335
+    ]
+   },
+   {
+    "factor": 1.0220818401769876,
+    "z_range": [
+     3.833333333333333,
+     4.0
+    ]
+   },
+   {
+    "factor": 1.022143880390048,
+    "z_range": [
+     3.9999999999999996,
+     4.166666666666666
+    ]
+   },
+   {
+    "factor": 1.0221984940603057,
+    "z_range": [
+     4.166666666666666,
+     4.333333333333334
+    ]
+   },
+   {
+    "factor": 1.0222467494985072,
+    "z_range": [
+     4.333333333333332,
+     4.5
+    ]
+   },
+   {
+    "factor": 1.0222895377502565,
+    "z_range": [
+     4.5,
+     4.666666666666666
+    ]
+   },
+   {
+    "factor": 1.0223276055725912,
+    "z_range": [
+     4.666666666666666,
+     4.833333333333334
+    ]
+   },
+   {
+    "factor": 1.0223615816768992,
+    "z_range": [
+     4.833333333333332,
+     5.0
+    ]
+   }
+  ],
+  "factors_lls": [
+   {
+    "factor": 0.2628075584661488,
+    "source": "prochaska10_t4",
+    "z_range": [
+     3.3,
+     3.4
+    ]
+   },
+   {
+    "factor": 0.25959241997945504,
+    "source": "prochaska10_t4",
+    "z_range": [
+     3.4,
+     3.5
+    ]
+   },
+   {
+    "factor": 0.2557499126254303,
+    "source": "prochaska10_t4",
+    "z_range": [
+     3.5,
+     3.65
+    ]
+   },
+   {
+    "factor": 0.24996952204373454,
+    "source": "prochaska10_t4",
+    "z_range": [
+     3.65,
+     3.9
+    ]
+   },
+   {
+    "factor": 0.2439324751951594,
+    "source": "prochaska10_t4",
+    "z_range": [
+     3.9,
+     4.1
+    ]
+   },
+   {
+    "factor": 0.23775004052442206,
+    "source": "prochaska10_t4",
+    "z_range": [
+     4.1,
+     4.4
+    ]
+   },
+   {
+    "factor": 0.30747281066442583,
+    "source": "omeara13_t5_comb",
+    "z_range": [
+     2.0,
+     2.6
+    ]
+   },
+   {
+    "factor": 0.28324400766532337,
+    "source": "fumagalli13_nc",
+    "z_range": [
+     2.6,
+     3.0
+    ]
+   },
+   {
+    "factor": 0.24207186122571198,
+    "source": "crighton19_corr",
+    "z_range": [
+     3.75,
+     4.4
+    ]
+   },
+   {
+    "factor": 0.23094074174092813,
+    "source": "crighton19_corr",
+    "z_range": [
+     4.4,
+     4.7
+    ]
+   },
+   {
+    "factor": 0.22086713652831733,
+    "source": "crighton19_corr",
+    "z_range": [
+     4.7,
+     5.4
+    ]
+   },
+   {
+    "factor": 0.25960841242578264,
+    "source": "fumagalli20_dr16",
+    "z_range": [
+     3.3,
+     3.6
+    ]
+   }
+  ],
+  "line_omega_m": 0.29183673469387755,
+  "lls_conversion": "l(z) to l(X): Delta z / Delta X(line Omega_m) over the row's bin",
+  "own_omega_m": {
+   "ho21": 0.279,
+   "omeara07": 0.3,
+   "prochaska10": 0.3,
+   "zafar13": 0.3
+  }
+ },
+ "cumulative": {
+  "bin_holding_the_threshold": [
+   17.5
+  ],
+  "bins_without_value_above_the_threshold": {
+   "2.2": [
+    22.9
+   ],
+   "2.4": [
+    22.9
+   ],
+   "2.6": [],
+   "2.8": [],
+   "3": [],
+   "3.2": [
+    22.9
+   ],
+   "3.4": [],
+   "3.6": [],
+   "3.8": [],
+   "4": [],
+   "4.2": [],
+   "4.4": [],
+   "4.6": []
+  },
+  "cross_check": "the LLS line less the sum of pred.cddf from 10^17.2 to 10^17.5, plus the subDLA and the DLA line; ratio = the count above 10^17.5 / this sum",
+  "cross_check_ratio_range": [
+   0.9998430256024798,
+   1.0020301978177952
+  ],
+  "label": "model (LF+MF): all absorbers with N_HI >= 10^17.5",
+  "method": "sum over the bins of pred.cddf of f times the width in N_HI of the bin's part above the threshold; the bin that holds the threshold counts from it to its upper edge, f taken constant within the bin; a bin with no value (NaN) is left out",
+  "threshold_log_nhi": 17.5
+ },
+ "design_point_flags": {
+  "ns_ridge": 3,
+  "outside_sampling_box": 12
+ },
+ "design_points": 60,
+ "design_points_flagged": 12,
+ "design_points_in_band_at_every_redshift": 60,
+ "design_points_refused": 0,
+ "design_table": "docs/figures/data/priya_lf_design_60.csv, sha256 a47f23bfce73b3d765206cef5b116cf42b3705c9a0df85a5e665cda185255d42",
+ "figure": "dN/dX against redshift",
+ "flags_set": [
+  "cddf_bins_without_support",
+  "incidence_heldout_error_available",
+  "incidence_mf_applied",
+  "k_downweighted",
+  "mf_applied"
+ ],
+ "heldout_error": "drawn on the model lines (LF+MF): the held-out range from pred.dndx_lower to pred.dndx_upper (pred.dndx * exp(-pred.dndx_err) and pred.dndx * exp(+pred.dndx_err), each bound computed on its own: asymmetric); pred.dndx_err is the held-out rms of ln(prediction / truth)",
+ "incidence_hr_simulations": 5,
+ "incidence_record": true,
+ "lls_measurements": {
+  "counts": "every absorber with tau_912 >= 2 (N_HI >= 10^17.5), per unit redshift as published; drawn per unit X: l(X) = l(z) Delta z / Delta X(line) over each row's redshift bin, errors times the same factor",
+  "drawn": {
+   "crighton19_corr": "Crighton et al. (2019)",
+   "fumagalli13_nc": "Fumagalli et al. (2013)",
+   "fumagalli20_dr16": "Fumagalli, Fotopoulou and Thomson (2020)",
+   "omeara13_t5_comb": "O'Meara et al. (2013) with Ribaudo, Lehner and Howk (2011)",
+   "prochaska10_t4": "Prochaska, O'Meara and Worseck (2010)"
+  },
+  "file": "docs/figures/data/lls_incidence/lls_lz_literature.dat",
+  "not_drawn": "the other rows of the table: each is contained in a drawn row or counts its absorbers (no drawn row contains another)",
+  "not_independent": "fumagalli20_dr16 (SDSS DR16) shares 344 quasars with prochaska10_t4 (SDSS DR7)",
+  "own_marker": {
+   "fumagalli20_dr16": "classified as tau >~ 2; may include systems just below tau = 2 (the paper); at z = 3.45 it overlaps a point of prochaska10_t4"
+  },
+  "swapped_printed_errors": [
+   "prochaska10_t4"
+  ],
+  "swapped_printed_errors_means": "the larger printed error drawn upward, the Poisson interval of the count; the table keeps the print; the combined O'Meara row, whose two printed errors are equal, is drawn as printed"
+ },
+ "measurement": "DLA dN/dX of Ho, Bird and Garnett (2021), 68 per cent interval: docs/figures/data/ho21/dndx_all.txt, 18 redshift bins",
+ "measurement_source": "Ho, Bird and Garnett (2021), doi:10.1093/mnras/stab2169; tables of github.com/sbird/DLA_data (commit 147c616), fetched from the fork github.com/jibanCat/DLA_data (commit daa595c); docs/figures/data/ho21/PROVENANCE.md",
+ "measurement_source_lls": "Prochaska, O'Meara and Worseck (2010), doi:10.1088/0004-637X/718/1/392; O'Meara et al. (2013), doi:10.1088/0004-637X/765/2/137, whose combined row includes a bin of Ribaudo, Lehner and Howk (2011), doi:10.1088/0004-637X/736/1/42; Fumagalli et al. (2013), doi:10.1088/0004-637X/775/1/78; Crighton et al. (2019), doi:10.1093/mnras/sty2762; Fumagalli, Fotopoulou and Thomson (2020), doi:10.1093/mnras/staa2388; values copied from the papers' tables and text: docs/figures/data/lls_incidence/PROVENANCE.md",
+ "parameters": {
+  "Ap": 1.9e-09,
+  "alphaq": 2.15,
+  "bhfeedback": 0.05,
+  "heref": 2.7,
+  "herei": 4.0,
+  "hireionz": 7.25,
+  "hub": 0.7,
+  "ns": 0.925,
+  "omegamh2": 0.143
+ },
+ "redshifts": [
+  2.2,
+  2.4,
+  2.6,
+  2.8,
+  3.0,
+  3.2,
+  3.4,
+  3.6,
+  3.8,
+  4.0,
+  4.2,
+  4.4,
+  4.6
+ ],
+ "release_format": "hcd_priya.release/1",
+ "synthetic_build": false
+}

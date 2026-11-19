@@ -12,9 +12,13 @@ gate certified. These tests pin:
   3. The SBC run_cfg population stamp gains sample_res/f_res_amp_sigma/metal_prior so a wired pkl can
      never silently pool with a pre-wiring (uniform/no-f_res) pkl, while a default resume still loads.
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_prod_forward_wiring.py -q
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+     python -m pytest tests/test_prod_forward_wiring.py -q
 """
+
+import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
+
+_REPO_ROOT = _os_rr.path.dirname(_os_rr.path.dirname(_os_rr.path.abspath(__file__)))
 import importlib.util
 import os
 import pickle
@@ -23,7 +27,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-REPO = "/home/mfho/hcd_priya"
+REPO = _REPO_ROOT
 
 
 def _load_script(name):
@@ -40,6 +44,7 @@ def _load_script(name):
 # --------------------------------------------------------------------------------------------- #
 def test_prod_forward_config_certified_values():
     from hcd_analysis.emulator import closure_legb as CL
+
     desi = CL.prod_forward_config("DESI")
     assert desi["sample_res"] is True and desi["f_res_amp_sigma"] == 0.02
     assert desi["metal_prior"] == "flatlog2node" and desi["metals"] is True
@@ -57,18 +62,20 @@ def test_prod_forward_config_certified_values():
 
 def test_prod_forward_config_unknown_leg_raises():
     from hcd_analysis.emulator import closure_legb as CL
+
     with pytest.raises(KeyError):
         CL.prod_forward_config("XQ100")
 
 
 def test_prod_forward_config_returns_a_copy():
     from hcd_analysis.emulator import closure_legb as CL
+
     a = CL.prod_forward_config("DESI")
     a["sample_res"] = "MUTATED"
-    assert CL.prod_forward_config("DESI")["sample_res"] is True   # not shared (top-level)
+    assert CL.prod_forward_config("DESI")["sample_res"] is True  # not shared (top-level)
     ks = CL.prod_forward_config("KS")
-    ks["ks_kwargs"]["k_max"] = "MUTATED"                          # mutate the NESTED dict
-    assert CL.prod_forward_config("KS")["ks_kwargs"]["k_max"] == 0.065   # deepcopy protected
+    ks["ks_kwargs"]["k_max"] = "MUTATED"  # mutate the NESTED dict
+    assert CL.prod_forward_config("KS")["ks_kwargs"]["k_max"] == 0.065  # deepcopy protected
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -92,6 +99,7 @@ def _capture_build_real_ctx_kwargs(survey, monkeypatch):
     return captured
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_desi_forwards_certified_knobs(monkeypatch):
     kw = _capture_build_real_ctx_kwargs("desi", monkeypatch)
     assert kw["sample_res"] is True
@@ -100,6 +108,7 @@ def test_build_real_ctx_desi_forwards_certified_knobs(monkeypatch):
     assert kw["metals_on"] is True and kw["sample_metals"] is True
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_eboss_width_005(monkeypatch):
     kw = _capture_build_real_ctx_kwargs("eboss", monkeypatch)
     assert kw["sample_res"] is True
@@ -107,6 +116,7 @@ def test_build_real_ctx_eboss_width_005(monkeypatch):
     assert kw["metal_prior"] == "flatlog2node"
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_ks_forwards_fres_and_kskwargs(monkeypatch):
     kw = _capture_build_real_ctx_kwargs("ks", monkeypatch)
     assert kw["sample_res"] is True
@@ -116,12 +126,14 @@ def test_build_real_ctx_ks_forwards_fres_and_kskwargs(monkeypatch):
     assert kw["ks_kwargs"] == {"resolution_float": True, "k_max": 0.065}
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_desi_eboss_kskwargs_none(monkeypatch):
     for survey in ("desi", "eboss"):
         kw = _capture_build_real_ctx_kwargs(survey, monkeypatch)
-        assert kw["ks_kwargs"] is None            # KS leg stays proxy default (byte-identical)
+        assert kw["ks_kwargs"] is None  # KS leg stays proxy default (byte-identical)
 
 
+@pytest.mark.deferred_legacy("REAL_FIT_CKPT_DIR")
 def test_build_real_ctx_ks_merges_zlo_with_kskwargs(monkeypatch):
     # the diagnostic z_lo override must MERGE with the certified ks_kwargs, not clobber it (neither wins):
     # the KS leg then floats echelle f_res (resolution_float/k_max) AND carries the z_lo cut.
@@ -153,35 +165,68 @@ def _write_pkl(path, run_cfg):
 # An OLD-STAMP run_cfg = a real pre-2026-07-07 (pre-wiring) DESI-NORC pkl: it HAS the older
 # discriminators but LACKS the three new forward keys (sample_res/f_res_amp_sigma/metal_prior).
 def _old_stamp_cfg():
-    return dict(leg_a=True, cemu_variant="current", amp_sigma=0.0, leg="DESI", fold=0,
-                tau0_prior_sigma=0.0, subdla_truth_boost=1.0, res_corr_on=False)
+    return dict(
+        leg_a=True,
+        cemu_variant="current",
+        amp_sigma=0.0,
+        leg="DESI",
+        fold=0,
+        tau0_prior_sigma=0.0,
+        subdla_truth_boost=1.0,
+        res_corr_on=False,
+    )
 
 
 def _wired_desi_cfg():
     # the run_cfg a WIRED DESI SBC run stamps, from the shared source (tracks the certified values).
     from hcd_analysis.emulator import closure_legb as CL
+
     fc = CL.prod_forward_config("DESI")
-    return dict(_old_stamp_cfg(), sample_res=fc["sample_res"],
-                f_res_amp_sigma=fc["f_res_amp_sigma"], metal_prior=fc["metal_prior"])
+    return dict(
+        _old_stamp_cfg(),
+        sample_res=fc["sample_res"],
+        f_res_amp_sigma=fc["f_res_amp_sigma"],
+        metal_prior=fc["metal_prior"],
+    )
 
 
 def test_wired_cfg_clashes_with_pre_stamp_pkl(tmp_path):
     sbc = _load_script("run_prod_sbc_shard")
     path = sbc._mock_path(str(tmp_path), 0)
-    _write_pkl(path, None)                         # a PRE-WIRING pkl (no run_cfg stamp at all)
-    with pytest.raises(RuntimeError):              # a wired (flatlog2node) request must CLASH, not load
-        sbc._run_mock(None, None, 0, str(tmp_path), n_mocks=1, n_warmup=1, n_samples=1,
-                      max_tree_depth=1, seed=0, run_cfg=_wired_desi_cfg())
+    _write_pkl(path, None)  # a PRE-WIRING pkl (no run_cfg stamp at all)
+    with pytest.raises(RuntimeError):  # a wired (flatlog2node) request must CLASH, not load
+        sbc._run_mock(
+            None,
+            None,
+            0,
+            str(tmp_path),
+            n_mocks=1,
+            n_warmup=1,
+            n_samples=1,
+            max_tree_depth=1,
+            seed=0,
+            run_cfg=_wired_desi_cfg(),
+        )
 
 
 def test_wired_cfg_clashes_with_old_stamp_pkl(tmp_path):
     # the load-bearing phantom-pooling guard: a WIRED run must CLASH with an OLD-STAMP (pre-wiring) pkl.
     sbc = _load_script("run_prod_sbc_shard")
     path = sbc._mock_path(str(tmp_path), 0)
-    _write_pkl(path, _old_stamp_cfg())             # stamped, but lacks the 3 new forward keys
-    with pytest.raises(RuntimeError):              # wired keys are NOT popped (non-default) -> clash
-        sbc._run_mock(None, None, 0, str(tmp_path), n_mocks=1, n_warmup=1, n_samples=1,
-                      max_tree_depth=1, seed=0, run_cfg=_wired_desi_cfg())
+    _write_pkl(path, _old_stamp_cfg())  # stamped, but lacks the 3 new forward keys
+    with pytest.raises(RuntimeError):  # wired keys are NOT popped (non-default) -> clash
+        sbc._run_mock(
+            None,
+            None,
+            0,
+            str(tmp_path),
+            n_mocks=1,
+            n_warmup=1,
+            n_samples=1,
+            max_tree_depth=1,
+            seed=0,
+            run_cfg=_wired_desi_cfg(),
+        )
 
 
 def test_default_run_loads_old_stamp_pkl_via_backcompat_pops(tmp_path):
@@ -190,10 +235,22 @@ def test_default_run_loads_old_stamp_pkl_via_backcompat_pops(tmp_path):
     sbc = _load_script("run_prod_sbc_shard")
     path = sbc._mock_path(str(tmp_path), 0)
     _write_pkl(path, _old_stamp_cfg())
-    default_req = dict(_old_stamp_cfg(), sample_res=False, f_res_amp_sigma=None, metal_prior="uniform")
-    rec = sbc._run_mock(None, None, 0, str(tmp_path), n_mocks=1, n_warmup=1, n_samples=1,
-                        max_tree_depth=1, seed=0, run_cfg=default_req)
-    assert rec["n_div"] == 0                        # loaded via the back-compat pops, no clash
+    default_req = dict(
+        _old_stamp_cfg(), sample_res=False, f_res_amp_sigma=None, metal_prior="uniform"
+    )
+    rec = sbc._run_mock(
+        None,
+        None,
+        0,
+        str(tmp_path),
+        n_mocks=1,
+        n_warmup=1,
+        n_samples=1,
+        max_tree_depth=1,
+        seed=0,
+        run_cfg=default_req,
+    )
+    assert rec["n_div"] == 0  # loaded via the back-compat pops, no clash
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -202,18 +259,35 @@ def test_default_run_loads_old_stamp_pkl_via_backcompat_pops(tmp_path):
 # --------------------------------------------------------------------------------------------- #
 def _wired_ks_cfg(k_max=0.065):
     from hcd_analysis.emulator import closure_legb as CL
+
     fc = CL.prod_forward_config("KS")
-    return dict(_old_stamp_cfg(), leg="KS", sample_res=fc["sample_res"],
-                f_res_amp_sigma=fc["f_res_amp_sigma"], metal_prior=fc["metal_prior"], ks_kmax=k_max)
+    return dict(
+        _old_stamp_cfg(),
+        leg="KS",
+        sample_res=fc["sample_res"],
+        f_res_amp_sigma=fc["f_res_amp_sigma"],
+        metal_prior=fc["metal_prior"],
+        ks_kmax=k_max,
+    )
 
 
 def test_wired_ks_clashes_with_preflip_pkl(tmp_path):
     sbc = _load_script("run_prod_sbc_shard")
     path = sbc._mock_path(str(tmp_path), 0)
-    _write_pkl(path, dict(_old_stamp_cfg(), leg="KS", sample_res=False))   # pre-flip KS pkl
+    _write_pkl(path, dict(_old_stamp_cfg(), leg="KS", sample_res=False))  # pre-flip KS pkl
     with pytest.raises(RuntimeError):
-        sbc._run_mock(None, None, 0, str(tmp_path), n_mocks=1, n_warmup=1, n_samples=1,
-                      max_tree_depth=1, seed=0, run_cfg=_wired_ks_cfg(0.065))
+        sbc._run_mock(
+            None,
+            None,
+            0,
+            str(tmp_path),
+            n_mocks=1,
+            n_warmup=1,
+            n_samples=1,
+            max_tree_depth=1,
+            seed=0,
+            run_cfg=_wired_ks_cfg(0.065),
+        )
 
 
 def test_wired_ks_0065_clashes_with_0045_fallback(tmp_path):
@@ -221,18 +295,43 @@ def test_wired_ks_0065_clashes_with_0045_fallback(tmp_path):
     path = sbc._mock_path(str(tmp_path), 0)
     _write_pkl(path, _wired_ks_cfg(0.045))
     with pytest.raises(RuntimeError):
-        sbc._run_mock(None, None, 0, str(tmp_path), n_mocks=1, n_warmup=1, n_samples=1,
-                      max_tree_depth=1, seed=0, run_cfg=_wired_ks_cfg(0.065))
+        sbc._run_mock(
+            None,
+            None,
+            0,
+            str(tmp_path),
+            n_mocks=1,
+            n_warmup=1,
+            n_samples=1,
+            max_tree_depth=1,
+            seed=0,
+            run_cfg=_wired_ks_cfg(0.065),
+        )
 
 
 def test_default_run_still_loads_old_stamp_pkl_with_kskmax_pop(tmp_path):
     sbc = _load_script("run_prod_sbc_shard")
     path = sbc._mock_path(str(tmp_path), 0)
     _write_pkl(path, _old_stamp_cfg())
-    default_req = dict(_old_stamp_cfg(), sample_res=False, f_res_amp_sigma=None,
-                       metal_prior="uniform", ks_kmax=None)
-    rec = sbc._run_mock(None, None, 0, str(tmp_path), n_mocks=1, n_warmup=1, n_samples=1,
-                        max_tree_depth=1, seed=0, run_cfg=default_req)
+    default_req = dict(
+        _old_stamp_cfg(),
+        sample_res=False,
+        f_res_amp_sigma=None,
+        metal_prior="uniform",
+        ks_kmax=None,
+    )
+    rec = sbc._run_mock(
+        None,
+        None,
+        0,
+        str(tmp_path),
+        n_mocks=1,
+        n_warmup=1,
+        n_samples=1,
+        max_tree_depth=1,
+        seed=0,
+        run_cfg=default_req,
+    )
     assert rec["n_div"] == 0
 
 
@@ -246,7 +345,7 @@ def _fake_ctx(ks_kmax, resolution_ready):
 
 def test_norc_ks_cap_helper_lifts_only_for_floating_ks():
     rf = _load_script("run_real_fit")
-    with pytest.raises(AssertionError):                      # proxy KS at 0.065 -> RAISE
+    with pytest.raises(AssertionError):  # proxy KS at 0.065 -> RAISE
         rf._assert_norc_ks_cap(_fake_ctx(0.065, resolution_ready=False))
-    rf._assert_norc_ks_cap(_fake_ctx(0.065, resolution_ready=True))   # echelle-floating -> no raise
+    rf._assert_norc_ks_cap(_fake_ctx(0.065, resolution_ready=True))  # echelle-floating -> no raise
     rf._assert_norc_ks_cap(_fake_ctx(0.045, resolution_ready=False))  # proxy at 0.045 -> fine

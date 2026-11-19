@@ -12,6 +12,7 @@ Contract under test (2026-07-17 handoff analyzer spec + 2026-07-18 meta-verdict 
   * contraction vs the deployed prior sd (0.00925) + the empirical prior sd cross-check
   * L-weighted secondary pooling (retained draws L=17..150 -> unequal per-mock MC error)
 """
+
 import pickle
 
 import numpy as np
@@ -35,8 +36,9 @@ from scripts.analyze_dla_selfdraw import (
 SIG = "68f71a3d" + "0" * 56
 
 
-def _rec(names, truth, mean, sd, L=100, seed=0, n_div=0, tau0_truth=1.0, tau0_mean=1.0,
-         tau0_sd=0.02):
+def _rec(
+    names, truth, mean, sd, L=100, seed=0, n_div=0, tau0_truth=1.0, tau0_mean=1.0, tau0_sd=0.02
+):
     """Synthetic fit record matching the shard pkl schema. Draws are gaussian at (mean, sd)
     per named column; sites_extra carries tau0_amp/dtau0 in the {draws, truth} format."""
     rng = np.random.default_rng(seed)
@@ -59,8 +61,9 @@ def _rec(names, truth, mean, sd, L=100, seed=0, n_div=0, tau0_truth=1.0, tau0_me
 NAMES = ["ns", "Ap", "tau0_z0", "alpha_lls", "alpha_subdla", "alpha_dla"]
 
 
-def _pkl(path, shard, clean, boost, sig=SIG, cov_reduced=True, boost_val=1.5, n_mocks=None,
-         survey="desi"):
+def _pkl(
+    path, shard, clean, boost, sig=SIG, cov_reduced=True, boost_val=1.5, n_mocks=None, survey="desi"
+):
     payload = {
         "arm": "dla_selfdraw",
         "survey": survey,
@@ -98,6 +101,7 @@ def _paired_records(alpha_clean=0.004, seed=1, **kw):
 
 # ---------------------------------------------------------------- ingest
 
+
 def test_load_shards_reads_and_pairs(tmp_path):
     rc, rb = _paired_records()
     _pkl(tmp_path / "dla_selfdraw_desi_shard_000.pkl", 0, [rc], [rb])
@@ -129,7 +133,7 @@ def test_load_shards_rejects_signature_mismatch(tmp_path):
 
 def test_load_shards_rejects_broken_truth_pairing(tmp_path):
     rc, rb = _paired_records()
-    rb["truth_vec"][5] = rc["truth_vec"][5] * 1.4          # not the stamped boost
+    rb["truth_vec"][5] = rc["truth_vec"][5] * 1.4  # not the stamped boost
     _pkl(tmp_path / "dla_selfdraw_desi_shard_000.pkl", 0, [rc], [rb])
     with pytest.raises(AssertionError, match="boost"):
         load_shards(str(tmp_path))
@@ -137,7 +141,7 @@ def test_load_shards_rejects_broken_truth_pairing(tmp_path):
 
 def test_load_shards_rejects_nondla_truth_drift(tmp_path):
     rc, rb = _paired_records()
-    rb["truth_vec"][0] += 1e-6                             # non-DLA truth must be bit-identical
+    rb["truth_vec"][0] += 1e-6  # non-DLA truth must be bit-identical
     _pkl(tmp_path / "dla_selfdraw_desi_shard_000.pkl", 0, [rc], [rb], n_mocks=1)
     with pytest.raises(AssertionError, match="truth"):
         load_shards(str(tmp_path))
@@ -197,7 +201,7 @@ def test_load_shards_ignores_smoke_pkls(tmp_path):
     _pkl(tmp_path / "dla_selfdraw_desi_shard_000.smoke.pkl", 0, [rc2], [rb2], n_mocks=1)
     clean, boost, meta = load_shards(str(tmp_path))
     assert len(clean) == 1
-    assert clean[0]["truth_vec"][5] == pytest.approx(0.004)   # the REAL shard, not the smoke
+    assert clean[0]["truth_vec"][5] == pytest.approx(0.004)  # the REAL shard, not the smoke
 
 
 def test_load_shards_rejects_mixed_boost(tmp_path):
@@ -212,19 +216,21 @@ def test_load_shards_rejects_mixed_boost(tmp_path):
 
 # ---------------------------------------------------------------- per-record stats
 
+
 def test_bias_z_named_recovers_known_shift():
     truth = np.array([0.4, 0.8, 0.3, 0.18, 0.06, 0.004])
     rec = _rec(NAMES, truth, truth, 0.05, L=4000, seed=3)
     b = bias_z_named(rec, "ns")
-    assert abs(b) < 0.1                                    # unbiased draws -> ~0
+    assert abs(b) < 0.1  # unbiased draws -> ~0
     rec2 = _rec(NAMES, truth, truth + 0.05, 0.05, L=4000, seed=4)
     assert bias_z_named(rec2, "ns") == pytest.approx(1.0, abs=0.1)
 
 
 def test_bias_z_named_sites_extra():
     truth = np.array([0.4, 0.8, 0.3, 0.18, 0.06, 0.004])
-    rec = _rec(NAMES, truth, truth, 0.05, L=4000, seed=5, tau0_truth=1.0, tau0_mean=1.02,
-               tau0_sd=0.02)
+    rec = _rec(
+        NAMES, truth, truth, 0.05, L=4000, seed=5, tau0_truth=1.0, tau0_mean=1.02, tau0_sd=0.02
+    )
     assert bias_z_named(rec, "tau0_amp") == pytest.approx(1.0, abs=0.1)
 
 
@@ -232,30 +238,32 @@ def test_rank_u_and_coverage():
     truth = np.array([0.4, 0.8, 0.3, 0.18, 0.06, 0.004])
     rec = _rec(NAMES, truth, truth, 0.05, L=4000, seed=6)
     u = rank_u(rec, "Ap")
-    assert 0.35 < u < 0.65                                 # truth at the centre
+    assert 0.35 < u < 0.65  # truth at the centre
     cov = central_coverage([0.5, 0.5, 0.99, 0.01, 0.6])
     assert cov["n"] == 5
-    assert cov["in68"] == 3                                # |u-0.5|<=0.34 for 0.5,0.5,0.6
-    assert cov["in95"] == 3                                # 0.99 and 0.01 fall outside [0.025,0.975]
+    assert cov["in68"] == 3  # |u-0.5|<=0.34 for 0.5,0.5,0.6
+    assert cov["in95"] == 3  # 0.99 and 0.01 fall outside [0.025,0.975]
 
 
 # ---------------------------------------------------------------- pooling + gate
 
+
 def test_paired_delta_and_pooling_zero_shift():
-    pairs = [_paired_records(alpha_clean=a, seed=10 + i, L=4000)
-             for i, a in enumerate([0.003, 0.004, 0.005, 0.006])]
+    pairs = [
+        _paired_records(alpha_clean=a, seed=10 + i, L=4000)
+        for i, a in enumerate([0.003, 0.004, 0.005, 0.006])
+    ]
     deltas = [paired_delta_named(rc, rb, "ns") for rc, rb in pairs]
     pooled = pool_deltas(deltas)
     assert abs(pooled["mean"]) < 0.15
     # ub uses the exact small-n Student-t 97.5% quantile, not the fixed 2 (closing-panel
     # fix 7): t_{3,0.975} = 3.1824
-    assert pooled["ub"] == pytest.approx(abs(pooled["mean"]) + 3.1824 * pooled["se"],
-                                         rel=1e-3)
+    assert pooled["ub"] == pytest.approx(abs(pooled["mean"]) + 3.1824 * pooled["se"], rel=1e-3)
     assert verdict(pooled["ub"]) == "PASS"
 
 
 def test_pool_deltas_flags_real_shift():
-    deltas = [0.5, 0.6, 0.55, 0.45]                        # a real ~0.5 sigma paired shift
+    deltas = [0.5, 0.6, 0.55, 0.45]  # a real ~0.5 sigma paired shift
     pooled = pool_deltas(deltas)
     assert pooled["ub"] > GATE
     assert verdict(pooled["ub"]) == "FAIL"
@@ -277,6 +285,7 @@ def test_pool_deltas_weights_align_past_none():
 
 
 # ---------------------------------------------------------------- alpha_dla response
+
 
 def _tight_pair(alpha_clean, seed, track=0.0):
     """Paired records with a TIGHT alpha_dla posterior (sd 0.005) so the slope estimate's MC
@@ -326,6 +335,7 @@ def test_rank_stats_uniformity_z():
 
 
 # ---------------------------------------------------------------- contraction
+
 
 def test_contraction_stats():
     truth = np.array([0.4, 0.8, 0.3, 0.18, 0.06, 0.004])

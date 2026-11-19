@@ -75,12 +75,12 @@ prediction, `∂ln(mean_m P_filt)/∂θ`.
 **Regenerate:**
 ```
 # DEPLOYED production ensemble (the object the real fit uses), with retained LOSO overlays:
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py --emulator ensemble
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  python scripts/plot_performance_walkthrough.py --emulator ensemble
 
 # LOSO held-out only (byte-identical to the original walkthrough):
-PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-  /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/plot_performance_walkthrough.py --emulator loso
+PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+  python scripts/plot_performance_walkthrough.py --emulator loso
 # --no-mf skips the multi-fidelity figure B6 (needs the HR cache + res_corr table)
 ```
 
@@ -109,7 +109,7 @@ Deployed-object properties (ensemble), what the real fit uses:
 | metric | value |
 |---|---|
 | **B3** cosmology-response \|∂lnP/∂θ\|_rms: n_s / A_p / hub | 0.199 / 0.104 / 0.214 |
-| **B6** MF KODIAQ-band frac err: MF vs LF-extrapolated (clean) | **0.18 vs 0.77** (~4× cut) |
+| **B6** MF KODIAQ-band frac err: MF vs LF-extrapolated (clean). Historical (pre-2026-10 FixedMeanHead MF, outputs at the wrong k; validates no release MF) | **0.18 vs 0.77** (~4× cut) |
 
 LOSO companion (always the held-out folds, regardless of `--emulator`). The **Fisher-bias** is
 how far the emulator's residual would pull a recovered cosmological parameter, in units of σ

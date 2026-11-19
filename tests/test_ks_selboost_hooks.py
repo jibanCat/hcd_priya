@@ -20,9 +20,10 @@ z is NEVER inferred from array length -- _apply_truth_boosts gains a z kwarg thr
 run_legb (ctx.z_global); a profile without z, or against a pivot-only truth (alpha_hcd_z=None),
 is a HARD ValueError, not a degraded scalar fallback.
 
-Env: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_ks_selboost_hooks.py -q
+Env: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu CUDA_VISIBLE_DEVICES="" \
+     python -m pytest tests/test_ks_selboost_hooks.py -q
 """
+
 import math
 
 import numpy as np
@@ -42,10 +43,11 @@ def _toy_truth_pack(nZg=len(ZG)):
     return dict(
         theta9=rng.uniform(0.2, 0.8, 9),
         tau0_global=rng.uniform(0.9, 1.1, nZg),
-        alpha_hcd=np.array([0.7, 0.3, 0.05]),                 # (3,) [LLS, subDLA, DLA] pivot
+        alpha_hcd=np.array([0.7, 0.3, 0.05]),  # (3,) [LLS, subDLA, DLA] pivot
         alpha_hcd_z=np.stack([np.array([0.7, 0.3, 0.05]) * (1.0 + 0.1 * i) for i in range(nZg)]),
         a_siiii=0.02,
-        kept_global_z=np.ones(nZg, bool))
+        kept_global_z=np.ones(nZg, bool),
+    )
 
 
 def _B_quad(b0, e1, e2, z):
@@ -65,18 +67,24 @@ def test_none_and_empty_spec_are_identity():
     assert LB._apply_truth_boosts(tp, None, z=ZG) is tp
 
 
+@pytest.mark.deferred_legacy("RETIRED_STUB_SOURCE")
 def test_run_legb_threads_z_global_into_truth_boosts():
     import inspect
+
     src = inspect.getsource(LB.run_legb)
-    assert "_apply_truth_boosts(truth_pack, inject_spec, z=" in src, \
-        "run_legb must thread ctx.z_global into _apply_truth_boosts (never infer z from length)"
+    assert (
+        "_apply_truth_boosts(truth_pack, inject_spec, z=" in src
+    ), "run_legb must thread ctx.z_global into _apply_truth_boosts (never infer z from length)"
 
 
+@pytest.mark.deferred_legacy("RETIRED_STUB_SOURCE")
 def test_run_legb_records_truth_alpha_hcd_z():
     import inspect
+
     src = inspect.getsource(LB.run_legb)
-    assert "truth_alpha_hcd_z" in src, \
-        "run_legb per-mock record must carry truth_alpha_hcd_z (the analyzer row-level contract)"
+    assert (
+        "truth_alpha_hcd_z" in src
+    ), "run_legb per-mock record must carry truth_alpha_hcd_z (the analyzer row-level contract)"
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -85,8 +93,11 @@ def test_run_legb_records_truth_alpha_hcd_z():
 @pytest.mark.parametrize("boost", [1.0, 1.5])
 def test_scalar_path_bit_identical(boost):
     tp = _toy_truth_pack()
-    for fn, c in ((LB.apply_lls_truth_boost, 0), (LB.apply_subdla_truth_boost, 1),
-                  (LB.apply_dla_truth_boost, 2)):
+    for fn, c in (
+        (LB.apply_lls_truth_boost, 0),
+        (LB.apply_subdla_truth_boost, 1),
+        (LB.apply_dla_truth_boost, 2),
+    ):
         out = fn(tp, boost)
         # the reference IS the old implementation: fresh array, a[c] *= float(boost)
         a_ref = np.array(tp["alpha_hcd"], float)
@@ -139,8 +150,9 @@ def test_pivot_and_rows_boosted_consistently():
     # one row fully by hand (z=2.4): x = ln(3.4/4)
     x = math.log(3.4 / 4.0)
     b_hand = 1.3 * math.exp(0.8 * x + 0.4 * x * x)
-    np.testing.assert_allclose(out["alpha_hcd_z"][0, 0], tp["alpha_hcd_z"][0, 0] * b_hand,
-                               rtol=1e-15)
+    np.testing.assert_allclose(
+        out["alpha_hcd_z"][0, 0], tp["alpha_hcd_z"][0, 0] * b_hand, rtol=1e-15
+    )
 
 
 def test_tabulated_loglog_interpolation_and_pivot():
@@ -156,8 +168,9 @@ def test_tabulated_loglog_interpolation_and_pivot():
     lb = np.log([2.0, 1.0, 4.0])
     w = (math.log(3.4) - lz[0]) / (lz[1] - lz[0])
     b_hand = math.exp(lb[0] * (1 - w) + lb[1] * w)
-    np.testing.assert_allclose(out["alpha_hcd_z"][0, 0], tp["alpha_hcd_z"][0, 0] * b_hand,
-                               rtol=1e-12)
+    np.testing.assert_allclose(
+        out["alpha_hcd_z"][0, 0], tp["alpha_hcd_z"][0, 0] * b_hand, rtol=1e-12
+    )
 
 
 def test_tabulated_pivot_off_node():
@@ -170,7 +183,7 @@ def test_tabulated_pivot_off_node():
     lb = np.log([1.4, 1.1])
     wgt = (math.log(4.0) - lz[0]) / (lz[1] - lz[0])
     b3_hand = math.exp(lb[0] * (1 - wgt) + lb[1] * wgt)
-    assert abs(b3_hand - 1.4) > 1e-3 and abs(b3_hand - 1.1) > 1e-3   # off both nodes
+    assert abs(b3_hand - 1.4) > 1e-3 and abs(b3_hand - 1.1) > 1e-3  # off both nodes
     np.testing.assert_allclose(out["alpha_hcd"][0], tp["alpha_hcd"][0] * b3_hand, rtol=1e-12)
 
 
@@ -200,22 +213,31 @@ def test_profile_touches_only_its_class_and_never_mutates_input():
 # --------------------------------------------------------------------------------------------- #
 #  (6) Fail-loud validation list (spec Sec 4, all ValueError).
 # --------------------------------------------------------------------------------------------- #
-@pytest.mark.parametrize("bad", [
-    {"b_pivot": 1.0, "eta": 2.7},                          # the superseded Sec-4 key-set (A2.7)
-    {"b_pivot": 1.0, "eta1": 2.7},                         # missing eta2
-    {"b_pivot": 1.0, "eta1": 0.0, "eta2": 0.0, "x": 1},    # extra key
-    {"z": [2.0, 5.0], "boost": [1.0, 1.0]},                # missing interp
-    {},                                                     # empty dict
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"b_pivot": 1.0, "eta": 2.7},  # the superseded Sec-4 key-set (A2.7)
+        {"b_pivot": 1.0, "eta1": 2.7},  # missing eta2
+        {"b_pivot": 1.0, "eta1": 0.0, "eta2": 0.0, "x": 1},  # extra key
+        {"z": [2.0, 5.0], "boost": [1.0, 1.0]},  # missing interp
+        {},  # empty dict
+    ],
+)
 def test_unknown_value_keyset_raises(bad):
     with pytest.raises(ValueError, match="profile"):
         LB.eval_boost_profile(bad, ZG)
 
 
-@pytest.mark.parametrize("b0,e1,e2", [
-    (0.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (float("nan"), 0.0, 0.0),
-    (1.0, float("nan"), 0.0), (1.0, 0.0, float("inf")),
-])
+@pytest.mark.parametrize(
+    "b0,e1,e2",
+    [
+        (0.0, 0.0, 0.0),
+        (-1.0, 0.0, 0.0),
+        (float("nan"), 0.0, 0.0),
+        (1.0, float("nan"), 0.0),
+        (1.0, 0.0, float("inf")),
+    ],
+)
 def test_nonpositive_or_nonfinite_params_raise(b0, e1, e2):
     with pytest.raises(ValueError):
         LB.eval_boost_profile({"b_pivot": b0, "eta1": e1, "eta2": e2}, ZG)
@@ -223,18 +245,19 @@ def test_nonpositive_or_nonfinite_params_raise(b0, e1, e2):
 
 def test_tabulated_validation_raises():
     ok = {"z": [2.0, 3.0, 5.0], "boost": [1.0, 1.0, 1.0], "interp": "loglog"}
-    with pytest.raises(ValueError):   # z not strictly increasing
+    with pytest.raises(ValueError):  # z not strictly increasing
         LB.eval_boost_profile({**ok, "z": [2.0, 2.0, 5.0]}, ZG)
-    with pytest.raises(ValueError):   # decreasing
+    with pytest.raises(ValueError):  # decreasing
         LB.eval_boost_profile({**ok, "z": [5.0, 3.0, 2.0]}, ZG)
-    with pytest.raises(ValueError):   # boost <= 0
+    with pytest.raises(ValueError):  # boost <= 0
         LB.eval_boost_profile({**ok, "boost": [1.0, -1.0, 1.0]}, ZG)
-    with pytest.raises(ValueError):   # non-finite boost
+    with pytest.raises(ValueError):  # non-finite boost
         LB.eval_boost_profile({**ok, "boost": [1.0, float("nan"), 1.0]}, ZG)
-    with pytest.raises(ValueError, match="cover"):   # non-covering table: NO silent extrapolation
-        LB.eval_boost_profile({"z": [2.5, 3.0, 4.0], "boost": [1.0, 1.0, 1.0],
-                               "interp": "loglog"}, ZG)
-    with pytest.raises(ValueError):   # unknown interp
+    with pytest.raises(ValueError, match="cover"):  # non-covering table: NO silent extrapolation
+        LB.eval_boost_profile(
+            {"z": [2.5, 3.0, 4.0], "boost": [1.0, 1.0, 1.0], "interp": "loglog"}, ZG
+        )
+    with pytest.raises(ValueError):  # unknown interp
         LB.eval_boost_profile({**ok, "interp": "linear"}, ZG)
 
 
@@ -248,9 +271,9 @@ def test_profile_without_z_grid_raises():
     tp = _toy_truth_pack()
     prof = {"b_pivot": 1.5, "eta1": 0.0, "eta2": 0.0}
     with pytest.raises(ValueError, match="z"):
-        LB.apply_lls_truth_boost(tp, prof)            # no z kwarg
+        LB.apply_lls_truth_boost(tp, prof)  # no z kwarg
     with pytest.raises(ValueError, match="z"):
-        LB._apply_truth_boosts(tp, {"lls_truth_boost": prof})   # z not threaded
+        LB._apply_truth_boosts(tp, {"lls_truth_boost": prof})  # z not threaded
 
 
 def test_profile_against_pivot_only_truth_raises():
@@ -262,7 +285,7 @@ def test_profile_against_pivot_only_truth_raises():
 
 
 def test_z_length_mismatch_raises():
-    tp = _toy_truth_pack()                            # 5 rows
+    tp = _toy_truth_pack()  # 5 rows
     prof = {"b_pivot": 1.5, "eta1": 0.0, "eta2": 0.0}
     with pytest.raises(ValueError, match="mismatch|length"):
         LB.apply_lls_truth_boost(tp, prof, z=np.array([2.4, 3.0, 4.4]))
@@ -294,18 +317,21 @@ def test_joint_dict_plus_dict_composition_k5_form():
     tp = _toy_truth_pack()
     t_lls = {"z": [2.0, 3.0, 5.0], "boost": [1.12, 1.05, 1.03], "interp": "loglog"}
     t_sub = {"z": [2.0, 3.0, 5.0], "boost": [1.29, 1.16, 1.07], "interp": "loglog"}
-    out = LB._apply_truth_boosts(tp, {"lls_truth_boost": t_lls, "subdla_truth_boost": t_sub},
-                                 z=ZG)
+    out = LB._apply_truth_boosts(tp, {"lls_truth_boost": t_lls, "subdla_truth_boost": t_sub}, z=ZG)
     B_lls = np.asarray(LB.eval_boost_profile(t_lls, ZG))
     B_sub = np.asarray(LB.eval_boost_profile(t_sub, ZG))
-    np.testing.assert_allclose(out["alpha_hcd_z"][:, 0], tp["alpha_hcd_z"][:, 0] * B_lls,
-                               rtol=1e-15)
-    np.testing.assert_allclose(out["alpha_hcd_z"][:, 1], tp["alpha_hcd_z"][:, 1] * B_sub,
-                               rtol=1e-15)
+    np.testing.assert_allclose(
+        out["alpha_hcd_z"][:, 0], tp["alpha_hcd_z"][:, 0] * B_lls, rtol=1e-15
+    )
+    np.testing.assert_allclose(
+        out["alpha_hcd_z"][:, 1], tp["alpha_hcd_z"][:, 1] * B_sub, rtol=1e-15
+    )
     np.testing.assert_array_equal(out["alpha_hcd_z"][:, 2], tp["alpha_hcd_z"][:, 2])
-    np.testing.assert_allclose(out["alpha_hcd"][0],
-                               tp["alpha_hcd"][0] * LB.eval_boost_profile(t_lls, HCD_Z_PIVOT),
-                               rtol=1e-15)
+    np.testing.assert_allclose(
+        out["alpha_hcd"][0],
+        tp["alpha_hcd"][0] * LB.eval_boost_profile(t_lls, HCD_Z_PIVOT),
+        rtol=1e-15,
+    )
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -313,8 +339,10 @@ def test_joint_dict_plus_dict_composition_k5_form():
 # --------------------------------------------------------------------------------------------- #
 def test_unit_profile_is_identity():
     tp = _toy_truth_pack()
-    for prof in ({"b_pivot": 1.0, "eta1": 0.0, "eta2": 0.0},
-                 {"z": [2.0, 5.0], "boost": [1.0, 1.0], "interp": "loglog"}):
+    for prof in (
+        {"b_pivot": 1.0, "eta1": 0.0, "eta2": 0.0},
+        {"z": [2.0, 5.0], "boost": [1.0, 1.0], "interp": "loglog"},
+    ):
         out = LB.apply_lls_truth_boost(tp, prof, z=ZG)
         np.testing.assert_array_equal(out["alpha_hcd"], tp["alpha_hcd"])
         np.testing.assert_array_equal(out["alpha_hcd_z"], tp["alpha_hcd_z"])

@@ -10,9 +10,10 @@ This pins the contract:
   (c) emu_var ≥ 0 ALWAYS (the SPD guarantee: coefᵀ(P∘ρ∘P)coef ≥ 0);
   (d) ∂emu_var/∂α is finite (the α-derivative now carries the cross terms).
 
-Run: PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya JAX_PLATFORMS=cpu \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 -m pytest tests/test_xclass_cemu.py -q
+Run: PYTHONNOUSERSITE=1 PYTHONPATH=<repo> JAX_PLATFORMS=cpu \
+     python -m pytest tests/test_xclass_cemu.py -q
 """
+
 import hcd_analysis.emulator  # noqa: F401  enables x64
 import jax
 import jax.numpy as jnp
@@ -22,7 +23,10 @@ import pytest
 from hcd_analysis.emulator.model import Emulator
 from hcd_analysis.emulator import inference as I
 from hcd_analysis.emulator.likelihood import (
-    sigma_at_tau0, rho_at_tau0, _KIM_AMP, _KIM_SLOPE,
+    sigma_at_tau0,
+    rho_at_tau0,
+    _KIM_AMP,
+    _KIM_SLOPE,
 )
 
 
@@ -30,17 +34,26 @@ def _ctx(n_k=10, n_basis=6, n_tb=4, seed=0):
     """Synthetic single-z forward-model fixture (mirrors test_likelihood_driver._ctx)."""
     rng = np.random.default_rng(seed)
     model = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis, key=jax.random.PRNGKey(seed))
-    pf = {"mu_marg": jnp.asarray(rng.normal(-2, 0.5, (4, n_k))),
-          "sig_marg": jnp.asarray(rng.uniform(0.5, 1.5, (4, n_k))),
-          "sig_cosmo": jnp.asarray(rng.uniform(0.02, 0.1, (4, n_k)))}
+    pf = {
+        "mu_marg": jnp.asarray(rng.normal(-2, 0.5, (4, n_k))),
+        "sig_marg": jnp.asarray(rng.uniform(0.5, 1.5, (4, n_k))),
+        "sig_cosmo": jnp.asarray(rng.uniform(0.02, 0.1, (4, n_k))),
+    }
     return dict(
-        model=model, pf=pf, n_k=n_k, n_tb=n_tb,
+        model=model,
+        pf=pf,
+        n_k=n_k,
+        n_tb=n_tb,
         dla_core=jnp.asarray(rng.uniform(0.0, 0.5, n_k)),
         alpha_hcd=jnp.asarray(rng.uniform(0.05, 0.4, 3)),
         sigma_zb=jnp.asarray(rng.uniform(0.01, 0.05, (4, n_k, n_tb))),
         cosmic=jnp.asarray(rng.uniform(1.0, 4.0, n_k)),
         alpha_centres=jnp.asarray([0.66, 0.83, 1.15, 1.33]),
-        flag=jnp.zeros(n_k, bool), theta9=jnp.full(9, 0.5), z=3.0, z_unit=0.5)
+        flag=jnp.zeros(n_k, bool),
+        theta9=jnp.full(9, 0.5),
+        z=3.0,
+        z_unit=0.5,
+    )
 
 
 def _diag_rho(sigma_zb):
@@ -57,10 +70,20 @@ def _emu_var(c, sigma_zb=None, rho_zb=None, tau0=0.40):
     """The diagonal of (C − cosmic) = the emu_var the assembly built (diagonal OR x-class)."""
     sig = c["sigma_zb"] if sigma_zb is None else sigma_zb
     _, C = I.predict_P_obs_and_cov_single_z(
-        c["model"], c["theta9"], c["z_unit"], c["z"], tau0, c["alpha_hcd"],
-        pf_stats=c["pf"], sigma_zb=sig, alpha_centres=c["alpha_centres"],
-        cosmic_cov=c["cosmic"], dla_core=c["dla_core"], dla_shot_flag=c["flag"],
-        rho_zb=rho_zb)
+        c["model"],
+        c["theta9"],
+        c["z_unit"],
+        c["z"],
+        tau0,
+        c["alpha_hcd"],
+        pf_stats=c["pf"],
+        sigma_zb=sig,
+        alpha_centres=c["alpha_centres"],
+        cosmic_cov=c["cosmic"],
+        dla_core=c["dla_core"],
+        dla_shot_flag=c["flag"],
+        rho_zb=rho_zb,
+    )
     return np.diag(np.asarray(C)) - np.asarray(c["cosmic"])
 
 
@@ -76,16 +99,37 @@ def test_xclass_diag_equals_diagonal_path_at_band_centre():
     for tb in range(c["n_tb"]):
         tau0 = float(c["alpha_centres"][tb]) * _KIM_AMP * (1 + c["z"]) ** _KIM_SLOPE
         _, C_diag = I.predict_P_obs_and_cov_single_z(
-            c["model"], c["theta9"], c["z_unit"], c["z"], tau0, c["alpha_hcd"],
-            pf_stats=c["pf"], sigma_zb=c["sigma_zb"], alpha_centres=c["alpha_centres"],
-            cosmic_cov=c["cosmic"], dla_core=c["dla_core"], dla_shot_flag=c["flag"])
+            c["model"],
+            c["theta9"],
+            c["z_unit"],
+            c["z"],
+            tau0,
+            c["alpha_hcd"],
+            pf_stats=c["pf"],
+            sigma_zb=c["sigma_zb"],
+            alpha_centres=c["alpha_centres"],
+            cosmic_cov=c["cosmic"],
+            dla_core=c["dla_core"],
+            dla_shot_flag=c["flag"],
+        )
         _, C_x = I.predict_P_obs_and_cov_single_z(
-            c["model"], c["theta9"], c["z_unit"], c["z"], tau0, c["alpha_hcd"],
-            pf_stats=c["pf"], sigma_zb=c["sigma_zb"], alpha_centres=c["alpha_centres"],
-            cosmic_cov=c["cosmic"], dla_core=c["dla_core"], dla_shot_flag=c["flag"],
-            rho_zb=rho)
-        assert np.array_equal(np.asarray(C_diag), np.asarray(C_x)), \
-            f"x-class with ρ=diag(σ²) must EXACTLY equal the diagonal path at centre tb={tb}"
+            c["model"],
+            c["theta9"],
+            c["z_unit"],
+            c["z"],
+            tau0,
+            c["alpha_hcd"],
+            pf_stats=c["pf"],
+            sigma_zb=c["sigma_zb"],
+            alpha_centres=c["alpha_centres"],
+            cosmic_cov=c["cosmic"],
+            dla_core=c["dla_core"],
+            dla_shot_flag=c["flag"],
+            rho_zb=rho,
+        )
+        assert np.array_equal(
+            np.asarray(C_diag), np.asarray(C_x)
+        ), f"x-class with ρ=diag(σ²) must EXACTLY equal the diagonal path at centre tb={tb}"
 
 
 def test_xclass_diag_equals_diagonal_path_tau0_flat():
@@ -98,8 +142,9 @@ def test_xclass_diag_equals_diagonal_path_tau0_flat():
     tau0 = 0.37  # arbitrary, between centres
     diag = _emu_var(c, sigma_zb=sig_flat, tau0=tau0)
     xcl = _emu_var(c, sigma_zb=sig_flat, rho_zb=rho, tau0=tau0)
-    assert np.allclose(diag, xcl, rtol=1e-12, atol=1e-18), \
-        "ρ=diag(σ²) must equal the diagonal path at any τ₀ when σ is τ₀-flat"
+    assert np.allclose(
+        diag, xcl, rtol=1e-12, atol=1e-18
+    ), "ρ=diag(σ²) must equal the diagonal path at any τ₀ when σ is τ₀-flat"
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +158,7 @@ def test_positive_offdiagonal_increases_emu_var():
     base = _diag_rho(c["sigma_zb"])
     var_base = _emu_var(c, rho_zb=base)
     # add a positive subDLA(2)–DLA(3) coupling: ρ_23 = +0.6·√(ρ_22·ρ_33) (a valid correlation)
-    coup = 0.6 * jnp.sqrt(c["sigma_zb"][2] ** 2 * c["sigma_zb"][3] ** 2)        # (K,Tb)
+    coup = 0.6 * jnp.sqrt(c["sigma_zb"][2] ** 2 * c["sigma_zb"][3] ** 2)  # (K,Tb)
     rho_pos = base.at[2, 3].set(coup).at[3, 2].set(coup)
     var_pos = _emu_var(c, rho_zb=rho_pos)
     dvar = var_pos - var_base
@@ -127,7 +172,7 @@ def test_negative_offdiagonal_decreases_emu_var():
     c = _ctx()
     base = _diag_rho(c["sigma_zb"])
     var_base = _emu_var(c, rho_zb=base)
-    coup = -0.6 * jnp.sqrt(c["sigma_zb"][1] ** 2 * c["sigma_zb"][2] ** 2)       # (K,Tb)
+    coup = -0.6 * jnp.sqrt(c["sigma_zb"][1] ** 2 * c["sigma_zb"][2] ** 2)  # (K,Tb)
     rho_neg = base.at[1, 2].set(coup).at[2, 1].set(coup)
     var_neg = _emu_var(c, rho_zb=rho_neg)
     assert np.any(var_neg < var_base - 1e-12), "negative coupling must lower some emu_var bins"
@@ -150,10 +195,12 @@ def test_emu_var_nonneg_for_spd_rho():
             rho[:, :, k, tb] = A @ A.T
     rho = jnp.asarray(rho)
     for s in range(8):
-        a = jnp.asarray(rng.uniform(-0.3, 0.6, 3))    # incl. coefs of mixed sign
+        a = jnp.asarray(rng.uniform(-0.3, 0.6, 3))  # incl. coefs of mixed sign
         cc = dict(c, alpha_hcd=a)
         var = _emu_var(cc, rho_zb=rho)
-        assert np.all(var >= -1e-12), f"emu_var must be ≥0 for SPD ρ (seed {s}); min {var.min():.3e}"
+        assert np.all(
+            var >= -1e-12
+        ), f"emu_var must be ≥0 for SPD ρ (seed {s}); min {var.min():.3e}"
 
 
 def test_emu_var_nonneg_at_strong_correlation():
@@ -162,11 +209,13 @@ def test_emu_var_nonneg_at_strong_correlation():
     c = _ctx(seed=5)
     base = _diag_rho(c["sigma_zb"])
     rho = base
-    for (i, j) in [(0, 1), (0, 2), (1, 2), (2, 3)]:
+    for i, j in [(0, 1), (0, 2), (1, 2), (2, 3)]:
         coup = 0.999 * jnp.sqrt(c["sigma_zb"][i] ** 2 * c["sigma_zb"][j] ** 2)
         rho = rho.at[i, j].set(coup).at[j, i].set(coup)
     var = _emu_var(c, rho_zb=rho)
-    assert np.all(var >= -1e-12), f"emu_var must stay ≥0 at near-±1 correlation; min {var.min():.3e}"
+    assert np.all(
+        var >= -1e-12
+    ), f"emu_var must stay ≥0 at near-±1 correlation; min {var.min():.3e}"
 
 
 # ---------------------------------------------------------------------------
@@ -180,24 +229,50 @@ def test_demu_var_dalpha_finite_and_carries_cross_terms():
 
     def total_emu(a):
         _, C = I.predict_P_obs_and_cov_single_z(
-            c["model"], c["theta9"], c["z_unit"], c["z"], 0.40, a,
-            pf_stats=c["pf"], sigma_zb=c["sigma_zb"], alpha_centres=c["alpha_centres"],
-            cosmic_cov=c["cosmic"], dla_core=c["dla_core"], dla_shot_flag=c["flag"],
-            rho_zb=rho)
+            c["model"],
+            c["theta9"],
+            c["z_unit"],
+            c["z"],
+            0.40,
+            a,
+            pf_stats=c["pf"],
+            sigma_zb=c["sigma_zb"],
+            alpha_centres=c["alpha_centres"],
+            cosmic_cov=c["cosmic"],
+            dla_core=c["dla_core"],
+            dla_shot_flag=c["flag"],
+            rho_zb=rho,
+        )
         return jnp.sum(jnp.diag(C))
 
     g = jax.grad(total_emu)(c["alpha_hcd"])
     assert np.all(np.isfinite(np.asarray(g))), "∂emu_var/∂α must be finite (x-class path)"
     assert np.asarray(g).dtype == np.float64, "x64 must be asserted"
     # the cross term materially changes the α-grad vs the diagonal-only ρ (off-diagonals matter)
-    g_diag = jax.grad(lambda a: jnp.sum(jnp.diag(
-        I.predict_P_obs_and_cov_single_z(
-            c["model"], c["theta9"], c["z_unit"], c["z"], 0.40, a,
-            pf_stats=c["pf"], sigma_zb=c["sigma_zb"], alpha_centres=c["alpha_centres"],
-            cosmic_cov=c["cosmic"], dla_core=c["dla_core"], dla_shot_flag=c["flag"],
-            rho_zb=base)[1])))(c["alpha_hcd"])
-    assert not np.allclose(np.asarray(g), np.asarray(g_diag)), \
-        "the off-diagonal ρ must change ∂emu_var/∂α (cross terms are live)"
+    g_diag = jax.grad(
+        lambda a: jnp.sum(
+            jnp.diag(
+                I.predict_P_obs_and_cov_single_z(
+                    c["model"],
+                    c["theta9"],
+                    c["z_unit"],
+                    c["z"],
+                    0.40,
+                    a,
+                    pf_stats=c["pf"],
+                    sigma_zb=c["sigma_zb"],
+                    alpha_centres=c["alpha_centres"],
+                    cosmic_cov=c["cosmic"],
+                    dla_core=c["dla_core"],
+                    dla_shot_flag=c["flag"],
+                    rho_zb=base,
+                )[1]
+            )
+        )
+    )(c["alpha_hcd"])
+    assert not np.allclose(
+        np.asarray(g), np.asarray(g_diag)
+    ), "the off-diagonal ρ must change ∂emu_var/∂α (cross terms are live)"
 
 
 def test_dlogL_dtau0_finite_xclass_path():
@@ -208,17 +283,33 @@ def test_dlogL_dtau0_finite_xclass_path():
     coup = 0.4 * jnp.sqrt(c["sigma_zb"][0] ** 2 * c["sigma_zb"][1] ** 2)
     rho = base.at[0, 1].set(coup).at[1, 0].set(coup)
     from hcd_analysis.emulator.predict import predict_P_obs
-    P_obs = np.asarray(predict_P_obs(c["model"], c["theta9"], c["z_unit"], 0.40,
-                                     c["alpha_hcd"], c["pf"], c["dla_core"]))
+
+    P_obs = np.asarray(
+        predict_P_obs(
+            c["model"], c["theta9"], c["z_unit"], 0.40, c["alpha_hcd"], c["pf"], c["dla_core"]
+        )
+    )
     P_data = jnp.asarray(P_obs + np.random.default_rng(0).normal(0, 0.3, c["n_k"]))
     valid_k = jnp.ones(c["n_k"], bool)
 
     def f(t0):
         return I.log_lik_single_z(
-            c["model"], c["theta9"], c["z_unit"], c["z"], t0, c["alpha_hcd"],
-            pf_stats=c["pf"], sigma_zb=c["sigma_zb"], alpha_centres=c["alpha_centres"],
-            cosmic_cov=c["cosmic"], P_data=P_data, dla_core=c["dla_core"],
-            dla_shot_flag=c["flag"], valid_k=valid_k, rho_zb=rho)
+            c["model"],
+            c["theta9"],
+            c["z_unit"],
+            c["z"],
+            t0,
+            c["alpha_hcd"],
+            pf_stats=c["pf"],
+            sigma_zb=c["sigma_zb"],
+            alpha_centres=c["alpha_centres"],
+            cosmic_cov=c["cosmic"],
+            P_data=P_data,
+            dla_core=c["dla_core"],
+            dla_shot_flag=c["flag"],
+            valid_k=valid_k,
+            rho_zb=rho,
+        )
 
     for t0 in (0.30, 0.40, 0.55):
         assert np.isfinite(float(f(t0)))

@@ -1,0 +1,19 @@
+# Prochaska, O'Meara & Worseck (2010), the allowed region of the H I frequency distribution f(N_HI, X) of Lyman
+# limit systems at z ~ 3.7 for log N_HI 17.5 to 19.0: the envelope of the four extreme power laws of the table
+# "SUMMARY OF f(N) RESULTS", cut "Conservative Range of Allowed Values". Six corners, log10 N_HI and log10 f.
+# Paper: Prochaska, J. X., O'Meara, J. M., Worseck, G. 2010, "A Definitive Survey for Lyman Limit Systems at
+#   z ~ 3.5 with the Sloan Digital Sky Survey", ApJ 718, 392, doi:10.1088/0004-637X/718/1/392,
+#   arXiv:0912.0292 (version 1, the only version).
+# Source: arXiv e-print 0912.0292v1 (https://arxiv.org/e-print/0912.0292v1), file prpt_dr7lls.tex,
+#   sha256 f236288f014668c136b1f4a5b4e5d4c19b741f0538d3c090edeabffe2bd574b9; table label tab:fn, lines 2100-2137, rows: line 2114: l=0.15, log f19=-20.25, log k=-4.1; line 2115: l=0.35, log f19=-20.25, log k=4.7; line 2118: l=0.15, log f19=-19.85, log k=-18.0; line 2119: l=0.35, log f19=-19.85, log k=-4.6.
+#   Read 2026-11-17. The power law f = k_LLS N^beta_LLS over N = 10^17.5 to 10^19 is that of section
+#   "f(N) at z ~ 3.7" (lines 1921-1946). beta_LLS = (log f19 - log k_LLS)/19 (the table's beta column, one
+#   decimal, agrees after rounding). Region = between the lowest and the highest of the four lines at each N.
+#   Values not rescaled (per unit X for the paper's Omega_m = 0.3, Omega_Lambda = 0.7, H0 = 72 cosmology).
+# Columns: log10 N_HI, log10 f(N_HI, X) (f in cm^2); corners in the order of prochaska_lls.dat of PR #27.
+19.000000	-20.250000
+19.000000	-19.850000
+18.216495	-19.221134
+17.500000	-18.280263
+17.500000	-19.703947
+18.468531	-19.798252

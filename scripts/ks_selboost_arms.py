@@ -30,24 +30,28 @@ Pure numpy on purpose (login-node safe; the analyzer imports this). ``eval_profi
 agree with the deployed hook evaluator closure_legb.eval_boost_profile to float precision —
 enforced by test_registry_evaluator_matches_hook_evaluator.
 """
+
+import os
 import hashlib
 import json
 
 import numpy as np
 
-Z_PIVOT = 3.0                 # convention B; == inference.HCD_Z_PIVOT (test-pinned)
+Z_PIVOT = 3.0  # convention B; == inference.HCD_Z_PIVOT (test-pinned)
 KS_Z_RANGE = (2.4, 4.6)
-ENVELOPE_REL = (0.8, 3.2)     # A2.1: relative-boost envelope == cosmic 2x-8x over the 2.5 center
-KS_DEPLOYED_LLS_BOOST = 2.5   # the deployed KS survey boost (cosmic-units conversion reference)
+ENVELOPE_REL = (0.8, 3.2)  # A2.1: relative-boost envelope == cosmic 2x-8x over the 2.5 center
+KS_DEPLOYED_LLS_BOOST = 2.5  # the deployed KS survey boost (cosmic-units conversion reference)
 
-K5_TABLE_PATH = ("/home/mfho/hcd_priya_notes/docs/superpowers/corrected-dndx-artifacts/"
-                 "conditional_incidence_table.txt")
+K5_TABLE_PATH = os.path.join(
+    os.environ.get("HCD_K5_TABLE_DIR", "<HCD_K5_TABLE_DIR unset>"),
+    "conditional_incidence_table.txt",
+)  # the measured table of record
 # provenance pin (D3 measurement of record, 2026-07-19): sha256 of the committed table file.
 # An updated measurement silently swapped under a running campaign fails loud here AND at the
 # analyzer ingest re-assert (same philosophy as the runner prior-state tripwire).
 K5_TABLE_SHA256 = "40931a5dc62c968150f39184f6191d5159863935bf0ad24167fddf9b3306edc9"
 
-_PLAN_CPUH_PER_FIT = 5.0      # Sec-7 planning anchor (measured KS ~3.8 at 550 steps; plan at 5)
+_PLAN_CPUH_PER_FIT = 5.0  # Sec-7 planning anchor (measured KS ~3.8 at 550 steps; plan at 5)
 _CONTINGENCY = 1.5
 _PILOT_CPUH = 40.0
 
@@ -61,64 +65,116 @@ _PILOT_CPUH = 40.0
 # --------------------------------------------------------------------------------------------- #
 ARMS = {
     "K0_clean": dict(
-        quad=None, n_mocks=16, envelope="in", default_run=True, part1=False, surface_fit=False,
-        purpose="control, matched center; shared pairing baseline; SBC/rank reference"),
+        quad=None,
+        n_mocks=16,
+        envelope="in",
+        default_run=True,
+        part1=False,
+        surface_fit=False,
+        purpose="control, matched center; shared pairing baseline; SBC/rank reference",
+    ),
     "K1_flat_lo": dict(
-        quad=(0.714, 0.0, 0.0), n_mocks=12, envelope="out", default_run=True, part1=False,
+        quad=(0.714, 0.0, 0.0),
+        n_mocks=12,
+        envelope="out",
+        default_run=True,
+        part1=False,
         surface_fit=True,
         purpose="D1 low-side amplitude (truth 2.5x vs center 3.5x displacement MIRROR); "
-                "cosmic 1.79 flat sits below the 2.0 floor -> envelope='out', NOT in Part 1"),
+        "cosmic 1.79 flat sits below the 2.0 floor -> envelope='out', NOT in Part 1",
+    ),
     "K2_flat_hi": dict(
-        quad=(1.667, 0.0, 0.0), n_mocks=16, envelope="in", default_run=True, part1=True,
+        quad=(1.667, 0.0, 0.0),
+        n_mocks=16,
+        envelope="in",
+        default_run=True,
+        part1=True,
         surface_fit=True,
         purpose="D1 high-side amplitude (truth 2.5x vs center 1.5x); DESI-comparable; "
-                "Part-1 gate arm"),
+        "Part-1 gate arm",
+    ),
     "K3_rising": dict(
-        quad=(1.25, 2.7, 0.0), n_mocks=16, envelope="in", default_run=True, part1=True,
+        quad=(1.25, 2.7, 0.0),
+        n_mocks=16,
+        envelope="in",
+        default_run=True,
+        part1=True,
         surface_fit=True,
         purpose="strong-rise corner, calibrated Ho slope +2.7 (b0=1.25 keeps the low-z end on "
-                "the 2.0-cosmic floor); anchors S_eta1; Part-1 gate arm"),
+        "the 2.0-cosmic floor); anchors S_eta1; Part-1 gate arm",
+    ),
     "K4_u_paper": dict(
-        quad=(0.81, -0.35, 13.0), n_mocks=16, envelope="in", default_run=True, part1=True,
+        quad=(0.81, -0.35, 13.0),
+        n_mocks=16,
+        envelope="in",
+        default_run=True,
+        part1=True,
         surface_fit=True,
         purpose="paper-like U (eta2>0), THE realistic criterion-bearing member: cosmic 3.0 at "
-                "z=2.4, trough 2.0 near z=3.05, 4.5 at z=4.2, 7.8 at z=4.6; Part-1 gate arm"),
+        "z=2.4, trough 2.0 near z=3.05, 4.5 at z=4.2, 7.8 at z=4.6; Part-1 gate arm",
+    ),
     "K6_inv_u": dict(
-        quad=(2.67, 3.83, -22.0), n_mocks=12, envelope="in", default_run=True, part1=True,
+        quad=(2.67, 3.83, -22.0),
+        n_mocks=12,
+        envelope="in",
+        default_run=True,
+        part1=True,
         surface_fit=True,
         purpose="inverted-U corner (eta2<0), the marginalization-projection alternative; "
-                "two-sides eta2 (identification + e2-sign linearity test); Part-1 gate arm"),
+        "two-sides eta2 (identification + e2-sign linearity test); Part-1 gate arm",
+    ),
     "K7_falling": dict(
-        quad=(2.00, -2.7, 0.0), n_mocks=12, envelope="in", default_run=True, part1=True,
+        quad=(2.00, -2.7, 0.0),
+        n_mocks=12,
+        envelope="in",
+        default_run=True,
+        part1=True,
         surface_fit=True,
         purpose="falling corner (cosmic 7.8 -> 2.0), promoted from contingency C1 to a DEFAULT "
-                "arm by the approved second ask (A2.8-b); two-sides eta1; Part-1 gate arm"),
+        "arm by the approved second ask (A2.8-b); two-sides eta1; Part-1 gate arm",
+    ),
     "K5_joint_meas": dict(
-        quad="measured", n_mocks=8, envelope="in", default_run=True, part1="if_in_envelope",
-        surface_fit=False, part2_binding=False,   # FLAG A RESOLUTION (spec launch log,
+        quad="measured",
+        n_mocks=8,
+        envelope="in",
+        default_run=True,
+        part1="if_in_envelope",
+        surface_fit=False,
+        part2_binding=False,  # FLAG A RESOLUTION (spec launch log,
         # PI-signed A2.8-c): the null-bound arm is EXCLUDED from the binding Part-2 max — at
         # its measured displacement D~0.13 the N=8 noise floor 2SE/D~1.3 makes it mechanically
         # unfailable-or-unpassable on noise alone; it reports a separate null-bound line.
         purpose="D3 joint-class NULL-BOUND arm at the measured DLA-conditional incidence "
-                "(B_LLS ~1.12->1.03, B_subDLA ~1.29->1.08); detects gross non-additivity only "
-                "(linear prediction ~0.05-0.07 sigma_post); OUT of the LLS surface fit"),
+        "(B_LLS ~1.12->1.03, B_subDLA ~1.29->1.08); detects gross non-additivity only "
+        "(linear prediction ~0.05-0.07 sigma_post); OUT of the LLS surface fit",
+    ),
     # ---- pre-registered contingencies (trigger-gated, NOT run by default) -------------------- #
     "C1_falling": dict(
-        quad=(2.00, -2.7, 0.0), n_mocks=12, envelope="in", default_run=False, part1=True,
+        quad=(2.00, -2.7, 0.0),
+        n_mocks=12,
+        envelope="in",
+        default_run=False,
+        part1=True,
         surface_fit=True,
         trigger="collapse-check failure, K1/K2 sign-asymmetry, or K3-vs-surface residual "
-                "> 2 SE. VOID while K7_falling runs as a default arm (A2.4: the approved "
-                "second ask absorbs C1 entirely) — registered for the ladder-descope branch "
-                "in which K7 is dropped.",
-        purpose="envelope-legal falling contingency (re-specced from the old b0=1 form)"),
+        "> 2 SE. VOID while K7_falling runs as a default arm (A2.4: the approved "
+        "second ask absorbs C1 entirely) — registered for the ladder-descope branch "
+        "in which K7 is dropped.",
+        purpose="envelope-legal falling contingency (re-specced from the old b0=1 form)",
+    ),
     "C2_adversarial": dict(
-        quad=(1.30, 6.5, 0.0), n_mocks=8, envelope="out", default_run=False, part1=False,
+        quad=(1.30, 6.5, 0.0),
+        n_mocks=8,
+        envelope="out",
+        default_run=False,
+        part1=False,
         surface_fit=False,
         trigger="K3 and K4 disagree qualitatively (slope-prior partial-absorption ambiguity), "
-                "or the PI rules an adversarial corner INTO the Part-B max.",
+        "or the PI rules an adversarial corner INTO the Part-B max.",
         purpose="OUT-OF-ENVELOPE adversarial corner (cosmic ~29x at z=4.6; emulator-span "
-                "caveat applies with force); counts in the binding Part-2 max if run (recorded "
-                "D4), flagged separately in the readout"),
+        "caveat applies with force); counts in the binding Part-2 max if run (recorded "
+        "D4), flagged separately in the readout",
+    ),
 }
 
 _CLS_KEYS = ("lls_truth_boost", "subdla_truth_boost")
@@ -140,8 +196,7 @@ def campaign_cost_cpuh():
     850 CPU-h second-ask envelope)."""
     fits = sum(ARMS[a]["n_mocks"] for a in default_arm_ids())
     nominal = fits * _PLAN_CPUH_PER_FIT
-    return dict(fits=fits, nominal=nominal,
-                worst_case=nominal * _CONTINGENCY + _PILOT_CPUH)
+    return dict(fits=fits, nominal=nominal, worst_case=nominal * _CONTINGENCY + _PILOT_CPUH)
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -154,8 +209,9 @@ def eval_profile(profile, z):
     keys = frozenset(profile)
     if keys == frozenset({"b_pivot", "eta1", "eta2"}):
         x = np.log((1.0 + z_arr) / (1.0 + Z_PIVOT))
-        B = float(profile["b_pivot"]) * np.exp(float(profile["eta1"]) * x
-                                               + float(profile["eta2"]) * x * x)
+        B = float(profile["b_pivot"]) * np.exp(
+            float(profile["eta1"]) * x + float(profile["eta2"]) * x * x
+        )
     elif keys == frozenset({"z", "boost", "interp"}):
         assert profile["interp"] == "loglog", profile["interp"]
         zt = np.asarray(profile["z"], float)
@@ -179,7 +235,8 @@ def load_k5_measured_tables(path=K5_TABLE_PATH):
     assert sha == K5_TABLE_SHA256, (
         f"K5 measurement table sha256 {sha[:16]}... != pinned {K5_TABLE_SHA256[:16]}... "
         f"({path}); the D3 measured vector of record has been swapped/edited — re-pin "
-        f"deliberately or restore the file")
+        f"deliberately or restore the file"
+    )
     z, b_lls, b_sub = [], [], []
     for line in raw.decode("utf-8").splitlines():
         parts = line.split()
@@ -188,18 +245,24 @@ def load_k5_measured_tables(path=K5_TABLE_PATH):
         if len(parts) >= 5 and parts[1].isdigit():
             nsnap = int(parts[1])
             if nsnap <= 1:
-                continue                    # single-sim rows: no suite scatter (table caveat)
+                continue  # single-sim rows: no suite scatter (table caveat)
             z.append(float(parts[0]))
             b_lls.append(float(parts[2].split("+-")[0]))
             b_sub.append(float(parts[3].split("+-")[0]))
     z = np.asarray(z, float)
     order = np.argsort(z)
-    out = dict(z=z[order], B_lls=np.asarray(b_lls, float)[order],
-               B_subdla=np.asarray(b_sub, float)[order], sha256=sha, path=str(path),
-               n_rows=int(z.size))
+    out = dict(
+        z=z[order],
+        B_lls=np.asarray(b_lls, float)[order],
+        B_subdla=np.asarray(b_sub, float)[order],
+        sha256=sha,
+        path=str(path),
+        n_rows=int(z.size),
+    )
     assert out["n_rows"] >= 10 and np.all(np.diff(out["z"]) > 0), "K5 table parse failed"
-    assert out["z"][0] <= 2.2 and out["z"][-1] >= 4.6, \
-        "K5 table must cover the z_global union grid (no silent extrapolation in the hook)"
+    assert (
+        out["z"][0] <= 2.2 and out["z"][-1] >= 4.6
+    ), "K5 table must cover the z_global union grid (no silent extrapolation in the hook)"
     return out
 
 
@@ -213,10 +276,12 @@ def arm_inject_spec(arm_id, table_path=K5_TABLE_PATH):
     if e["quad"] == "measured":
         t = load_k5_measured_tables(table_path)
         return {
-            "lls_truth_boost": {"z": list(t["z"]), "boost": list(t["B_lls"]),
-                                "interp": "loglog"},
-            "subdla_truth_boost": {"z": list(t["z"]), "boost": list(t["B_subdla"]),
-                                   "interp": "loglog"},
+            "lls_truth_boost": {"z": list(t["z"]), "boost": list(t["B_lls"]), "interp": "loglog"},
+            "subdla_truth_boost": {
+                "z": list(t["z"]),
+                "boost": list(t["B_subdla"]),
+                "interp": "loglog",
+            },
         }
     b0, e1, e2 = e["quad"]
     return {"lls_truth_boost": {"b_pivot": float(b0), "eta1": float(e1), "eta2": float(e2)}}
@@ -237,12 +302,19 @@ def _registry_payload(table_path=K5_TABLE_PATH):
     payload = {}
     for aid, e in ARMS.items():
         payload[aid] = dict(
-            profiles=arm_inject_spec(aid, table_path), n_mocks=e["n_mocks"],
-            envelope=e["envelope"], default_run=e["default_run"], part1=e["part1"],
-            surface_fit=e["surface_fit"])
-    payload["_meta"] = dict(z_pivot=Z_PIVOT, envelope_rel=list(ENVELOPE_REL),
-                            ks_z_range=list(KS_Z_RANGE),
-                            k5_table_sha256=K5_TABLE_SHA256)
+            profiles=arm_inject_spec(aid, table_path),
+            n_mocks=e["n_mocks"],
+            envelope=e["envelope"],
+            default_run=e["default_run"],
+            part1=e["part1"],
+            surface_fit=e["surface_fit"],
+        )
+    payload["_meta"] = dict(
+        z_pivot=Z_PIVOT,
+        envelope_rel=list(ENVELOPE_REL),
+        ks_z_range=list(KS_Z_RANGE),
+        k5_table_sha256=K5_TABLE_SHA256,
+    )
     return payload
 
 
@@ -251,7 +323,8 @@ def registry_signature(table_path=K5_TABLE_PATH):
     shard pkl; the analyzer ingest asserts homogeneity (mixed-registry campaigns must not
     pool)."""
     return hashlib.sha256(
-        json.dumps(_registry_payload(table_path), sort_keys=True).encode("utf-8")).hexdigest()
+        json.dumps(_registry_payload(table_path), sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 
 def batch_cells():

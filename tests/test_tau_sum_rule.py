@@ -10,12 +10,14 @@ Demonstrates three things:
 
 Also makes one plot summarising all of this for the audit record.
 """
+
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,8 +28,8 @@ sys.path.insert(0, str(ROOT))
 from hcd_analysis.voigt_utils import _SIGMA_PREFACTOR, fit_nhi_from_tau
 from tests.test_nhi_recovery import tau_voigt_physical  # physical normalisation
 
-DV = 1.0       # km/s (fine pixel grid for sum-rule test)
-V_HALF = 10000 # km/s half-box (wide enough to contain the full profile)
+DV = 1.0  # km/s (fine pixel grid for sum-rule test)
+V_HALF = 10000  # km/s half-box (wide enough to contain the full profile)
 TAU_THR = 100.0
 OUT = ROOT / "figures" / "diagnostics"
 OUT.mkdir(parents=True, exist_ok=True)
@@ -51,8 +53,12 @@ def voigt_fit_nhi(v, tau, b_init=30.0):
     (Bypasses catalog.py's window expansion, so this is wing-contamination-free
     when tau has no forest added.)"""
     NHI, _, _ = fit_nhi_from_tau(
-        tau, v, b_init=b_init, b_bounds=(1.0, 300.0),
-        tau_cap=1.0e12, max_iter=500,
+        tau,
+        v,
+        b_init=b_init,
+        b_bounds=(1.0, 300.0),
+        tau_cap=1.0e12,
+        max_iter=500,
     )
     return NHI
 
@@ -67,8 +73,10 @@ def main():
             _, tau = profile(logN, b)
             tau_int_full = float((tau * DV).sum())
             expected = 10.0**logN * _SIGMA_PREFACTOR
-            print(f"  {logN:>4.2f}  {b:>4.0f}  {tau_int_full:>12.4e}  "
-                  f"{expected:>14.4e}  {tau_int_full/expected:6.4f}")
+            print(
+                f"  {logN:>4.2f}  {b:>4.0f}  {tau_int_full:>12.4e}  "
+                f"{expected:>14.4e}  {tau_int_full/expected:6.4f}"
+            )
 
     print()
     print("=" * 66)
@@ -93,8 +101,10 @@ def main():
     print("=" * 66)
     print("3.  Fast mode vs Voigt-fit on clean synthetic input")
     print("=" * 66)
-    print(f"{'logN_true':>10}  {'b':>4}  {'fast':>8}  {'voigt':>8}  "
-          f"{'fast-truth':>11}  {'voigt-truth':>12}")
+    print(
+        f"{'logN_true':>10}  {'b':>4}  {'fast':>8}  {'voigt':>8}  "
+        f"{'fast-truth':>11}  {'voigt-truth':>12}"
+    )
     fast_results, voigt_results = {}, {}
     for b in b_grid:
         fr, vr = [], []
@@ -107,9 +117,12 @@ def main():
                 lv = np.log10(max(NHI_fit, 1.0))
             except Exception:
                 lv = np.nan
-            fr.append(lf); vr.append(lv)
-            print(f"  {logN:>9.2f}  {b:>4.0f}  {lf:>8.3f}  {lv:>8.3f}  "
-                  f"{lf-logN:>+11.3f}  {lv-logN:>+12.3f}")
+            fr.append(lf)
+            vr.append(lv)
+            print(
+                f"  {logN:>9.2f}  {b:>4.0f}  {lf:>8.3f}  {lv:>8.3f}  "
+                f"{lf-logN:>+11.3f}  {lv-logN:>+12.3f}"
+            )
         fast_results[b] = np.array(fr)
         voigt_results[b] = np.array(vr)
 
@@ -147,11 +160,13 @@ def main():
 
     # Panel 3: fast vs voigt-fit
     for j, b in enumerate(b_grid):
-        ax[2].plot(logN_grid, fast_results[b] - logN_grid, "o-",
-                   label=f"fast  b={b:.0f}", alpha=0.9)
+        ax[2].plot(
+            logN_grid, fast_results[b] - logN_grid, "o-", label=f"fast  b={b:.0f}", alpha=0.9
+        )
     for j, b in enumerate(b_grid):
-        ax[2].plot(logN_grid, voigt_results[b] - logN_grid, "x--",
-                   label=f"voigt b={b:.0f}", alpha=0.7)
+        ax[2].plot(
+            logN_grid, voigt_results[b] - logN_grid, "x--", label=f"voigt b={b:.0f}", alpha=0.7
+        )
     for thr in (17.2, 19.0, 20.3):
         ax[2].axvline(thr, color="gray", lw=0.5, ls=":")
     ax[2].axhline(0, color="k", ls="--", alpha=0.4)

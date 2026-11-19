@@ -37,30 +37,32 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-
 # ---------------------------------------------------------------------------
 # Truth DLA record from a colden skewer
 # ---------------------------------------------------------------------------
 
+
 @dataclasses.dataclass
 class TruthDLA:
     """A single DLA found by integrating colden along a sightline."""
+
     skewer_idx: int
-    pix_start: int        # inclusive
-    pix_end: int          # inclusive
-    pix_peak: int         # pixel of maximum colden inside the run
-    NHI_truth: float      # cm^-2 — Σ colden[skewer, pix_start:pix_end+1]
+    pix_start: int  # inclusive
+    pix_end: int  # inclusive
+    pix_peak: int  # pixel of maximum colden inside the run
+    NHI_truth: float  # cm^-2 — Σ colden[skewer, pix_start:pix_end+1]
 
 
 @dataclasses.dataclass
 class RecoveredDLA:
     """A τ-peak-finder system mirrored to a small dataclass for matching."""
+
     skewer_idx: int
-    pix_start: int        # inclusive
-    pix_end: int          # inclusive
+    pix_start: int  # inclusive
+    pix_end: int  # inclusive
     NHI_recovered: float  # cm^-2
-    log_NHI: float        # log10(NHI_recovered)
-    absorber_class: str   # "LLS" | "subDLA" | "DLA"
+    log_NHI: float  # log10(NHI_recovered)
+    absorber_class: str  # "LLS" | "subDLA" | "DLA"
 
 
 @dataclasses.dataclass
@@ -68,7 +70,7 @@ class MatchedPair:
     truth: TruthDLA
     recovered: RecoveredDLA
     delta_log_nhi: float  # log10(NHI_rec) - log10(NHI_truth)
-    delta_pix: int        # |centre_rec - pix_peak_truth|
+    delta_pix: int  # |centre_rec - pix_peak_truth|
 
 
 @dataclasses.dataclass
@@ -210,6 +212,7 @@ def find_truth_dlas_from_colden(
 # Position-tolerant matching between truth and recovered DLA lists
 # ---------------------------------------------------------------------------
 
+
 def tol_pixels_for_300_kms(dv_pix_kms: float) -> int:
     """Standard tolerance for the τ vs colden matcher: 300 km/s in pixels.
 
@@ -330,6 +333,7 @@ def match_dla_lists(
 # Summary statistics
 # ---------------------------------------------------------------------------
 
+
 def summary_stats(
     truth: Sequence[TruthDLA],
     recovered: Sequence[RecoveredDLA],
@@ -397,6 +401,7 @@ def summary_stats(
 # ---------------------------------------------------------------------------
 # Convenience: build RecoveredDLA records from the production catalog API
 # ---------------------------------------------------------------------------
+
 
 def recovered_from_systems(
     systems_per_skewer: Iterable[Tuple[int, List[Tuple[int, int]]]],

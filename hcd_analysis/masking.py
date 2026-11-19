@@ -24,7 +24,6 @@ import numpy as np
 
 from .catalog import AbsorberCatalog, Absorber
 
-
 # Default wing-expansion threshold per absorber class, in τ units.
 # The mask for one system is pixels with τ > (threshold + τ_eff), contiguous
 # around the system peak. Motivated by Rogers et al. 2018 / PRIYA §3.3: a DLA
@@ -32,15 +31,16 @@ from .catalog import AbsorberCatalog, Absorber
 # correlated flux suppression and should be removed. Scaling up for subDLA/LLS
 # where wings are weaker gives a class-appropriate mask width.
 DEFAULT_WING_THRESHOLD = {
-    "DLA":    0.25,   # PRIYA/Rogers default
+    "DLA": 0.25,  # PRIYA/Rogers default
     "subDLA": 0.50,
-    "LLS":    1.00,
+    "LLS": 1.00,
 }
 
 
 # ---------------------------------------------------------------------------
 # Index-level mask builder
 # ---------------------------------------------------------------------------
+
 
 def build_skewer_mask(
     n_pixels: int,
@@ -56,16 +56,17 @@ def build_skewer_mask(
     for ab in absorbers:
         if ab.pix_end >= n_pixels:
             # Periodic boundary wrap: system spans [..., n_pixels-1] and [0, ...]
-            mask[ab.pix_start:] = True
-            mask[:ab.pix_end - n_pixels + 1] = True
+            mask[ab.pix_start :] = True
+            mask[: ab.pix_end - n_pixels + 1] = True
         else:
-            mask[ab.pix_start:ab.pix_end + 1] = True
+            mask[ab.pix_start : ab.pix_end + 1] = True
     return mask
 
 
 # ---------------------------------------------------------------------------
 # Core fill functions
 # ---------------------------------------------------------------------------
+
 
 def _fill_zero_tau(tau: np.ndarray, mask: np.ndarray) -> np.ndarray:
     out = tau.copy()
@@ -119,7 +120,7 @@ def _fill_contiguous(tau: np.ndarray, mask: np.ndarray) -> np.ndarray:
             else:
                 fill_vals = np.linspace(left_val, right_val, end - start + 1)
 
-            out[start:end + 1] = np.exp(fill_vals)
+            out[start : end + 1] = np.exp(fill_vals)
         else:
             i += 1
     return out
@@ -135,6 +136,7 @@ _FILL_FUNCTIONS = {
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def apply_mask_to_skewer(
     tau: np.ndarray,
@@ -160,8 +162,9 @@ def apply_mask_to_skewer(
     mask = build_skewer_mask(len(tau), absorbers)
     fill_fn = _FILL_FUNCTIONS.get(strategy)
     if fill_fn is None:
-        raise ValueError(f"Unknown fill strategy: {strategy!r}. "
-                         f"Choose from {list(_FILL_FUNCTIONS)}")
+        raise ValueError(
+            f"Unknown fill strategy: {strategy!r}. " f"Choose from {list(_FILL_FUNCTIONS)}"
+        )
     return fill_fn(tau, mask)
 
 
@@ -214,6 +217,7 @@ def apply_mask_to_batch(
 # Convenience: build masked tau for an entire file (loads in batches)
 # ---------------------------------------------------------------------------
 
+
 def iter_masked_batches(
     hdf5_path,
     catalog: AbsorberCatalog,
@@ -248,6 +252,7 @@ def iter_masked_batches(
 # so a strong DLA gets a wide damping-wing mask and a weak LLS gets a narrow
 # core mask without any hard-coded velocity limits.
 # ---------------------------------------------------------------------------
+
 
 def build_skewer_mask_from_tau(
     tau_row: np.ndarray,
@@ -301,10 +306,10 @@ def build_skewer_mask_from_tau(
         for ab in abs_list:
             # Find τ peak in this absorber's detected region (handle wrap)
             if ab.pix_end >= n:
-                seg = tau2[ab.pix_start:ab.pix_end + 1]
+                seg = tau2[ab.pix_start : ab.pix_end + 1]
                 peak = ab.pix_start + int(np.argmax(seg))  # in doubled coords
             else:
-                seg = tau_row[ab.pix_start:ab.pix_end + 1]
+                seg = tau_row[ab.pix_start : ab.pix_end + 1]
                 peak = ab.pix_start + int(np.argmax(seg))  # in single coords
 
             # searchsorted: find the run that contains `peak`
@@ -370,7 +375,10 @@ def apply_tauspace_mask_to_batch(
         if not absorbers:
             continue
         mask = build_skewer_mask_from_tau(
-            tau_out[local_idx], absorbers, tau_eff, wing_threshold_by_class,
+            tau_out[local_idx],
+            absorbers,
+            tau_eff,
+            wing_threshold_by_class,
         )
         # Reuse existing fill functions. _fill_mean_flux computes its own
         # per-row mean; for consistency with PRIYA we'd rather fill with the
@@ -403,7 +411,11 @@ def iter_tauspace_masked_batches(
         hdf5_path, batch_size=batch_size, n_skewers=n_skewers
     ):
         yield row_start, row_end, apply_tauspace_mask_to_batch(
-            tau_batch, row_start, catalog, mask_classes, tau_eff,
+            tau_batch,
+            row_start,
+            catalog,
+            mask_classes,
+            tau_eff,
             wing_threshold_by_class=wing_threshold_by_class,
             fill_strategy=fill_strategy,
         )
@@ -412,6 +424,7 @@ def iter_tauspace_masked_batches(
 # ---------------------------------------------------------------------------
 # PRIYA-style DLA masking (arXiv:2306.05471)
 # ---------------------------------------------------------------------------
+
 
 def priya_dla_mask_row(
     tau_row: np.ndarray,
@@ -451,7 +464,7 @@ def priya_dla_mask_row(
         hi += 1
 
     mask = np.zeros(n, dtype=bool)
-    mask[lo:hi + 1] = True
+    mask[lo : hi + 1] = True
     return mask
 
 
@@ -483,7 +496,8 @@ def iter_priya_masked_batches(
         tau_out = tau_batch.astype(np.float64).copy()
         for local_i in range(tau_out.shape[0]):
             mask = priya_dla_mask_row(
-                tau_out[local_i], tau_eff,
+                tau_out[local_i],
+                tau_eff,
                 tau_dla_detect=tau_dla_detect,
                 tau_mask_scale=tau_mask_scale,
             )

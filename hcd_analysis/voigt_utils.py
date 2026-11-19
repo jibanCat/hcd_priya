@@ -28,16 +28,16 @@ from scipy.special import wofz
 # ---------------------------------------------------------------------------
 # Physical constants (CGS unless noted)
 # ---------------------------------------------------------------------------
-_C_CGS = 2.99792458e10       # cm/s
-_C_KMS = 2.99792458e5        # km/s
-_E_CGS = 4.80320427e-10      # esu (electron charge)
-_M_E_CGS = 9.10938e-28       # g (electron mass)
+_C_CGS = 2.99792458e10  # cm/s
+_C_KMS = 2.99792458e5  # km/s
+_E_CGS = 4.80320427e-10  # esu (electron charge)
+_M_E_CGS = 9.10938e-28  # g (electron mass)
 
 # Lyman alpha line parameters
 _LAMBDA_LYA_CM = 1.21567e-5  # cm (1215.67 Å)
 _LAMBDA_LYA_KMS = _LAMBDA_LYA_CM * _C_KMS / _C_CGS  # not meaningful, kept for doc
-_F_LU = 0.4164               # oscillator strength (Lyman alpha)
-_GAMMA_LYA = 6.265e8         # s^-1 (Einstein A coefficient)
+_F_LU = 0.4164  # oscillator strength (Lyman alpha)
+_GAMMA_LYA = 6.265e8  # s^-1 (Einstein A coefficient)
 
 # Voigt optical-depth prefactor — velocity-integrated absorption cross section.
 #
@@ -49,9 +49,7 @@ _GAMMA_LYA = 6.265e8         # s^-1 (Einstein A coefficient)
 #
 # Our phi_v is returned in (km/s)^-1 (voigt_profile_phi), so we absorb the
 # 1 km/s = 1e5 cm/s factor into the prefactor, giving units cm^2 * (km/s):
-_SIGMA_PREFACTOR = (
-    np.pi * _E_CGS**2 * _F_LU * _LAMBDA_LYA_CM / (_M_E_CGS * _C_CGS)
-) / 1.0e5
+_SIGMA_PREFACTOR = (np.pi * _E_CGS**2 * _F_LU * _LAMBDA_LYA_CM / (_M_E_CGS * _C_CGS)) / 1.0e5
 # Sanity:
 #   - Sum rule:  integral tau(v) dv = NHI * _SIGMA_PREFACTOR.
 #   - Line centre peak (small Voigt damping a, so H(0,a) ~= 1):
@@ -89,6 +87,7 @@ except ImportError:
 # Core Voigt profile (independent implementation using scipy wofz)
 # ---------------------------------------------------------------------------
 
+
 def voigt_profile_phi(v_kms: np.ndarray, b_kms: float) -> np.ndarray:
     """
     Voigt profile φ(v) normalised so that ∫ φ(v) dv = 1 (in km/s).
@@ -105,12 +104,12 @@ def voigt_profile_phi(v_kms: np.ndarray, b_kms: float) -> np.ndarray:
     phi : array, shape same as v_kms, units (km/s)^-1
     """
     # Thermal broadening (Gaussian) width in Doppler units
-    x = v_kms / b_kms                        # dimensionless frequency offset
+    x = v_kms / b_kms  # dimensionless frequency offset
     # Lorentz damping parameter
-    a = _VOIGT_A_PREFACTOR / (b_kms * 1.0e5) # b in cm/s
+    a = _VOIGT_A_PREFACTOR / (b_kms * 1.0e5)  # b in cm/s
     z_w = x + 1j * a
-    H = wofz(z_w).real                        # Voigt-Hjerting function (normalised to sqrt(pi))
-    return H / (np.sqrt(np.pi) * b_kms)       # (km/s)^-1
+    H = wofz(z_w).real  # Voigt-Hjerting function (normalised to sqrt(pi))
+    return H / (np.sqrt(np.pi) * b_kms)  # (km/s)^-1
 
 
 def tau_voigt(
@@ -146,6 +145,7 @@ def tau_voigt(
 # Column density from equivalent width (COG, fast approximate)
 # ---------------------------------------------------------------------------
 
+
 def nhi_from_ew_linear(ew_kms: float) -> float:
     """
     Linear part of the curve of growth (optically thin):
@@ -164,9 +164,10 @@ def nhi_from_ew_linear(ew_kms: float) -> float:
 # Voigt fitting from tau array
 # ---------------------------------------------------------------------------
 
+
 def _residuals(params: np.ndarray, v: np.ndarray, tau_obs: np.ndarray, tau_cap) -> float:
     """Chi^2 in log space (robust to dynamic range)."""
-    tau_cap = float(tau_cap)   # guard: YAML may pass as string "1.0e6"
+    tau_cap = float(tau_cap)  # guard: YAML may pass as string "1.0e6"
     log_NHI, log_b = params
     NHI = 10.0**log_NHI
     b = 10.0**log_b
@@ -206,7 +207,7 @@ def fit_nhi_from_tau(
     b        : best-fit Doppler parameter (km/s)
     success  : True if optimiser converged
     """
-    tau_cap = float(tau_cap)   # ensure float regardless of YAML parsing
+    tau_cap = float(tau_cap)  # ensure float regardless of YAML parsing
     b_bounds = (float(b_bounds[0]), float(b_bounds[1]))  # same guard
     b_init = float(b_init)
 
@@ -219,7 +220,7 @@ def fit_nhi_from_tau(
     # Fit in log10 space: x = [log10(NHI), log10(b)]
     x0 = [np.log10(NHI_guess), np.log10(b_init)]
     bounds = [
-        (12.0, 25.0),                           # log10(NHI) range
+        (12.0, 25.0),  # log10(NHI) range
         (np.log10(b_bounds[0]), np.log10(b_bounds[1])),
     ]
 
@@ -234,14 +235,15 @@ def fit_nhi_from_tau(
             options={"maxiter": max_iter, "ftol": 1e-10},
         )
 
-    NHI = 10.0**result.x[0]
-    b = 10.0**result.x[1]
+    NHI = 10.0 ** result.x[0]
+    b = 10.0 ** result.x[1]
     return NHI, b, result.success
 
 
 # ---------------------------------------------------------------------------
 # Fast NHI estimator for large datasets
 # ---------------------------------------------------------------------------
+
 
 def nhi_from_tau_fast(
     tau_segment: np.ndarray,

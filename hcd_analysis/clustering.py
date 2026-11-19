@@ -37,6 +37,7 @@ output of the wrappers above; the (r_⊥, r_∥) path is preserved for
 back-compat (the monopole-only Jacobian bias is O(few %), see
 ``docs/clustering_multipole_jacobian_todo.md``).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -45,7 +46,6 @@ from typing import Optional, Tuple
 
 import h5py
 import numpy as np
-
 
 # ---------------------------------------------------------------------------
 # Constants and conventions
@@ -115,6 +115,7 @@ class SightlineGeometry:
 # Loader
 # ---------------------------------------------------------------------------
 
+
 def load_sightline_geometry(spectra_h5_path: Path) -> SightlineGeometry:
     """Load the sightline grid from a fake_spectra HDF5 file.
 
@@ -159,6 +160,7 @@ def load_sightline_geometry(spectra_h5_path: Path) -> SightlineGeometry:
 # Coordinate transforms
 # ---------------------------------------------------------------------------
 
+
 def pixel_to_xyz(
     geom: SightlineGeometry,
     skewer_idx: np.ndarray,
@@ -188,12 +190,11 @@ def pixel_to_xyz(
     pixel = np.asarray(pixel, dtype=np.float64)
     if skewer_idx.shape != pixel.shape:
         raise ValueError(
-            f"skewer_idx and pixel shape mismatch: "
-            f"{skewer_idx.shape} vs {pixel.shape}"
+            f"skewer_idx and pixel shape mismatch: " f"{skewer_idx.shape} vs {pixel.shape}"
         )
 
-    cof = geom.cofm_mpch[skewer_idx]      # (N, 3)
-    ax = geom.axis[skewer_idx]            # (N,)
+    cof = geom.cofm_mpch[skewer_idx]  # (N, 3)
+    ax = geom.axis[skewer_idx]  # (N,)
     los = (cof[np.arange(len(ax)), ax] + (pixel + 0.5) * geom.dx_pix) % geom.box
 
     xyz = cof.copy()
@@ -216,8 +217,8 @@ def xyz_to_nearest_pixel(
     if xyz.shape[0] != skewer_idx.shape[0]:
         raise ValueError("skewer_idx and xyz length mismatch")
 
-    cof = geom.cofm_mpch[skewer_idx]      # (N, 3)
-    ax = geom.axis[skewer_idx]            # (N,)
+    cof = geom.cofm_mpch[skewer_idx]  # (N, 3)
+    ax = geom.axis[skewer_idx]  # (N,)
     los_pos = xyz[np.arange(len(ax)), ax]
     cof_los = cof[np.arange(len(ax)), ax]
     pix_f = ((los_pos - cof_los) % geom.box) / geom.dx_pix - 0.5
@@ -278,6 +279,7 @@ def los_separation(
 # ---------------------------------------------------------------------------
 # Generic 2D pair counter
 # ---------------------------------------------------------------------------
+
 
 def pair_count_2d(
     left_xyz: np.ndarray,
@@ -382,29 +384,29 @@ def pair_count_2d(
 
     for r_start in range(0, nR, chunk_size):
         r_end = min(nR, r_start + chunk_size)
-        Rc = R[r_start:r_end]               # (Nc, 3)
-        wRc = wR[r_start:r_end]             # (Nc,)
+        Rc = R[r_start:r_end]  # (Nc, 3)
+        wRc = wR[r_start:r_end]  # (Nc,)
         # Δ = L[:, None, :] − Rc[None, :, :]   shape (NL, Nc, 3)
         delta = L[:, None, :] - Rc[None, :, :]
-        delta = delta - box * np.round(delta / box)   # minimum image, vectorised
+        delta = delta - box * np.round(delta / box)  # minimum image, vectorised
 
         # signed r_par along left's LOS axis
         # delta[i, j, ax[i]] for all i, j → use fancy indexing
         # rows broadcast: delta[rows[:, None], np.arange(Nc)[None, :], ax[:, None]]
         cols = np.arange(r_end - r_start)
-        r_par = delta[rows[:, None], cols[None, :], ax[:, None]]   # (NL, Nc)
+        r_par = delta[rows[:, None], cols[None, :], ax[:, None]]  # (NL, Nc)
 
         # |Δ|² and r_perp
-        d2 = (delta * delta).sum(axis=2)                            # (NL, Nc)
+        d2 = (delta * delta).sum(axis=2)  # (NL, Nc)
         perp_sq = np.maximum(d2 - r_par * r_par, 0.0)
         r_perp = np.sqrt(perp_sq)
 
         # Pair weights: w_L[i] * w_R[j] → outer product
-        w_pair = wL[:, None] * wRc[None, :]                         # (NL, Nc)
+        w_pair = wL[:, None] * wRc[None, :]  # (NL, Nc)
 
         if exclude_self:
             # Mark self-pairs (only possible when left and right are the same array)
-            j_global = np.arange(r_start, r_end)                   # (Nc,)
+            j_global = np.arange(r_start, r_end)  # (Nc,)
             self_mask = (j_global[None, :] == rows[:, None]).ravel()  # (NL*Nc,)
         else:
             self_mask = None
@@ -463,6 +465,7 @@ def pair_count_2d(
 #
 # See `docs/clustering_multipole_jacobian_todo.md` for the full
 # diagnosis (Option A is what's implemented here).
+
 
 def pair_count_rmu(
     left_xyz: np.ndarray,
@@ -561,11 +564,11 @@ def pair_count_rmu(
         Rc = R[r_start:r_end]
         wRc = wR[r_start:r_end]
         delta = L[:, None, :] - Rc[None, :, :]
-        delta = delta - box * np.round(delta / box)             # minimum image
+        delta = delta - box * np.round(delta / box)  # minimum image
 
         cols = np.arange(r_end - r_start)
-        r_par = delta[rows[:, None], cols[None, :], ax[:, None]]   # (NL, Nc) signed
-        d2 = (delta * delta).sum(axis=2)                            # (NL, Nc)
+        r_par = delta[rows[:, None], cols[None, :], ax[:, None]]  # (NL, Nc) signed
+        d2 = (delta * delta).sum(axis=2)  # (NL, Nc)
         # r and |μ| — guard against r == 0 (self-pairs etc.).
         r_3d = np.sqrt(d2)
         finite_r = r_3d > 0
@@ -592,11 +595,7 @@ def pair_count_rmu(
         i_mu = np.searchsorted(mu_edges, abs_mu.ravel(), side="right") - 1
 
         # Drop r==0 pairs (undefined μ) and out-of-range bins.
-        valid = (
-            finite_r.ravel()
-            & (i_r >= 0) & (i_r < n_r)
-            & (i_mu >= 0) & (i_mu < n_mu)
-        )
+        valid = finite_r.ravel() & (i_r >= 0) & (i_r < n_r) & (i_mu >= 0) & (i_mu < n_mu)
         w_flat = w_pair.ravel()
         if self_mask is not None:
             w_flat = np.where(self_mask, 0.0, w_flat)
@@ -623,6 +622,7 @@ def pair_count_rmu(
 # ---------------------------------------------------------------------------
 # ξ_× : DLA point catalog × Lyα flux field
 # ---------------------------------------------------------------------------
+
 
 def xi_cross_dla_lya(
     pixel_xyz: np.ndarray,
@@ -748,9 +748,7 @@ def fold_signed_to_abs(
     """
     edges = np.asarray(r_par_bins_signed, dtype=np.float64)
     if not np.allclose(edges, -edges[::-1]):
-        raise ValueError(
-            f"r_par_bins_signed must be symmetric around 0; got {edges}"
-        )
+        raise ValueError(f"r_par_bins_signed must be symmetric around 0; got {edges}")
     n = edges.size - 1
     if n % 2 != 0:
         raise ValueError(f"need an even number of signed r_par bins; got {n}")
@@ -758,16 +756,14 @@ def fold_signed_to_abs(
 
     if counts is not None or npairs is not None:
         if counts is None or npairs is None:
-            raise ValueError(
-                "must pass BOTH counts and npairs (or neither) to fold_signed_to_abs"
-            )
+            raise ValueError("must pass BOTH counts and npairs (or neither) to fold_signed_to_abs")
         c_folded = counts[:, half:] + counts[:, :half][:, ::-1]
         n_folded = npairs[:, half:] + npairs[:, :half][:, ::-1]
         with np.errstate(divide="ignore", invalid="ignore"):
             xi_folded = np.where(n_folded > 0, c_folded / n_folded, np.nan)
     else:
-        pos = xi_signed[:, half:]                       # bins for +r_par
-        neg = xi_signed[:, :half][:, ::-1]              # bins for -r_par, reversed
+        pos = xi_signed[:, half:]  # bins for +r_par
+        neg = xi_signed[:, :half][:, ::-1]  # bins for -r_par, reversed
         # Unweighted nanmean — correct only when n_pairs is the same on
         # both halves (auto-corr on a symmetric grid).  For ξ_× pass the
         # ``counts``/``npairs`` arrays for a proper count-weighted fold.
@@ -780,6 +776,7 @@ def fold_signed_to_abs(
 # ---------------------------------------------------------------------------
 # ξ_DD : DLA × DLA auto-correlation with analytic RR
 # ---------------------------------------------------------------------------
+
 
 def _bin_volumes_2d(
     r_perp_bins: np.ndarray,
@@ -794,9 +791,9 @@ def _bin_volumes_2d(
     """
     perp = np.asarray(r_perp_bins, dtype=np.float64)
     par = np.asarray(r_par_bins_signed, dtype=np.float64)
-    perp_area = np.pi * (perp[1:] ** 2 - perp[:-1] ** 2)            # (n_perp,)
-    par_width = np.diff(par)                                          # (n_par,)
-    return perp_area[:, None] * par_width[None, :]                    # (n_perp, n_par)
+    perp_area = np.pi * (perp[1:] ** 2 - perp[:-1] ** 2)  # (n_perp,)
+    par_width = np.diff(par)  # (n_par,)
+    return perp_area[:, None] * par_width[None, :]  # (n_perp, n_par)
 
 
 # ---------------------------------------------------------------------------
@@ -825,6 +822,7 @@ class DeltaFResult:
         not double-counted: a pixel marked by an LLS first and re-
         covered by an overlapping subDLA increments only LLS).
     """
+
     delta_F: np.ndarray
     mean_F: float
     mask: np.ndarray
@@ -984,10 +982,10 @@ def xi_auto_dla(
         exclude_self=True,
         chunk_size=chunk_size,
     )
-    DD = DD_counts                                                  # (n_perp, n_par)
+    DD = DD_counts  # (n_perp, n_par)
 
-    V_box = box ** 3
-    V_bin = _bin_volumes_2d(r_perp_bins, r_par_bins_signed)          # (n_perp, n_par)
+    V_box = box**3
+    V_bin = _bin_volumes_2d(r_perp_bins, r_par_bins_signed)  # (n_perp, n_par)
     RR = n_dla * (n_dla - 1) * V_bin / V_box
 
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -1014,9 +1012,9 @@ def _bin_volumes_rmu(
     """
     r = np.asarray(r_bins, dtype=np.float64)
     mu = np.asarray(mu_bins, dtype=np.float64)
-    r_vol = (4.0 / 3.0) * np.pi * (r[1:] ** 3 - r[:-1] ** 3)        # (n_r,)
-    mu_width = np.diff(mu)                                           # (n_mu,)
-    return r_vol[:, None] * mu_width[None, :]                        # (n_r, n_mu)
+    r_vol = (4.0 / 3.0) * np.pi * (r[1:] ** 3 - r[:-1] ** 3)  # (n_r,)
+    mu_width = np.diff(mu)  # (n_mu,)
+    return r_vol[:, None] * mu_width[None, :]  # (n_r, n_mu)
 
 
 def xi_auto_dla_rmu(
@@ -1056,7 +1054,7 @@ def xi_auto_dla_rmu(
         chunk_size=chunk_size,
     )
 
-    V_box = box ** 3
+    V_box = box**3
     V_bin = _bin_volumes_rmu(r_bins, mu_bins)
     RR = n_dla * (n_dla - 1) * V_bin / V_box
 
@@ -1068,6 +1066,7 @@ def xi_auto_dla_rmu(
 # ---------------------------------------------------------------------------
 # ξ_FF : Lyα × Lyα flux auto-correlation
 # ---------------------------------------------------------------------------
+
 
 def xi_auto_lya(
     pixel_xyz: np.ndarray,
@@ -1128,7 +1127,7 @@ def xi_auto_lya(
     if subsample_n is not None and subsample_n < n_total:
         rng = np.random.default_rng(rng_seed)
         idx = rng.choice(n_total, size=int(subsample_n), replace=False)
-        idx.sort()                                          # cache-friendly
+        idx.sort()  # cache-friendly
         L_xyz = pixel_xyz[idx]
         L_axis = pixel_los_axis[idx]
         L_dF = pixel_delta_F[idx]

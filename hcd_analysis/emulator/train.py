@@ -8,11 +8,13 @@ bundle (eqx leaves + JSON arch/seed meta + pickled train-split norm stats).
 Also hosts ``aggregate_error_vector`` (plan Task-14 stub): RMS-over-folds error
 vector + DLA high-k shot-noise flag, feeding the likelihood covariance.
 
-Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=/home/mfho/hcd_priya, emu-jax python.
+Env (MANDATORY): PYTHONNOUSERSITE=1 PYTHONPATH=<repo>, emu-jax python.
 """
+
 from __future__ import annotations
 
 import json
+import os
 import pickle
 import subprocess
 from pathlib import Path
@@ -24,10 +26,17 @@ import equinox as eqx
 import optax
 
 from hcd_analysis.emulator.model import (
-    Emulator, joint_loss, p_resid_loss, coherent_resid_loss,
+    Emulator,
+    joint_loss,
+    p_resid_loss,
+    coherent_resid_loss,
 )
 from hcd_analysis.emulator.data import (
-    fit_target_norm, fit_baseline_residual_norm, make_batch, safe_log, apply_norm,
+    fit_target_norm,
+    fit_baseline_residual_norm,
+    make_batch,
+    safe_log,
+    apply_norm,
     cell_id,
 )
 
@@ -77,8 +86,10 @@ def _loss_with_term_w(term_w, w_coh=0.0):
     so a stage trains only the heads that feed its non-zero terms (in conjunction
     with parameter freezing for clean isolation). ``w_coh>0`` adds the FLAT coherent
     de-bias regularizer (requires cell/n_cells in the batch)."""
+
     def _loss(model, batch):
         return joint_loss(model, batch, term_w=term_w, w_coh=w_coh)
+
     return _loss
 
 
@@ -90,9 +101,11 @@ def train_step_partitioned(diff_model, static_model, opt, opt_state, batch, loss
     filter spec; grads are taken only wrt ``diff_model`` so the static (frozen)
     leaves never move. ``loss_fn(model, batch)`` is a closure (e.g. a term_w-fixed
     joint_loss). Returns (diff_model, opt_state, loss, grad_norm)."""
+
     def _wrapped(dm):
         model = eqx.combine(dm, static_model)
         return loss_fn(model, batch)
+
     loss, grads = eqx.filter_value_and_grad(_wrapped)(diff_model)
     grad_norm = _global_grad_norm(grads)
     updates, opt_state = opt.update(grads, opt_state, eqx.filter(diff_model, eqx.is_array))
@@ -124,14 +137,14 @@ def _warmstart_bases(d, train_idx, norm_stats, n_basis, n_k):
     if n_basis is None:
         return None, None
     from hcd_analysis.emulator.model import svd_basis_init
+
     b = make_batch(d, train_idx, norm_stats)
     out = []
     for key in ("t_p_resid", "t_p_base"):
         M = np.asarray(b[key]).reshape(-1, n_k)
         M = M[np.all(np.isfinite(M), axis=1)]
-        out.append(svd_basis_init(jnp.asarray(M), n_basis)
-                   if M.shape[0] >= n_basis else None)
-    return out[0], out[1]   # (residual, baseline)
+        out.append(svd_basis_init(jnp.asarray(M), n_basis) if M.shape[0] >= n_basis else None)
+    return out[0], out[1]  # (residual, baseline)
 
 
 def _baseline_cell_table(d, train_idx, norm_stats):
@@ -141,7 +154,7 @@ def _baseline_cell_table(d, train_idx, norm_stats):
     The baseline head maps (z,τ₀)→(4,K); under LOSO a cell's target is its
     train-cell-mean (shared across the 60 cosmologies). Collapsing the train rows
     to one entry per distinct cell makes the pre-fit a small, well-posed regression
-    (≈306 cells on LF) — the same construction the validated feasibility recipe
+    (≈306 cells on LF) — the same construction the pre-2026-10 feasibility recipe
     (scripts/feasibility_subpercent.py Exp 2) trained the deep baseline on.
     Returns (z_cells, tau0_cells, target (Nc,4,K), mask (Nc,4,K))."""
     train_idx = np.asarray(train_idx)
@@ -154,16 +167,16 @@ def _baseline_cell_table(d, train_idx, norm_stats):
         rows = train_idx[cells == cc]
         cz.append(z_unit[rows][0])
         ct.append(d["tau0"][rows][0])
-        cy.append(pf["cell_mean"][int(cc)])          # (4,K) train cell-mean (logP)
+        cy.append(pf["cell_mean"][int(cc)])  # (4,K) train cell-mean (logP)
     cz = np.asarray(cz, np.float64)
     ct = np.asarray(ct, np.float64)
-    cy = np.stack(cy)                                # (Nc,4,K)
-    tgt = (cy - pf["mu_marg"]) / pf["sig_marg"]      # σ_marg-standardized cell-mean
+    cy = np.stack(cy)  # (Nc,4,K)
+    tgt = (cy - pf["mu_marg"]) / pf["sig_marg"]  # σ_marg-standardized cell-mean
     return cz, ct, tgt, np.isfinite(tgt)
 
 
 def _prefit_baseline(model, d, train_idx, norm_stats, *, epochs, lr):
-    """Pre-fit ONLY the θ-blind BaselineHead to its cell-mean floor (validated recipe).
+    """Pre-fit ONLY the θ-blind BaselineHead to its cell-mean floor (the pre-2026-10 feasibility recipe).
 
     The deep baseline needs MANY gradient steps to reach term (b) ≈ 0.03–0.05·σ_cosmo
     (feasibility Exp 2 used ~12–15k epochs of baseline-only training); in the joint
@@ -192,11 +205,11 @@ def _prefit_baseline(model, d, train_idx, norm_stats, *, epochs, lr):
 
     def loss(dm):
         m = eqx.combine(dm, static_model)
-        pred = jax.vmap(lambda z, t: m.head_base(z, t))(Z, T)   # (Nc,4,K)
+        pred = jax.vmap(lambda z, t: m.head_base(z, t))(Z, T)  # (Nc,4,K)
         # Σ(weight·mask) weighted-mean MSE with uniform weight == plain masked mean
         # (the per-cell baseline target carries no inv_nc; uniform is the right norm).
         diff = jnp.where(Mk > 0, pred - Y, 0.0)
-        return jnp.sum(diff ** 2) / jnp.maximum(jnp.sum(Mk), 1.0)
+        return jnp.sum(diff**2) / jnp.maximum(jnp.sum(Mk), 1.0)
 
     @eqx.filter_jit
     def step(dm, st):
@@ -214,7 +227,7 @@ def _iter_minibatches(rng, idx, batch_size):
     idx = np.asarray(idx)
     perm = rng.permutation(len(idx))
     for start in range(0, len(idx), batch_size):
-        yield idx[perm[start:start + batch_size]]
+        yield idx[perm[start : start + batch_size]]
 
 
 def _pad_batch(batch, batch_size):
@@ -250,13 +263,15 @@ def _pad_batch(batch, batch_size):
         if k in ("mask", "t_f_nhi_mask", "t_dndx_mask"):
             out[k] = jnp.pad(v, pad_width, constant_values=False)  # padded -> masked out
         elif k in ("inv_nc", "inv_nalpha"):
-            out[k] = jnp.pad(v, pad_width, constant_values=0)      # zero weight (belt+suspenders)
+            out[k] = jnp.pad(v, pad_width, constant_values=0)  # zero weight (belt+suspenders)
         elif k == "cell":
             # padded rows -> cell 0 (a valid bin), but mask=False so they add 0 to
             # BOTH the segment-sum numerator and count — inert in coherent_debias_term.
             out[k] = jnp.pad(v, pad_width, constant_values=0)
         else:
-            out[k] = jnp.pad(v, pad_width, constant_values=0)      # datarange_weight etc -> 0 (masked anyway)
+            out[k] = jnp.pad(
+                v, pad_width, constant_values=0
+            )  # datarange_weight etc -> 0 (masked anyway)
     return out
 
 
@@ -268,25 +283,44 @@ def _to_jnp_batch(b):
     return {k: (int(v) if k == "n_cells" else jnp.asarray(v)) for k, v in b.items()}
 
 
-def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
-               batch_size=512, seed=0, key=None, patience=10, n_k=None,
-               staged=False, prefit_baseline_epochs=8000, prefit_baseline_lr=2e-3,
-               freeze_baseline=None, term_w=None, k_weight=None,
-               early_stop_metric="auto", weight_decay=1e-4,
-               w_coh=0.0, datarange=False, datarange_kw=None):
+def train_fold(
+    d,
+    train_idx,
+    val_idx,
+    *,
+    n_basis=None,
+    lr=1e-3,
+    epochs=100,
+    batch_size=512,
+    seed=0,
+    key=None,
+    patience=10,
+    n_k=None,
+    staged=False,
+    prefit_baseline_epochs=8000,
+    prefit_baseline_lr=2e-3,
+    freeze_baseline=None,
+    term_w=None,
+    k_weight=None,
+    early_stop_metric="auto",
+    weight_decay=1e-4,
+    w_coh=0.0,
+    datarange=False,
+    datarange_kw=None,
+):
     """Train one LOSO fold on ``train_idx``, validating on ``val_idx`` each epoch.
 
     - Fits the train-split target normalisation (``fit_target_norm``) on ``train_idx``.
     - SVD warm-starts both P_filt bases (REDESIGN: baseline + residual) when
       ``n_basis`` is set.
-    - PRE-FITS the θ-blind BaselineHead to its cell-mean floor (validated recipe;
+    - PRE-FITS the θ-blind BaselineHead to its cell-mean floor (the pre-2026-10 feasibility recipe;
       ``prefit_baseline_epochs`` baseline-only steps) BEFORE the joint loop, so term
       (b) reaches ~0.03–0.05·σ_cosmo. The joint early-stop is driven by the much
       larger p_resid/f_nhi terms and would otherwise cut the deep baseline off long
       before convergence. Set ``prefit_baseline_epochs=0`` to disable (the joint loop
       then trains the baseline from the SVD warm-start only).
     - FREEZES the pre-fit baseline during the joint loop (``freeze_baseline``, default
-      True whenever a pre-fit ran). This mirrors the validated recipe (Exp 4 trained
+      True whenever a pre-fit ran). This mirrors the pre-2026-10 feasibility recipe (Exp 4 trained
       the baseline + residual as SEPARATE fixed fits, never jointly fine-tuned): if
       the baseline kept training jointly it DRIFTS off its floor (the inv_nc-weighted
       p_base term at shared LR pulls it), re-inflating term (b). With it frozen the
@@ -320,8 +354,8 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
       flat_w80; default 0 OFF, set ~80 for production). Adds
       ``w_coh·coherent_debias_term`` to the joint loss — penalizes the per-(z,τ₀)-cell
       θ-mean of the residual fit error (UNIFORM in k), flattening the coherent low-k
-      tilt the per-sim MSE leaves free. Drives gate failures 3/8→1/8, ns RMS
-      0.182→0.133σ (jax-traps #24). When >0 the early-stop metric folds it in
+      tilt the per-sim MSE leaves free (it reduced the coherent n_s error in the
+      internal gate tests). When >0 the early-stop metric folds it in
       (resid + coh) so the stop tracks both.
     - ``datarange`` (bool): SOFT down-weight out-of-range (z∉[2.2,4.6] OR k<1e-3) bins
       by ~0.2 in the P_filt-channel loss terms (keeps z>4.6's regularizing signal but
@@ -338,8 +372,18 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     datarange_kw = datarange_kw or {}
     if staged:
         return train_fold_staged(
-            d, train_idx, val_idx, n_basis=n_basis, lr=lr, epochs=epochs,
-            batch_size=batch_size, seed=seed, key=key, patience=patience, n_k=n_k)
+            d,
+            train_idx,
+            val_idx,
+            n_basis=n_basis,
+            lr=lr,
+            epochs=epochs,
+            batch_size=batch_size,
+            seed=seed,
+            key=key,
+            patience=patience,
+            n_k=n_k,
+        )
     if key is None:
         key = jax.random.PRNGKey(seed)
     train_idx = np.asarray(train_idx)
@@ -354,17 +398,24 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     # σ_marg-standardized cell-mean targets (t_p_base), the RESIDUAL basis from the
     # σ_cosmo-whitened residual targets (t_p_resid) -- each in its head's own space.
     p_filt_basis_init, baseline_basis_init = _warmstart_bases(
-        d, train_idx, norm_stats, n_basis, n_k)
+        d, train_idx, norm_stats, n_basis, n_k
+    )
 
-    model = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis,
-                     p_filt_basis_init=p_filt_basis_init,
-                     baseline_basis_init=baseline_basis_init, key=key)
+    model = Emulator(
+        in_dim=10,
+        n_k=n_k,
+        n_basis=n_basis,
+        p_filt_basis_init=p_filt_basis_init,
+        baseline_basis_init=baseline_basis_init,
+        key=key,
+    )
 
     # VALIDATED RECIPE: pre-fit the deep θ-blind baseline to its cell-mean floor so
     # term (b) collapses (the joint early-stop can't drive the baseline there alone).
     did_prefit = prefit_baseline_epochs is not None and prefit_baseline_epochs > 0
-    model = _prefit_baseline(model, d, train_idx, norm_stats,
-                             epochs=prefit_baseline_epochs, lr=prefit_baseline_lr)
+    model = _prefit_baseline(
+        model, d, train_idx, norm_stats, epochs=prefit_baseline_epochs, lr=prefit_baseline_lr
+    )
     # Freeze the pre-fit baseline during the joint loop unless explicitly overridden
     # (default: freeze iff a pre-fit ran, so the baseline doesn't drift off its floor).
     if freeze_baseline is None:
@@ -391,8 +442,9 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     # soft down-weight (when datarange=True). The cell/n_cells keys (for the coherent
     # de-bias term) are emitted unconditionally by make_batch.
     def _mb(idx):
-        return make_batch(d, idx, norm_stats, k_weight=k_weight,
-                          datarange=datarange, **datarange_kw)
+        return make_batch(
+            d, idx, norm_stats, k_weight=k_weight, datarange=datarange, **datarange_kw
+        )
 
     # The training loss closure: joint_loss with the fold's term_w AND the FLAT
     # coherent de-bias weight w_coh (the data-range down-weight rides inside the
@@ -420,8 +472,14 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
     use_kw_es = k_weight is not None
     use_dr_es = datarange
 
-    history = {"train_loss": [], "val_loss": [], "val_resid_loss": [],
-               "val_coh_loss": [], "grad_norm": [], "lr": []}
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "val_resid_loss": [],
+        "val_coh_loss": [],
+        "grad_norm": [],
+        "lr": [],
+    }
     best_metric = np.inf
     best_model = model
     stall = 0
@@ -434,7 +492,8 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
             # zero-contribution rows, so train_step keeps ONE static shape (traces once).
             batch = _pad_batch(_to_jnp_batch(_mb(mb)), batch_size)
             diff_model, opt_state, loss, gnorm = train_step_partitioned(
-                diff_model, static_model, opt, opt_state, batch, loss_fn)
+                diff_model, static_model, opt, opt_state, batch, loss_fn
+            )
             model = eqx.combine(diff_model, static_model)
             ep_losses.append(float(loss))
             ep_gnorms.append(float(gnorm))
@@ -444,8 +503,9 @@ def train_fold(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
         # AFTER the epoch's last update (step == #updates so far), not the epoch's first step.
         ep_lr = float(lr_sched(step))
         val_loss = float(evaluate(model, val_batch))
-        val_resid = float(p_resid_loss(model, val_batch, use_k_weight=use_kw_es,
-                                       use_datarange=use_dr_es))
+        val_resid = float(
+            p_resid_loss(model, val_batch, use_k_weight=use_kw_es, use_datarange=use_dr_es)
+        )
         val_coh = float(coherent_resid_loss(model, val_batch)) if w_coh > 0.0 else np.nan
         history["train_loss"].append(float(np.mean(ep_losses)))
         history["val_loss"].append(val_loss)
@@ -486,15 +546,32 @@ def _trainable_mask(model, train_baseline, train_rest):
     # all array leaves -> train_rest, then override the head_base subtree -> train_baseline.
     full = jax.tree_util.tree_map(lambda _: train_rest, is_arr)
     full = eqx.tree_at(
-        lambda m: m.head_base, full,
+        lambda m: m.head_base,
+        full,
         replace=jax.tree_util.tree_map(
-            lambda _: train_baseline, eqx.filter(model.head_base, eqx.is_array)))
+            lambda _: train_baseline, eqx.filter(model.head_base, eqx.is_array)
+        ),
+    )
     return full
 
 
-def _run_stage(model, norm_stats, d, train_idx, val_batch, *, n_epochs,
-               batch_size, rng, term_w, train_baseline, train_rest, lr,
-               history, patience_resid):
+def _run_stage(
+    model,
+    norm_stats,
+    d,
+    train_idx,
+    val_batch,
+    *,
+    n_epochs,
+    batch_size,
+    rng,
+    term_w,
+    train_baseline,
+    train_rest,
+    lr,
+    history,
+    patience_resid,
+):
     """Run one training stage with frozen/trainable partition + term_w, early-
     stopping on the val residual loss. Returns the best-by-resid model in this
     stage and appends per-epoch diagnostics to ``history``.
@@ -518,8 +595,10 @@ def _run_stage(model, norm_stats, d, train_idx, val_batch, *, n_epochs,
         for mb in _iter_minibatches(rng, train_idx, batch_size):
             batch = _pad_batch(_to_jnp_batch(make_batch(d, mb, norm_stats)), batch_size)
             diff_model, opt_state, loss, gnorm = train_step_partitioned(
-                diff_model, static_model, opt, opt_state, batch, loss_fn)
-            ep_losses.append(float(loss)); ep_g.append(float(gnorm))
+                diff_model, static_model, opt, opt_state, batch, loss_fn
+            )
+            ep_losses.append(float(loss))
+            ep_g.append(float(gnorm))
         model_now = eqx.combine(diff_model, static_model)
         vresid = float(p_resid_loss(model_now, val_batch))
         history["train_loss"].append(float(np.mean(ep_losses)))
@@ -538,8 +617,20 @@ def _run_stage(model, norm_stats, d, train_idx, val_batch, *, n_epochs,
     return best_model
 
 
-def train_fold_staged(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=100,
-                      batch_size=512, seed=0, key=None, patience=10, n_k=None):
+def train_fold_staged(
+    d,
+    train_idx,
+    val_idx,
+    *,
+    n_basis=None,
+    lr=1e-3,
+    epochs=100,
+    batch_size=512,
+    seed=0,
+    key=None,
+    patience=10,
+    n_k=None,
+):
     """3-stage training (normalization REDESIGN), early-stop on val RESIDUAL loss.
 
     ABLATION-ONLY — NOT THE PRODUCTION PATH. This is the deferred-bug 3-stage
@@ -570,14 +661,26 @@ def train_fold_staged(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=10
     norm_stats = _fit_norm(d, train_idx)
 
     p_filt_basis_init, baseline_basis_init = _warmstart_bases(
-        d, train_idx, norm_stats, n_basis, n_k)
-    model = Emulator(in_dim=10, n_k=n_k, n_basis=n_basis,
-                     p_filt_basis_init=p_filt_basis_init,
-                     baseline_basis_init=baseline_basis_init, key=key)
+        d, train_idx, norm_stats, n_basis, n_k
+    )
+    model = Emulator(
+        in_dim=10,
+        n_k=n_k,
+        n_basis=n_basis,
+        p_filt_basis_init=p_filt_basis_init,
+        baseline_basis_init=baseline_basis_init,
+        key=key,
+    )
 
     val_batch = _to_jnp_batch(make_batch(d, val_idx, norm_stats))
-    history = {"train_loss": [], "val_loss": [], "val_resid_loss": [],
-               "grad_norm": [], "lr": [], "stage": []}
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "val_resid_loss": [],
+        "grad_norm": [],
+        "lr": [],
+        "stage": [],
+    }
 
     e1 = max(1, epochs // 3)
     e2 = max(1, epochs // 2)
@@ -587,28 +690,61 @@ def train_fold_staged(d, train_idx, val_idx, *, n_basis=None, lr=1e-3, epochs=10
     # Stage 1: baseline head only (θ-blind cell-mean fit).
     n0 = len(history["val_resid_loss"])
     model = _run_stage(
-        model, norm_stats, d, train_idx, val_batch, n_epochs=e1, batch_size=batch_size,
-        rng=rng, term_w={"f_nhi": 0., "dndx": 0., "p_base": 1., "p_resid": 0., "delta": 0.},
-        train_baseline=True, train_rest=False, lr=lr, history=history,
-        patience_resid=patience_resid)
+        model,
+        norm_stats,
+        d,
+        train_idx,
+        val_batch,
+        n_epochs=e1,
+        batch_size=batch_size,
+        rng=rng,
+        term_w={"f_nhi": 0.0, "dndx": 0.0, "p_base": 1.0, "p_resid": 0.0, "delta": 0.0},
+        train_baseline=True,
+        train_rest=False,
+        lr=lr,
+        history=history,
+        patience_resid=patience_resid,
+    )
     history["stage"] += [1] * (len(history["val_resid_loss"]) - n0)
 
     # Stage 2: freeze baseline; train residual + delta + Head A.
     n0 = len(history["val_resid_loss"])
     model = _run_stage(
-        model, norm_stats, d, train_idx, val_batch, n_epochs=e2, batch_size=batch_size,
-        rng=rng, term_w={"f_nhi": 1., "dndx": 1., "p_base": 0., "p_resid": 1., "delta": 1.},
-        train_baseline=False, train_rest=True, lr=lr, history=history,
-        patience_resid=patience_resid)
+        model,
+        norm_stats,
+        d,
+        train_idx,
+        val_batch,
+        n_epochs=e2,
+        batch_size=batch_size,
+        rng=rng,
+        term_w={"f_nhi": 1.0, "dndx": 1.0, "p_base": 0.0, "p_resid": 1.0, "delta": 1.0},
+        train_baseline=False,
+        train_rest=True,
+        lr=lr,
+        history=history,
+        patience_resid=patience_resid,
+    )
     history["stage"] += [2] * (len(history["val_resid_loss"]) - n0)
 
     # Stage 3: joint fine-tune ALL heads at a small LR.
     n0 = len(history["val_resid_loss"])
     model = _run_stage(
-        model, norm_stats, d, train_idx, val_batch, n_epochs=e3, batch_size=batch_size,
-        rng=rng, term_w={"f_nhi": 1., "dndx": 1., "p_base": 1., "p_resid": 1., "delta": 1.},
-        train_baseline=True, train_rest=True, lr=lr * 0.1, history=history,
-        patience_resid=patience_resid)
+        model,
+        norm_stats,
+        d,
+        train_idx,
+        val_batch,
+        n_epochs=e3,
+        batch_size=batch_size,
+        rng=rng,
+        term_w={"f_nhi": 1.0, "dndx": 1.0, "p_base": 1.0, "p_resid": 1.0, "delta": 1.0},
+        train_baseline=True,
+        train_rest=True,
+        lr=lr * 0.1,
+        history=history,
+        patience_resid=patience_resid,
+    )
     history["stage"] += [3] * (len(history["val_resid_loss"]) - n0)
 
     history = {k: np.asarray(v) for k, v in history.items()}
@@ -620,15 +756,21 @@ def _git_sha():
 
     Records exactly which code trained the frozen LF backbone so the MF / likelihood
     that load it are fully reproducible. Never raises — a checkpoint must still save
-    outside a git tree (returns None instead)."""
-    repo = Path(__file__).resolve().parents[2]            # .../hcd_priya
+    outside a git tree. A git-archive export (batch runs) has no .git: the batch then
+    exports the archived commit as HCD_CODE_COMMIT, used here as the fallback."""
+    repo = Path(__file__).resolve().parents[2]  # .../hcd_priya
     try:
         out = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5)
-        return out.stdout.strip() if out.returncode == 0 else None
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
     except Exception:
-        return None
+        pass
+    return os.environ.get("HCD_CODE_COMMIT") or None
 
 
 def _arch_cfg_from_model(model):
@@ -643,21 +785,100 @@ def _arch_cfg_from_model(model):
     return {
         "in_dim": int(model.enc.layers[0].in_features),
         "n_k": int(model.head_b.n_k),
-        "n_basis": (int(model.head_b.n_basis)
-                    if model.head_b.n_basis is not None else None),
+        "n_basis": (int(model.head_b.n_basis) if model.head_b.n_basis is not None else None),
         "baseline_n_layers": int(model.head_base.n_layers),
         "baseline_width": int(model.head_base.width),
     }
 
 
-def save_checkpoint(path, model, arch_cfg, norm_stats, seed,
-                    kfkms=None, cache_path=None, recipe=None):
-    """Serialise eqx leaves + JSON meta + pickled norm_stats.
+def _sha256_or_none(path):
+    import hashlib
+    import os
 
-    M4: the meta now records the k-grid identity so a checkpoint is self-
-    describing — ``kfkms`` (the cache's k-grid, list of floats; ``n_k`` derived
-    from it) and ``cache_path`` (the cache the model was trained on). Either may
-    be omitted (back-compat), in which case the corresponding key is null.
+    if path is None or not os.path.isfile(str(path)):
+        return None
+    h = hashlib.sha256()
+    with open(str(path), "rb") as f:
+        for b in iter(lambda: f.read(1 << 24), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+# the schema-2.0 meta rules live in schema.py (so the release readers never import the trainer); the names stay here
+from hcd_analysis.emulator.schema import SCHEMA2_REQUIRED as _SCHEMA2_REQUIRED  # noqa: E402
+from hcd_analysis.emulator.schema import velocity_key_paths as _velocity_key_paths  # noqa: E402
+
+
+def release_cache_identity(cache):
+    """``(cache_sha256, cache_lineage_sha256)`` of a cache dict loaded by the strict ``data.load_cache``: the file's
+    sha256 hashed at load and the digest of its ``tau0_cache`` lineage record, which must be well formed and
+    release-eligible under the release finder allow-list. Refused (ValueError) for any other cache dict.
+    """
+    from .. import lineage as _L
+    from ..catalog import RELEASE_FINDER_IDS
+
+    sha, rec = cache.get("cache_sha256"), cache.get("lineage")
+    if not (isinstance(sha, str) and len(sha) == 64) or not isinstance(rec, dict):
+        raise ValueError(
+            "a release member is trained on a cache loaded by the strict data.load_cache (it carries "
+            "cache_sha256 and lineage); this cache dict does not"
+        )
+    try:
+        _L.check_record(rec, RELEASE_FINDER_IDS)
+    except _L.LineageError as e:
+        raise ValueError(f"the training cache's lineage record is refused: {e}") from None
+    if rec.get("kind") != "tau0_cache" or rec.get("release_eligible") is not True:
+        raise ValueError("the training cache is not a release-eligible tau0_cache")
+    return sha, _L.record_sha256(rec)
+
+
+def release_code_identity(expected=None):
+    """The checkout's ``{commit, dirty}`` (lineage.code_identity), refused (ValueError) unless the commit is known and
+    the tree clean (tracked files at the commit), and, with ``expected``, unchanged since then."""
+    from .. import lineage as _L
+
+    code = _L.code_identity()
+    if (
+        not (isinstance(code.get("commit"), str) and len(code["commit"]) == 40)
+        or code.get("dirty") is not False
+    ):
+        raise ValueError(
+            f"release training needs a clean tree at a known commit; code identity is {code}"
+        )
+    if expected is not None and code != expected:
+        raise ValueError(f"the code changed during training: {expected} at the start, {code} now")
+    return code
+
+
+def save_checkpoint(
+    path,
+    model,
+    arch_cfg,
+    norm_stats,
+    seed,
+    *,
+    cache,
+    cache_path=None,
+    recipe=None,
+    release=False,
+    code=None,
+):
+    """Serialise eqx leaves + JSON meta + pickled norm_stats under checkpoint schema 2.0.
+
+    The meta's ``cache_sha256`` is the digest the strict ``data.load_cache`` computed when it read the cache
+    (``cache["cache_sha256"]``); only a cache dict without it (a historical read) is hashed here from ``cache_path``.
+
+    ``release=True`` (a release ensemble member): the cache must be a release cache from the strict loader
+    (``release_cache_identity``), the checkout clean at a known commit and, with ``code`` (the identity at the start of
+    training), unchanged (``release_code_identity``); none of the three files may exist. The meta then records
+    ``git_sha`` = the full 40-hex commit, ``code_dirty`` = False, ``cache_sha256`` = the digest hashed at load,
+    ``cache_lineage_sha256`` = the digest of the cache's lineage record, and ``cache_path`` = the file name only (a
+    public bundle never carries a private path).
+
+    ``cache`` is the loaded cache dict the model was trained on. The meta records the VALIDATED comoving modes
+    ``k_com_hmpc`` (GLOBAL_STATIC, schema.py) and the coordinate convention; it never stores a velocity grid,
+    because the bins' s/km values depend on (z, theta) and are derived at prediction time (kcoord.py;
+    docs/kgrid_incident_2026-10.md).
 
     REPRODUCIBILITY (Phase-2b PR-prep): the stored ``arch_cfg`` is COMPLETED from the
     model's own static fields (``_arch_cfg_from_model`` — adds baseline_n_layers/
@@ -666,34 +887,104 @@ def save_checkpoint(path, model, arch_cfg, norm_stats, seed,
     knobs (``recipe``: w_coh, term_w, edge_gain/lowk, datarange, …). The frozen LF
     backbone the MF/likelihood load is then fully reproducible from the checkpoint
     alone — previously the recipe lived only in the separate hist.json."""
-    eqx.tree_serialise_leaves(str(path) + ".eqx", model)
     # complete the caller's arch_cfg from the model's static fields (caller-supplied
     # keys win on conflict, but the model is the source of truth for the arch).
     full_arch = _arch_cfg_from_model(model)
     full_arch.update(arch_cfg or {})
-    meta = {"arch_cfg": full_arch, "seed": int(seed),
-            "git_sha": _git_sha(),
-            "recipe": (dict(recipe) if recipe is not None else None),
-            "cache_path": (str(cache_path) if cache_path is not None else None)}
-    if kfkms is not None:
-        # cache kfkms is (R, n_k) (per-row, shared grid); store the single k-grid.
-        kf = np.asarray(kfkms)
-        kgrid = kf[0] if kf.ndim == 2 else np.atleast_1d(kf).ravel()
-        meta["kfkms"] = kgrid.astype(float).tolist()
-        meta["n_k"] = int(kgrid.shape[0])
-    else:
-        meta["kfkms"] = None
-        meta["n_k"] = full_arch.get("n_k")
-    with open(str(path) + ".meta.json", "w") as f:
+    from .data import PARAM_LIMITS
+    from .schema import (
+        CHECKPOINT_SCHEMA_VERSION,
+        K_CONVENTION,
+        L_BOX_HMPC,
+        SchemaCollapseError,
+        k_com_hmpc_from_cache,
+        validate_cache_schema,
+    )
+    import os as _os
+
+    if cache_path is None or not _os.path.isfile(str(cache_path)):
+        raise SchemaCollapseError(
+            f"cache_path must name the cache file the model was trained on (got {cache_path!r}); "
+            "its sha256 is part of every schema-2.0 checkpoint"
+        )
+    if recipe is not None and _velocity_key_paths(recipe):
+        raise SchemaCollapseError(
+            f"recipe carries a velocity grid key {_velocity_key_paths(recipe)}; kfkms never "
+            "enters a checkpoint (k is derived per request, kcoord.py)"
+        )
+    validate_cache_schema(cache)  # refuses a collapsed or inconsistent cache
+    k_com = np.asarray(
+        k_com_hmpc_from_cache(cache), float
+    )  # GLOBAL_STATIC, validated across ALL rows
+    if int(full_arch.get("n_k", k_com.shape[0])) != int(k_com.shape[0]):
+        raise ValueError(f"model n_k {full_arch.get('n_k')} != cache modes {k_com.shape[0]}")
+    at_load = cache.get("cache_sha256")
+    meta = {
+        "schema_version": CHECKPOINT_SCHEMA_VERSION,
+        "arch_cfg": full_arch,
+        "seed": int(seed),
+        "git_sha": _git_sha(),
+        "recipe": (dict(recipe) if recipe is not None else None),
+        "cache_path": (str(cache_path) if cache_path is not None else None),
+        "cache_sha256": (
+            at_load
+            if isinstance(at_load, str) and len(at_load) == 64
+            else _sha256_or_none(cache_path)
+        ),
+        "k_com_hmpc": k_com.tolist(),
+        "n_k": int(k_com.shape[0]),
+        "L_box_hmpc": float(L_BOX_HMPC),
+        "k_convention": K_CONVENTION,
+        "param_limits": np.asarray(PARAM_LIMITS, float).tolist(),
+    }
+    if release:
+        cache_sha, rec_sha = release_cache_identity(cache)
+        code_now = release_code_identity(code)
+        meta.update(
+            git_sha=code_now["commit"],
+            code_dirty=False,
+            cache_sha256=cache_sha,
+            cache_lineage_sha256=rec_sha,
+            cache_path=_os.path.basename(str(cache_path)),
+        )
+    mode = "x" if release else "w"  # a release checkpoint is never overwritten
+    if release:
+        clash = [
+            str(path) + e
+            for e in (".eqx", ".meta.json", ".norm.pkl")
+            if _os.path.lexists(str(path) + e)
+        ]
+        if clash:
+            raise FileExistsError(f"a release checkpoint is never overwritten: {clash}")
+    with open(str(path) + ".eqx", mode + "b") as f:
+        eqx.tree_serialise_leaves(f, model)
+    with open(str(path) + ".meta.json", mode) as f:
         json.dump(meta, f)
-    with open(str(path) + ".norm.pkl", "wb") as f:
+    with open(str(path) + ".norm.pkl", mode + "b") as f:
         pickle.dump(norm_stats, f)
 
 
 def load_checkpoint(path):
-    """Inverse of ``save_checkpoint``. Returns (model, meta, norm_stats)."""
+    """Inverse of ``save_checkpoint``. Returns (model, meta, norm_stats). Only schema-2.0 checkpoints load."""
     with open(str(path) + ".meta.json") as f:
         meta = json.load(f)
+    from .schema import CHECKPOINT_SCHEMA_VERSION, SchemaCollapseError
+
+    if meta.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+        raise SchemaCollapseError(
+            f"checkpoint {path} has schema {meta.get('schema_version')!r}, expected {CHECKPOINT_SCHEMA_VERSION}: "
+            "pre-2026-10 checkpoints carry a single velocity grid (kfkms) and are not loadable; see "
+            "docs/kgrid_incident_2026-10.md"
+        )
+    missing = [k for k in _SCHEMA2_REQUIRED if meta.get(k) is None]
+    if missing:
+        raise SchemaCollapseError(f"checkpoint {path}: schema-2.0 meta lacks {missing}")
+    if not (isinstance(meta["cache_sha256"], str) and len(meta["cache_sha256"]) == 64):
+        raise SchemaCollapseError(f"checkpoint {path}: cache_sha256 is not a 64-hex digest")
+    if _velocity_key_paths(meta):
+        raise SchemaCollapseError(
+            f"checkpoint {path}: meta carries a velocity grid key {_velocity_key_paths(meta)}"
+        )
     skeleton = Emulator(**meta["arch_cfg"], key=jax.random.PRNGKey(meta["seed"]))
     model = eqx.tree_deserialise_leaves(str(path) + ".eqx", skeleton)
     with open(str(path) + ".norm.pkl", "rb") as f:
@@ -702,6 +993,7 @@ def load_checkpoint(path):
 
 
 # --- Task 14 stub: k-fold LOSO error vector + DLA high-k shot flags -----------
+
 
 def aggregate_error_vector(resid_folds, neff_folds, shot_thresh=1.0):
     """RMS-over-folds error vector + a DLA high-k shot-noise flag.
@@ -712,10 +1004,10 @@ def aggregate_error_vector(resid_folds, neff_folds, shot_thresh=1.0):
     the worst-case DLA effective count over folds AND all z/τ₀ bands is below
     ``shot_thresh``.
     """
-    R = np.stack(resid_folds, 0)                 # (F,4,K,Zb[,Tb])
+    R = np.stack(resid_folds, 0)  # (F,4,K,Zb[,Tb])
     N = np.stack(neff_folds, 0)
-    sigma = np.sqrt(np.nanmean(R ** 2, axis=0))  # (4,K,Zb[,Tb])
-    dla = N[:, 3]                                 # (F,K,Zb[,Tb])
-    band_axes = tuple([0] + list(range(2, dla.ndim)))   # folds + all band axes
-    dla_neff = dla.min(axis=band_axes)           # (K,) worst-case DLA neff per k
+    sigma = np.sqrt(np.nanmean(R**2, axis=0))  # (4,K,Zb[,Tb])
+    dla = N[:, 3]  # (F,K,Zb[,Tb])
+    band_axes = tuple([0] + list(range(2, dla.ndim)))  # folds + all band axes
+    dla_neff = dla.min(axis=band_axes)  # (K,) worst-case DLA neff per k
     return {"sigma": sigma, "dla_shot_flag": dla_neff < shot_thresh}

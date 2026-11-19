@@ -21,11 +21,17 @@ For a simulation box at redshift z with comoving size L [Mpc]:
 
     dX = (H_0 / H(z)) × (1+z)^2 × dz_box
 
-where dz_box = H(z)/c × L_phys = H(z)/c × L/(1+z), giving:
+where dz_box = H(z)/c × L: a photon crosses the proper length L/(1+z) in a time L/((1+z) c), while the redshift
+changes by (1+z) H(z) times that time. This gives:
 
-    dX = (1+z) × L × H_0/c
+    dX = (1+z)^2 × L × H_0/c
 
-Per sightline: dX = (1+z) × (box_Mpc) × (H_0/c)
+Per sightline: dX = (1+z)^2 × (box_Mpc) × (H_0/c); with the box in Mpc/h and H_0 = 100 h km/s/Mpc, h cancels:
+dX = (1+z)^2 × (box in Mpc/h) × 100 / c, with c in km/s. This is what
+`hcd_analysis.cddf.absorption_path_per_sightline` computes, and what the CDDF tests check
+(`tests/test_science_cddf.py`). An earlier version of this page wrote dX = (1+z) × L × H_0/c, which misses a
+factor 1+z ([`bugs_found.md`](bugs_found.md), section 7).
+
 Total path: dX_total = N_sightlines × dX
 
 ## Measurement

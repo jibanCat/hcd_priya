@@ -21,6 +21,7 @@ readout REFUSES it.
 Usage:
   python scripts/analyze_r6_pairs.py --shard-dir <dir> [--npz-out out.npz]
 """
+
 import argparse
 import glob
 import os
@@ -61,18 +62,22 @@ def load_r6(shard_dir):
             assert pc.get("r6_override") is True, f"{p}: not an R6 pkl (r6_override missing)"
             assert pc.get("r6_arm") == arm, f"{p}: stamped r6_arm {pc.get('r6_arm')!r} != {arm}"
             _expect = {"legacy": "alpha_pivot_powerlaw_v1", "mapped": "dndx_mapped_v2"}[arm]
-            assert pc.get("hcd_parameterization") == _expect, \
-                f"{p}: parameterization {pc.get('hcd_parameterization')!r} != {_expect} for the {arm} arm"
+            assert (
+                pc.get("hcd_parameterization") == _expect
+            ), f"{p}: parameterization {pc.get('hcd_parameterization')!r} != {_expect} for the {arm} arm"
             if arm in meta_by_arm:
                 r = meta_by_arm[arm]
-                assert pc.get("r6_truth_source") == r["prior_constants"]["r6_truth_source"], \
-                    f"{p}: mixed r6_truth_source within the {arm} arm"
+                assert (
+                    pc.get("r6_truth_source") == r["prior_constants"]["r6_truth_source"]
+                ), f"{p}: mixed r6_truth_source within the {arm} arm"
                 for sig in ("forward_signature", "hcd_prior_signature"):
-                    assert meta["forward"][sig] == r["forward"][sig], \
-                        f"{p}: {sig} drift within the {arm} arm"
+                    assert (
+                        meta["forward"][sig] == r["forward"][sig]
+                    ), f"{p}: {sig} drift within the {arm} arm"
                 for k in _RUN_KW_CORE:
-                    assert meta["run_kw"].get(k) == r["run_kw"].get(k), \
-                        f"{p}: run_kw[{k}] drift within the {arm} arm"
+                    assert meta["run_kw"].get(k) == r["run_kw"].get(
+                        k
+                    ), f"{p}: run_kw[{k}] drift within the {arm} arm"
             else:
                 meta_by_arm[arm] = meta
             for rec, mi in zip(d["per_mock"], d["idxs"]):
@@ -81,15 +86,19 @@ def load_r6(shard_dir):
     # CROSS-ARM stamps: same tree (both signatures — the constants payload covers BOTH eras, so
     # a pair generated astride a constant swap refuses), same truth source, same sampler core.
     mL, mM = meta_by_arm["legacy"], meta_by_arm["mapped"]
-    assert mL["forward"]["forward_signature"] == mM["forward"]["forward_signature"], \
-        "cross-arm forward_signature mismatch (arms from different trees)"
-    assert mL["forward"]["hcd_prior_signature"] == mM["forward"]["hcd_prior_signature"], \
-        "cross-arm hcd_prior_signature mismatch (arms astride a prior-constant swap)"
-    assert mL["prior_constants"]["r6_truth_source"] == mM["prior_constants"]["r6_truth_source"], \
-        "cross-arm r6_truth_source mismatch (pairs do not share a truth source)"
+    assert (
+        mL["forward"]["forward_signature"] == mM["forward"]["forward_signature"]
+    ), "cross-arm forward_signature mismatch (arms from different trees)"
+    assert (
+        mL["forward"]["hcd_prior_signature"] == mM["forward"]["hcd_prior_signature"]
+    ), "cross-arm hcd_prior_signature mismatch (arms astride a prior-constant swap)"
+    assert (
+        mL["prior_constants"]["r6_truth_source"] == mM["prior_constants"]["r6_truth_source"]
+    ), "cross-arm r6_truth_source mismatch (pairs do not share a truth source)"
     for k in _RUN_KW_CORE:
-        assert mL["run_kw"].get(k) == mM["run_kw"].get(k), \
-            f"cross-arm run_kw[{k}] mismatch (pairing needs identical sampler settings + seed)"
+        assert mL["run_kw"].get(k) == mM["run_kw"].get(
+            k
+        ), f"cross-arm run_kw[{k}] mismatch (pairing needs identical sampler settings + seed)"
     return by_arm, meta_by_arm
 
 
@@ -102,17 +111,20 @@ def pair_report(shard_dir, npz_out=None):
     # truth_vec, and the z-resolved alpha rows).
     for m in common:
         rL, rM = by_arm["legacy"][m], by_arm["mapped"][m]
-        assert np.array_equal(np.asarray(rL["truth_vec"]), np.asarray(rM["truth_vec"])), \
-            f"pair {m}: truth_vec differs between arms — NOT a shared-truth pair (refusing)"
-        assert np.array_equal(np.asarray(rL["truth_alpha_hcd_z"]),
-                              np.asarray(rM["truth_alpha_hcd_z"])), \
-            f"pair {m}: truth_alpha_hcd_z differs between arms — NOT a shared-truth pair"
+        assert np.array_equal(
+            np.asarray(rL["truth_vec"]), np.asarray(rM["truth_vec"])
+        ), f"pair {m}: truth_vec differs between arms — NOT a shared-truth pair (refusing)"
+        assert np.array_equal(
+            np.asarray(rL["truth_alpha_hcd_z"]), np.asarray(rM["truth_alpha_hcd_z"])
+        ), f"pair {m}: truth_alpha_hcd_z differs between arms — NOT a shared-truth pair"
 
     ts = meta["mapped"]["prior_constants"]["r6_truth_source"]
     print(f"== R6 paired readout: {len(common)} pairs (orphan mocks skipped: {orphans}) ==")
-    print(f"truth source: {ts} (stamped, both arms); "
-          f"forward {meta['mapped']['forward']['forward_signature'][:12]}...; "
-          f"prior sig {meta['mapped']['forward']['hcd_prior_signature'][:12]}...")
+    print(
+        f"truth source: {ts} (stamped, both arms); "
+        f"forward {meta['mapped']['forward']['forward_signature'][:12]}...; "
+        f"prior sig {meta['mapped']['forward']['hcd_prior_signature'][:12]}..."
+    )
     print("delta = bias_mapped - bias_legacy per pair (posterior-mean bias vs the SHARED truth);")
     print("mean +/- paired SE over pairs. ns/Ap are in theta_unit (unit-cube) coordinates, the")
     print("campaign-analyzer convention. SUPPORTING EVIDENCE, no gate; cannot adjudicate")
@@ -122,9 +134,10 @@ def pair_report(shard_dir, npz_out=None):
     for arm in ("legacy", "mapped"):
         nd = {m: int(by_arm[arm][m].get("n_div", 0)) for m in common}
         bad = {m: n for m, n in nd.items() if n > 0}
-        print(f"  [{arm}] divergences: total {sum(nd.values())}, "
-              f"divergent fits {len(bad)}/{len(common)}"
-              + (f" (mocks {sorted(bad)})" if bad else ""))
+        print(
+            f"  [{arm}] divergences: total {sum(nd.values())}, "
+            f"divergent fits {len(bad)}/{len(common)}" + (f" (mocks {sorted(bad)})" if bad else "")
+        )
 
     out = dict(mocks=np.asarray(common), truth_source=ts)
     for p in PAIR_PARAMS:
@@ -134,14 +147,18 @@ def pair_report(shard_dir, npz_out=None):
         for arm in ("legacy", "mapped"):
             for m in common:
                 rec = by_arm[arm][m]
-                assert p in rec["names"] or p in rec.get("sites_extra", {}), \
-                    f"param {p!r} absent in the {arm} arm, mock {m} — broken/stale pkl " \
+                assert p in rec["names"] or p in rec.get("sites_extra", {}), (
+                    f"param {p!r} absent in the {arm} arm, mock {m} — broken/stale pkl "
                     f"(every PAIR_PARAM exists in both parameterizations)"
-        dl = np.array([_bias(by_arm["mapped"][m], p) - _bias(by_arm["legacy"][m], p)
-                       for m in common])
+                )
+        dl = np.array(
+            [_bias(by_arm["mapped"][m], p) - _bias(by_arm["legacy"][m], p) for m in common]
+        )
         se = dl.std(ddof=1) / np.sqrt(len(dl)) if len(dl) > 1 else float("nan")
-        print(f"  {p:>13}: mean {dl.mean():+.4f} +/- {se:.4f}   per-pair "
-              f"{np.array2string(dl, precision=3)}")
+        print(
+            f"  {p:>13}: mean {dl.mean():+.4f} +/- {se:.4f}   per-pair "
+            f"{np.array2string(dl, precision=3)}"
+        )
         out[f"delta_{p}"] = dl
     if npz_out:
         np.savez(npz_out, **out)

@@ -6,31 +6,34 @@
 #   sbatch scripts/batch_greatlakes.sh run-all
 #   sbatch scripts/batch_greatlakes.sh run-sim --sim ns0.803...
 #
-# Outputs go to /scratch/cavestru_root/cavestru0/mfho/hcd_outputs/
+# Outputs go to $HCD_OUTPUTS_DIR/
 
 #SBATCH --job-name=hcd_pipeline
-#SBATCH --account=cavestru0
+# Charge your own allocation when you submit (sbatch's account option).
 #SBATCH --partition=standard
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=21
 #SBATCH --mem-per-cpu=8g
 #SBATCH --time=08:00:00
-#SBATCH --chdir=/home/mfho/hcd_priya
-#SBATCH --output=/home/mfho/hcd_priya/logs/hcd_%j.out
-#SBATCH --error=/home/mfho/hcd_priya/logs/hcd_%j.err
+#SBATCH --output=logs/hcd_%j.out
+#SBATCH --error=logs/hcd_%j.err
 #SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=mfho@umich.edu
 
+REPO="${SLURM_SUBMIT_DIR:-$(pwd)}"   # this checkout: submit from its root (emulator-debug 2026-10)
+cd "$REPO" || exit 2
+[ -f "$REPO/hcd_analysis/paths.py" ] || { echo "submit from the repository root (got $REPO)" >&2; exit 2; }
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
-HCD_ROOT="/home/mfho/hcd_priya"
+HCD_ROOT="$REPO"
 PYTHON="/sw/pkgs/arc/mamba/py3.11/bin/python3"
 HCD_CONFIG="${HCD_CONFIG:-${HCD_ROOT}/config/default.yaml}"
-OUTPUT_ROOT="/scratch/cavestru_root/cavestru0/mfho/hcd_outputs"
+# The 2026-05 production root below holds results but no run_settings.json, so the pipeline now refuses to run
+# into it (hcd_analysis/run_settings.py). For a new run, set OUTPUT_ROOT to a new directory.
+OUTPUT_ROOT="${HCD_OUTPUTS_DIR:?set HCD_OUTPUTS_DIR to the output directory}"
 
 mkdir -p "${HCD_ROOT}/logs"
 cd "${HCD_ROOT}"
@@ -67,7 +70,7 @@ case "$MODE" in
       exit 1
     fi
     echo "Array task ${SLURM_ARRAY_TASK_ID} → ${SIM_NAME}"
-    "$PYTHON" -m cli.run run-sim \
+    "$PYTHON" -m hcd_analysis.cli.run run-sim \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --set "n_workers=1" \
@@ -77,7 +80,7 @@ case "$MODE" in
     ;;
 
   run-all)
-    "$PYTHON" -m cli.run run-all \
+    "$PYTHON" -m hcd_analysis.cli.run run-all \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --n-workers "${SLURM_CPUS_PER_TASK:-4}" \
@@ -86,7 +89,7 @@ case "$MODE" in
     ;;
 
   run-sim)
-    "$PYTHON" -m cli.run run-sim \
+    "$PYTHON" -m hcd_analysis.cli.run run-sim \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --verbose \
@@ -94,7 +97,7 @@ case "$MODE" in
     ;;
 
   run-one)
-    "$PYTHON" -m cli.run run-one \
+    "$PYTHON" -m hcd_analysis.cli.run run-one \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --verbose \
@@ -102,7 +105,7 @@ case "$MODE" in
     ;;
 
   convergence)
-    "$PYTHON" -m cli.run convergence \
+    "$PYTHON" -m hcd_analysis.cli.run convergence \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --verbose \
@@ -110,7 +113,7 @@ case "$MODE" in
     ;;
 
   benchmark)
-    "$PYTHON" -m cli.run benchmark \
+    "$PYTHON" -m hcd_analysis.cli.run benchmark \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --n-sims 2 --n-snaps 3 \
@@ -119,7 +122,7 @@ case "$MODE" in
     ;;
 
   report)
-    "$PYTHON" -m cli.run report \
+    "$PYTHON" -m hcd_analysis.cli.run report \
       --config "$HCD_CONFIG" \
       --output-root "$OUTPUT_ROOT" \
       --figures-dir "${HCD_ROOT}/figures" \

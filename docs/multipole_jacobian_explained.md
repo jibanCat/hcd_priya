@@ -254,7 +254,7 @@ on the `(r, |μ|)` grid.
 
 To run::
 
-    cd /home/mfho/hcd_priya
+    cd <repo>
     for t in tests/test_clustering.py tests/test_lya_bias.py; do python3 "$t"; done
 
 To regenerate the validation figures::
@@ -266,7 +266,7 @@ To regenerate the real-data test-10 plot::
     python3 scripts/run_test10.py --mode rmu
 
 (takes ~ 11 min on a Great Lakes login node; reads
-`/nfs/turbo/umor-yueyingn/mfho/emu_full/<sim>/output/SPECTRA_022/lya_forest_spectra_grid_480.hdf5`
+`$HCD_LF_RAW_DIR/<sim>/output/SPECTRA_022/lya_forest_spectra_grid_480.hdf5`
 and the matching catalog).
 
 ---
@@ -279,7 +279,7 @@ and the matching catalog).
    non-linear scale-dependent bias (Bird+2014 §5.2) — a separate
    PR.
 
-2. **χ²/dof ≈ 279** on the real-data fit is large.  The reported
+2. **χ²/dof ≈ 279** on the fit to the PRIYA spectra is large.  The reported
    `b_DLA_err = 0.414` is rescaled by `√(χ²/dof)` so it absorbs
    model-mismatch inflation; the formal Poisson-only error would
    have been `~ 0.02`.  (The earlier number `χ²/dof ≈ 363` came

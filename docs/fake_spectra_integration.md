@@ -10,7 +10,7 @@
 
 Production code paths in `hcd_priya` **do not import `fake_spectra` at runtime**. The pre-saved `tau/H/1/1215` HDF5 grids that this pipeline consumes were *originally generated* with `fake_spectra`, but everything downstream of that — system finding, NHI recovery, P1D, CDDF, masking, templates — is reimplemented locally.
 
-The only `import fake_spectra` site in the package is at `hcd_analysis/voigt_utils.py:72`, inside a `try/except ImportError` block. It is used purely as a sanity hook: if `fake_spectra` happens to be installed, the module captures `voigt_profile` for cross-validation; if not, every code path proceeds with our internal Voigt implementation. No production figure or downstream artefact depends on this soft import being satisfied.
+The only `import fake_spectra` site in the package is in `hcd_analysis/voigt_utils.py`, inside the `try/except ImportError` block that sets `_HAVE_FAKE_SPECTRA`. It is used purely as a sanity hook: if `fake_spectra` happens to be installed, the module captures `voigt_profile` for cross-validation; if not, every code path proceeds with our internal Voigt implementation. No production figure or downstream artefact depends on this soft import being satisfied.
 
 ## What we ported (with cross-validation)
 

@@ -21,14 +21,17 @@ For a flat ΛCDM cosmology:
 For a simulation box at redshift z, the total absorption path per sightline is:
     Delta_X = (H_0 / H(z)) * (1+z)^2 * Delta_z_box
 
-where Delta_z_box is the redshift interval spanned by the box:
-    Delta_z_box ≈ H(z) * L_phys / c  (narrow box)
-              = H(z) * (box_kpc/h / 1000 / h) / (1+z) / c_kms  km/s / (km/s)
+where Delta_z_box is the redshift interval spanned by the box. A photon crosses the proper length L_com / (1+z) of a
+box of comoving length L_com in Delta_t = L_com / ((1+z) c), while the redshift changes by (1+z) H(z) Delta_t:
+    Delta_z_box = H(z) * L_com / c  (narrow box)
 
-This simplifies to:
-    Delta_X = (1+z)^2 * L_phys_Mpc * H_0_kms / c_kms
-            = (1+z)^2 * (box/1000/h) / (1+z) * H_0/c  (dimensionless)
-            = (1+z) * (box/1000/h) * H_0/c
+This gives (with L_com in Mpc and H_0 = 100 h km/s/Mpc, h cancels):
+    Delta_X = (1+z)^2 * L_com * H_0 / c
+            = (1+z)^2 * (box_kpc_h / 1000 / h) * (100 h) / c_kms
+            = (1+z)^2 * (box in Mpc/h) * 100 / c_kms  (dimensionless)
+
+as ``absorption_path_per_sightline`` computes. (An earlier version of this text wrote (1+z) * L * H_0 / c, which
+misses a factor 1+z; see docs/bugs_found.md section 7.)
 
 We measure CDDF from the simulation directly:
     f(N_HI) = n_absorbers(N_HI in bin) / (dN_HI * n_sightlines * Delta_X)
@@ -81,6 +84,7 @@ _C_KMS = 2.99792458e5
 # Absorption path length
 # ---------------------------------------------------------------------------
 
+
 def absorption_path_per_sightline(
     box_kpc_h: float,
     hubble: float,
@@ -109,19 +113,20 @@ def absorption_path_per_sightline(
     compounding bugs — missing (1+z) factor and missing h factor — that
     inflated the CDDF and dN/dX by (1+z)·h.  See docs/bugs_found.md §7.
     """
-    L_com_Mpc = box_kpc_h / 1000.0 / hubble    # comoving Mpc
-    H0 = hubble * _H0_KMS_MPC                   # km/s/Mpc, dimensional
-    return (1.0 + z)**2 * L_com_Mpc * H0 / _C_KMS
+    L_com_Mpc = box_kpc_h / 1000.0 / hubble  # comoving Mpc
+    H0 = hubble * _H0_KMS_MPC  # km/s/Mpc, dimensional
+    return (1.0 + z) ** 2 * L_com_Mpc * H0 / _C_KMS
 
 
 def hz_from_cosmology(omegam: float, omegal: float, z: float) -> float:
     """H(z)/H_0 (dimensionless) for flat ΛCDM."""
-    return np.sqrt(omegam * (1.0 + z)**3 + omegal)
+    return np.sqrt(omegam * (1.0 + z) ** 3 + omegal)
 
 
 # ---------------------------------------------------------------------------
 # CDDF measurement
 # ---------------------------------------------------------------------------
+
 
 def measure_cddf(
     catalog: AbsorberCatalog,
@@ -164,7 +169,7 @@ def measure_cddf(
 
     counts, edges = np.histogram(log_nhi_vals, bins=log_nhi_bins)
     dlogN = np.diff(edges)
-    dN = 10.0**edges[1:] - 10.0**edges[:-1]  # actual dN in cm^-2
+    dN = 10.0 ** edges[1:] - 10.0 ** edges[:-1]  # actual dN in cm^-2
 
     with np.errstate(divide="ignore", invalid="ignore"):
         f_nhi = np.where(dN > 0, counts / (dN * total_path), 0.0)
@@ -186,6 +191,7 @@ def measure_cddf(
 # ---------------------------------------------------------------------------
 # CDDF Perturbation model
 # ---------------------------------------------------------------------------
+
 
 class CDDFPerturbation:
     """
@@ -220,6 +226,7 @@ class CDDFPerturbation:
 # ---------------------------------------------------------------------------
 # Perturbation → P1D effect
 # ---------------------------------------------------------------------------
+
 
 def perturbed_mask_classes(
     catalog: AbsorberCatalog,
@@ -280,6 +287,7 @@ def perturbed_mask_classes(
 # DataFrame-compatible CDDF (used by pipeline when catalog is a pandas DF)
 # ---------------------------------------------------------------------------
 
+
 def measure_cddf_from_dataframe(
     df,
     z: float,
@@ -312,7 +320,7 @@ def measure_cddf_from_dataframe(
 
     log_nhi_vals = np.asarray(df["log_nhi"])
     counts, edges = np.histogram(log_nhi_vals, bins=log_nhi_bins)
-    dN = 10.0**edges[1:] - 10.0**edges[:-1]
+    dN = 10.0 ** edges[1:] - 10.0 ** edges[:-1]
 
     with np.errstate(divide="ignore", invalid="ignore"):
         f_nhi = np.where(dN > 0, counts / (dN * total_path), 0.0)
@@ -333,6 +341,7 @@ def measure_cddf_from_dataframe(
 # ---------------------------------------------------------------------------
 # Per-sim CDDF stacking with separate redshift bins
 # ---------------------------------------------------------------------------
+
 
 def stack_cddf_for_sim(
     cddf_list: List[Dict],
@@ -393,7 +402,7 @@ def stack_cddf_for_sim(
             z_snaps.append(c["z"])
             f_per_snap.append(c["f_nhi"])
 
-        dN = 10.0**log_nhi_edges[1:] - 10.0**log_nhi_edges[:-1]
+        dN = 10.0 ** log_nhi_edges[1:] - 10.0 ** log_nhi_edges[:-1]
         with np.errstate(divide="ignore", invalid="ignore"):
             f_stacked = np.where(dN > 0, counts_total / (dN * path_total), 0.0)
 
@@ -446,9 +455,15 @@ def compute_perturbed_p1d(
 
     # Compute baseline P1D (unperturbed mask)
     k, p1d_base, _ = compute_p1d_single(
-        hdf5_path, nbins, dv_kms, catalog=catalog,
-        mask_classes=base_mask_classes, batch_size=batch_size,
-        n_skewers=n_skewers, fill_strategy=fill_strategy, k_bins=k_bins,
+        hdf5_path,
+        nbins,
+        dv_kms,
+        catalog=catalog,
+        mask_classes=base_mask_classes,
+        batch_size=batch_size,
+        n_skewers=n_skewers,
+        fill_strategy=fill_strategy,
+        k_bins=k_bins,
     )
 
     # Generate perturbed realizations
@@ -467,9 +482,15 @@ def compute_perturbed_p1d(
             absorbers=abs_list,
         )
         _, p1d_r, _ = compute_p1d_single(
-            hdf5_path, nbins, dv_kms, catalog=tmp_cat,
-            mask_classes=base_mask_classes, batch_size=batch_size,
-            n_skewers=n_skewers, fill_strategy=fill_strategy, k_bins=k_bins,
+            hdf5_path,
+            nbins,
+            dv_kms,
+            catalog=tmp_cat,
+            mask_classes=base_mask_classes,
+            batch_size=batch_size,
+            n_skewers=n_skewers,
+            fill_strategy=fill_strategy,
+            k_bins=k_bins,
         )
         p1d_realizations.append(p1d_r)
 

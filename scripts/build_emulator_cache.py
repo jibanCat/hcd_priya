@@ -13,11 +13,13 @@ so every dataset in the cache lives in the project convention.
 
 Usage:
     python3 scripts/build_emulator_cache.py \
-        [--root /scratch/cavestru_root/cavestru0/mfho/hcd_outputs] \
+        [--root $HCD_OUTPUTS_DIR] \
         [--output hcd_analysis/_emulator_data/observables.h5] \
         [--limit N] [--spot-check]
 """
+
 from __future__ import annotations
+import os
 
 import argparse
 import datetime
@@ -89,8 +91,7 @@ def read_p1d_per_class(snap_dir: Path) -> dict:
     return out
 
 
-def interp_p1d_loglog(k_src: np.ndarray, P_src: np.ndarray,
-                      k_target: np.ndarray) -> np.ndarray:
+def interp_p1d_loglog(k_src: np.ndarray, P_src: np.ndarray, k_target: np.ndarray) -> np.ndarray:
     """Log-log linear interpolation of P(k) from `k_src` onto `k_target`.
 
     Out-of-range targets (k_target < k_src.min() or > k_src.max()) are
@@ -132,18 +133,16 @@ def compute_dndx_per_class(meta_n_absorbers: dict, total_path: float) -> dict[st
     catalog NHI value instead.
     """
     return {
-        "dNdX_LLS":    float(meta_n_absorbers["LLS"])    / total_path,
+        "dNdX_LLS": float(meta_n_absorbers["LLS"]) / total_path,
         "dNdX_subDLA": float(meta_n_absorbers["subDLA"]) / total_path,
-        "dNdX_DLA":    float(meta_n_absorbers["DLA"])    / total_path,
+        "dNdX_DLA": float(meta_n_absorbers["DLA"]) / total_path,
     }
 
 
-PARAM_ORDER = ("ns", "Ap", "herei", "heref", "alphaq",
-               "hub", "omegamh2", "hireionz", "bhfeedback")
+PARAM_ORDER = ("ns", "Ap", "herei", "heref", "alphaq", "hub", "omegamh2", "hireionz", "bhfeedback")
 
 
-def build_row(sim_name: str, snap: int, snap_dir: Path,
-              k_target: np.ndarray) -> dict:
+def build_row(sim_name: str, snap: int, snap_dir: Path, k_target: np.ndarray) -> dict:
     """Assemble one (sim, snap) row matching the output HDF5 schema."""
     params_dict = parse_sim_params(sim_name)
     if params_dict is None:
@@ -166,23 +165,23 @@ def build_row(sim_name: str, snap: int, snap_dir: Path,
         "dv_kms": float(meta["dv_kms"]),
         "nbins_native": int(meta["nbins"]),
         "n_total_sightlines": int(meta["n_skewers"]),
-        "P_clean":       interp_p1d_loglog(k_src_angular, p1d["P_clean"],       k_target),
-        "P_LLS_only":    interp_p1d_loglog(k_src_angular, p1d["P_LLS_only"],    k_target),
+        "P_clean": interp_p1d_loglog(k_src_angular, p1d["P_clean"], k_target),
+        "P_LLS_only": interp_p1d_loglog(k_src_angular, p1d["P_LLS_only"], k_target),
         "P_subDLA_only": interp_p1d_loglog(k_src_angular, p1d["P_subDLA_only"], k_target),
-        "P_DLA_only":    interp_p1d_loglog(k_src_angular, p1d["P_DLA_only"],    k_target),
-        "mean_F_clean":  float(p1d["mean_F_clean"]),
-        "mean_F_LLS":    float(p1d["mean_F_LLS"]),
+        "P_DLA_only": interp_p1d_loglog(k_src_angular, p1d["P_DLA_only"], k_target),
+        "mean_F_clean": float(p1d["mean_F_clean"]),
+        "mean_F_LLS": float(p1d["mean_F_LLS"]),
         "mean_F_subDLA": float(p1d["mean_F_subDLA"]),
-        "mean_F_DLA":    float(p1d["mean_F_DLA"]),
-        "n_sightlines_clean":  int(p1d["n_sightlines_clean"]),
-        "n_sightlines_LLS":    int(p1d["n_sightlines_LLS"]),
+        "mean_F_DLA": float(p1d["mean_F_DLA"]),
+        "n_sightlines_clean": int(p1d["n_sightlines_clean"]),
+        "n_sightlines_LLS": int(p1d["n_sightlines_LLS"]),
         "n_sightlines_subDLA": int(p1d["n_sightlines_subDLA"]),
-        "n_sightlines_DLA":    int(p1d["n_sightlines_DLA"]),
+        "n_sightlines_DLA": int(p1d["n_sightlines_DLA"]),
         "log_nhi_centres": np.asarray(cddf["log_nhi_centres"], dtype=np.float64),
-        "log_nhi_edges":   np.asarray(cddf["log_nhi_edges"], dtype=np.float64),
-        "f_nhi":           np.asarray(cddf["f_nhi"], dtype=np.float64),
-        "n_absorbers":     np.asarray(cddf["n_absorbers"], dtype=np.int64),
-        "total_path_dX":   float(cddf["total_path"]),
+        "log_nhi_edges": np.asarray(cddf["log_nhi_edges"], dtype=np.float64),
+        "f_nhi": np.asarray(cddf["f_nhi"], dtype=np.float64),
+        "n_absorbers": np.asarray(cddf["n_absorbers"], dtype=np.int64),
+        "total_path_dX": float(cddf["total_path"]),
         **dndx,
     }
     return row
@@ -190,22 +189,37 @@ def build_row(sim_name: str, snap: int, snap_dir: Path,
 
 def _git_sha(repo: Path) -> str:
     try:
-        out = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                             capture_output=True, text=True, check=True)
+        out = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         return out.stdout.strip()
     except Exception:
         return "unknown"
 
 
 _VECTOR_FLOAT_KEYS = (
-    "z", "dv_kms", "total_path_dX",
-    "mean_F_clean", "mean_F_LLS", "mean_F_subDLA", "mean_F_DLA",
-    "dNdX_LLS", "dNdX_subDLA", "dNdX_DLA",
+    "z",
+    "dv_kms",
+    "total_path_dX",
+    "mean_F_clean",
+    "mean_F_LLS",
+    "mean_F_subDLA",
+    "mean_F_DLA",
+    "dNdX_LLS",
+    "dNdX_subDLA",
+    "dNdX_DLA",
 )
 _VECTOR_INT_KEYS = (
-    "snap", "nbins_native", "n_total_sightlines",
-    "n_sightlines_clean", "n_sightlines_LLS",
-    "n_sightlines_subDLA", "n_sightlines_DLA",
+    "snap",
+    "nbins_native",
+    "n_total_sightlines",
+    "n_sightlines_clean",
+    "n_sightlines_LLS",
+    "n_sightlines_subDLA",
+    "n_sightlines_DLA",
 )
 _PER_CLASS_P1D_KEYS = ("P_clean", "P_LLS_only", "P_subDLA_only", "P_DLA_only")
 _PER_ROW_2D_KEYS = ("f_nhi", "n_absorbers")
@@ -226,8 +240,9 @@ def write_cache(rows: list[dict], k_target: np.ndarray, output_path: Path) -> No
     log_nhi_centres = rows[0]["log_nhi_centres"]
     log_nhi_edges = rows[0]["log_nhi_edges"]
     for r in rows[1:]:
-        assert np.array_equal(r["log_nhi_centres"], log_nhi_centres), \
-            "log_nhi_centres mismatch across rows"
+        assert np.array_equal(
+            r["log_nhi_centres"], log_nhi_centres
+        ), "log_nhi_centres mismatch across rows"
 
     with h5py.File(output_path, "w") as f:
         f.attrs["created_utc"] = datetime.datetime.utcnow().isoformat(timespec="seconds") + "Z"
@@ -238,8 +253,7 @@ def write_cache(rows: list[dict], k_target: np.ndarray, output_path: Path) -> No
         f.attrs["interp_method"] = "loglog_linear_NaN_outside"
 
         f.create_dataset("k_target", data=np.asarray(k_target, dtype=np.float64))
-        f.create_dataset("param_names",
-                         data=np.array(list(PARAM_ORDER), dtype=h5py.string_dtype()))
+        f.create_dataset("param_names", data=np.array(list(PARAM_ORDER), dtype=h5py.string_dtype()))
         f.create_dataset("sim_name", data=sim_names)
         f.create_dataset("params", data=params)
         f.create_dataset("log_nhi_centres", data=log_nhi_centres)
@@ -255,19 +269,21 @@ def write_cache(rows: list[dict], k_target: np.ndarray, output_path: Path) -> No
             f.create_dataset(key, data=np.stack([r[key] for r in rows], axis=0))
 
 
-_DEFAULT_HCD_ROOT = Path("/scratch/cavestru_root/cavestru0/mfho/hcd_outputs")
+_DEFAULT_HCD_ROOT = Path(os.environ.get("HCD_OUTPUTS_DIR", "<HCD_OUTPUTS_DIR unset>"))
 
 
-def verify_round_trip(cache_path: Path, sim: str, snap: int,
-                      root: Path = _DEFAULT_HCD_ROOT) -> None:
+def verify_round_trip(
+    cache_path: Path, sim: str, snap: int, root: Path = _DEFAULT_HCD_ROOT
+) -> None:
     """Re-load one row from the cache and compare back to source files."""
     with h5py.File(cache_path, "r") as f:
         sim_names = f["sim_name"][...].astype(str)
         snaps = f["snap"][...]
         mask = (sim_names == sim) & (snaps == snap)
         if mask.sum() != 1:
-            raise AssertionError(f"row ({sim}, {snap}) not unique in cache "
-                                 f"({mask.sum()} matches)")
+            raise AssertionError(
+                f"row ({sim}, {snap}) not unique in cache " f"({mask.sum()} matches)"
+            )
         i = int(np.where(mask)[0][0])
         cached = {
             "z": float(f["z"][i]),
@@ -277,8 +293,7 @@ def verify_round_trip(cache_path: Path, sim: str, snap: int,
             "k_target": f["k_target"][...],
         }
 
-    match = [(s, sn, sd) for s, sn, sd in discover_sim_snap_pairs(root)
-             if s == sim and sn == snap]
+    match = [(s, sn, sd) for s, sn, sd in discover_sim_snap_pairs(root) if s == sim and sn == snap]
     if not match:
         raise AssertionError(f"({sim}, {snap}) not found under {root}")
     _, _, snap_dir = match[0]
@@ -293,19 +308,35 @@ def verify_round_trip(cache_path: Path, sim: str, snap: int,
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build the HCD-emulator observables cache (Phase 1).")
-    parser.add_argument("--root", type=Path, default=_DEFAULT_HCD_ROOT,
-                        help="Root scratch directory containing per-sim folders.")
-    parser.add_argument("--output", type=Path,
-                        default=REPO_ROOT / "hcd_analysis" / "_emulator_data" / "observables.h5",
-                        help="Output HDF5 path (will be overwritten).")
-    parser.add_argument("--limit", type=int, default=None,
-                        help="If set, only process the first N pairs (for dry runs).")
-    parser.add_argument("--spot-check", action="store_true",
-                        help="After building, re-verify the first row against source files.")
+        description="Build the HCD-emulator observables cache (Phase 1)."
+    )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=_DEFAULT_HCD_ROOT,
+        help="Root scratch directory containing per-sim folders.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=REPO_ROOT / "hcd_analysis" / "_emulator_data" / "observables.h5",
+        help="Output HDF5 path (will be overwritten).",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="If set, only process the first N pairs (for dry runs).",
+    )
+    parser.add_argument(
+        "--spot-check",
+        action="store_true",
+        help="After building, re-verify the first row against source files.",
+    )
     args = parser.parse_args()
 
     from hcd_analysis.p1d import _DEFAULT_K_BINS
+
     # _DEFAULT_K_BINS is cyclic (s/km); convert to angular (rad*s/km) at the
     # cache layer so every downstream consumer reads the project convention.
     k_target = 2.0 * np.pi * _DEFAULT_K_BINS
@@ -326,8 +357,9 @@ def main() -> None:
     print(f"Wrote cache to {args.output}  ({args.output.stat().st_size / 1e6:.2f} MB)")
 
     if args.spot_check and rows:
-        verify_round_trip(args.output, sim=rows[0]["sim_name"], snap=rows[0]["snap"],
-                          root=args.root)
+        verify_round_trip(
+            args.output, sim=rows[0]["sim_name"], snap=rows[0]["snap"], root=args.root
+        )
 
 
 if __name__ == "__main__":
