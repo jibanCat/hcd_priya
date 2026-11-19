@@ -26,8 +26,10 @@ removed. It needs ``hcd_analysis`` installed.
 
 ``--synthetic``: writes a synthetic release (untrained networks; no real number) with the test suite's builder. Run it
 from a repository checkout, in an environment that has ``hcd_analysis``'s dependencies and ``pytest`` (the ``test``
-extra). The package version is ``0+synthetic``: a version with a local label cannot be uploaded to the package index,
-so a synthetic build cannot be published by mistake.
+extra). The package version is the version that hcd-priya pins in ``pyproject.toml`` (beside this folder) with the
+local label ``+synthetic``, for example ``1.2.0+synthetic``: the pin accepts it, so the code installs with it, and a
+version with a local label cannot be uploaded to the package index, so a synthetic build cannot be published by
+mistake.
 
 Then build: ``python -m build --outdir <dir> model_package`` (the wheel and the source archive). The script removes
 ``model_package/build`` and the ``egg-info`` directory before it writes anything and with ``--clean``: files left
@@ -53,12 +55,34 @@ PKG = os.path.join(HERE, "src", "hcd_priya_models")
 DATA = os.path.join(PKG, "data")
 VERSION = os.path.join(PKG, "_version.py")
 FORMAT = "hcd_priya.models/1"
-SYNTHETIC_VERSION = "0+synthetic"
+SYNTHETIC_LABEL = "+synthetic"
+PIN = re.compile(r"hcd-priya-models\s*==\s*(\S+)\Z")
 DOC_FILES = ("README.md", "LICENSE", "ATTRIBUTION.md", "SHA256SUMS")
 # A canonical public version (PEP 440): what the package index keeps unchanged and accepts.
 PUBLIC_VERSION = re.compile(
     r"(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?\Z"
 )
+
+
+def synthetic_version() -> str:
+    """The version of a synthetic build: the version of hcd-priya-models that hcd-priya pins exactly in
+    ``pyproject.toml`` (the folder above this one), with the local label ``+synthetic``. The pin accepts it (PEP 440
+    ignores a local label the pin does not name), and a package index refuses it."""
+    import tomllib
+
+    path = os.path.join(os.path.dirname(HERE), "pyproject.toml")
+    try:
+        with open(path, "rb") as fh:
+            deps = tomllib.load(fh)["project"]["dependencies"]
+    except (OSError, KeyError, tomllib.TOMLDecodeError) as exc:
+        sys.exit(f"prepare: --synthetic reads the pin of hcd-priya-models from {path}: {exc}")
+    pins = [m.group(1) for d in deps if (m := PIN.match(d.strip()))]
+    named = [d for d in deps if d.strip().startswith("hcd-priya-models")]
+    if len(pins) != 1 or len(named) != 1 or not PUBLIC_VERSION.match(pins[0]):
+        sys.exit(
+            f"prepare: {path} must pin hcd-priya-models to exactly one public version (==X.Y.Z), not {named}"
+        )
+    return pins[0] + SYNTHETIC_LABEL
 
 
 def sha256_file(path: str) -> str:
@@ -258,9 +282,10 @@ def main(argv=None) -> int:
             with tempfile.TemporaryDirectory() as tmp:
                 rel = make_release(os.path.join(tmp, "release"))
                 entry, _version = add_release(str(rel["root"]), rel["sha"])
-            write_package(SYNTHETIC_VERSION, True, [entry])
+            version = synthetic_version()
+            write_package(version, True, [entry])
             print(
-                f"prepare: synthetic package ready, version {SYNTHETIC_VERSION} (untrained networks; never published)"
+                f"prepare: synthetic package ready, version {version} (untrained networks; never published)"
             )
         else:
             src = os.path.abspath(args.release)

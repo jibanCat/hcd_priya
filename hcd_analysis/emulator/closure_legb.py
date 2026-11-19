@@ -256,7 +256,8 @@ _THETA_UNIT_LO, _THETA_UNIT_HI = sampling_unit_bounds()
 #   form="eboss" — the McDonald/eBOSS SiIIIcorr (lya_emulator_full): 1 + aa² + 2aa·cos(Δv_SiIII·k),
 #     aa = f_SiIII/(1−⟨F⟩), NO decorrelation, SiIII only.
 # Amplitudes are f_X (the metal flux decrement); the effective oscillation amplitude is A_X =
-# f_X/(1−⟨F⟩). Defaults: f_SiIII≈0.009 (PRIYA-eBOSS), SiII/SiII-SiII sub-dominant.
+# f_X/(1−⟨F⟩). Defaults: f_SiIII≈0.009 (the eBOSS fit of Fernandez, Bird and Ho 2024, arXiv:2309.03943, Table 3: 8.83e-3 to 9.63e-3),
+# SiII/SiII-SiII sub-dominant.
 _LAMBDA_SiIIb = 1193.28  # second SiII doublet line [Å] (leading line DL.LAMBDA_SiII=1190.42)
 
 
@@ -266,7 +267,7 @@ def metal_inject(
     mean_flux,
     *,
     form="desi_full",
-    f_SiIII=0.009,
+    f_SiIII=0.009,  # Fernandez, Bird and Ho 2024 (arXiv:2309.03943), Table 3
     f_SiII=0.004,
     f_SiII_SiII=0.002,
     r_doublet=0.5,
@@ -546,7 +547,7 @@ class LegBCtx(NamedTuple):
     # per-z map uses tau0_vec, not the global scalar) — kept for flatlog back-compat.
     metal_node_z: tuple = (2.2, 4.2)  # STATIC ascending node redshifts (Chaves-Montero Sec 5.2)
     metal_fnode_lo: float = 0.003  # flat-log10 f per-node lower bracket
-    metal_fnode_hi: float = 0.03  # upper bracket (spans eBOSS .006 / Ma .014 / DESI .016)
+    metal_fnode_hi: float = 0.03  # upper bracket
     metal_siII_legs: tuple = ("DESI",)  # legs that ALSO sample the SiII doublet f-nodes
     # MODEL C+ — FLOAT the sigmoid decorrelation SCALE k_SiIII/k_SiII (cup1d s_Lya_SiIII/s_Lya_SiII;
     # we sample the SCALE, not its inverse). Per metals_on leg, per ion, a 2-node LogUniform site (per
@@ -2169,8 +2170,8 @@ def _check_single_instrument_for_res(legs, sample_res):
     """Guard for the option-b f_res site (4-referee panel #8 / Bayesian #4): ``_legb_model`` samples ONE
     global ``f_res_amp``/``f_res_slope``, but spectral resolution is a per-INSTRUMENT systematic -- DESI
     and eBOSS spectrographs are physically independent (unlike the globally-shared intergalactic metals).
-    A single shared f_res across instruments would be pulled to a wrong compromise (DESI wants ~0.022,
-    eBOSS ~0.044) -> a residual k^2 tilt on the under-corrected leg -> n_s bias on a JOINT fit. Until
+    A single shared f_res across instruments would be pulled to a wrong compromise between the two instruments'
+    resolution corrections -> a residual k^2 tilt on the under-corrected leg -> n_s bias on a JOINT fit. Until
     per-instrument sites (``f_res_amp_desi``/``f_res_amp_eboss``) are built, a multi-instrument ctx with
     ``sample_res`` must RAISE. The per-leg Gate-B cert is single-instrument, so this is a no-op there.
     ``sample_res=False`` is a no-op (golden-safe)."""

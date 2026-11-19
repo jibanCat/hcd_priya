@@ -21,18 +21,22 @@ shape of pred.P_class, the P1D of clean, LLS, subDLA, DLA: (4, 172)
 ```
 
 - **What it holds.** The LF+MF release of the emulator (its name in this package is `lfmf`; `load_published()`
-  loads it without a name): the low-fidelity backbone bundle, the
-  multi-fidelity record and `release.json`, in the pickle-free format described in the hcd_priya documentation.
+  loads it without a name): the low-fidelity backbone bundle, the multi-fidelity record of the class spectra, the
+  incidence multi-fidelity record (the correction of dN/dX and the CDDF, with their held-out errors) and
+  `release.json`, in the pickle-free format described in the hcd_priya documentation.
 - **How it is checked.** `hcd-priya` pins the sha256 of the release it accepts. `load_published` loads the files of
   this package only if they verify against that digest, file by file. This package loads nothing itself.
 - **How it is built.** The model files are not in git. `python model_package/prepare.py --release RELEASE_DIR
   --release-sha256 SHA256` copies an accepted release in after checking its digest and verifies every file;
   `python -m build --outdir <dir> model_package` then builds the wheel and the source archive. For tests,
-  `prepare.py --synthetic` makes a stand-in with untrained networks (version `0+synthetic`, never published), which
+  `prepare.py --synthetic` makes a stand-in with untrained networks (the pinned version with the label `+synthetic`,
+  never published), which
   `load_published` loads only when `HCD_PRIYA_ALLOW_SYNTHETIC=1` is set. The docstring of `prepare.py` has the
   details.
 - **Versions.** The version of this package is the version of the model bundle it holds. A version of `hcd-priya`
   accepts the model versions it pins; a model package it does not know is refused with a message that names both.
-- **Licence.** The model files are released under the MIT licence (see `LICENSE`), like the code.
+- **Licence.** The model files are released under the Creative Commons Attribution 4.0 International licence
+  (CC BY 4.0); the few lines of Python in this package, and the example script a release carries, are under the MIT
+  licence, like the code. See `LICENSE`, and the `LICENSE` file of the release inside the package.
 - **No model is published yet.** The package is built and tested in the hcd_priya repository
   (`model_package/`); the model files are copied in at build time and are not in git.

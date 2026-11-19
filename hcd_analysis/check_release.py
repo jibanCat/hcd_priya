@@ -12,9 +12,9 @@ What it does, in order: reports where ``hcd_analysis`` was imported from; loads 
 verifies every file against the published digests; predicts the
 per-class P1D at the centre of the parameter box for each requested redshift, at each fidelity the model serves
 there; mixes in the HCD classes; and, with ``--reference``, compares the numbers with reference predictions published beside the release.
-It prints one line per step. It exits 0 when everything passes (the last line is PASSED; with a synthetic test
-build of the model package it is "PASSED (synthetic build: ...)", so that such a run is never read as the check of a
-model), 1 when a step fails
+It prints one line per step. It exits 0 when everything passes: the last line is PASSED after a comparison with a
+reference, "PASSED (no reference compared)" without one, and "PASSED (synthetic build: ...)" with a synthetic test
+build of the model package, so that neither is read as the check of a model. It exits 1 when a step fails
 (a line starting with FAILED says why), and 2 for a wrong command line.
 
 The reference file is made once by whoever publishes the release, with ``--write-reference``, on the supported
@@ -217,11 +217,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         + ". This is a check of the installation, not a scientific validation of the model."
     )
-    print(
-        "PASSED (synthetic build: the installation was checked, not a model)"
-        if synthetic
-        else "PASSED"
-    )
+    if synthetic:
+        print("PASSED (synthetic build: the installation was checked, not a model)")
+    elif args.reference:
+        print("PASSED")
+    else:  # a plain PASSED is kept for the check against a reference
+        print("PASSED (no reference compared)")
     return 0
 
 

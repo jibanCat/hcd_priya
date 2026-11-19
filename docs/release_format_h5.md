@@ -242,10 +242,10 @@ with a suffix, in another case, in quotes or brackets (a stringified list), join
 one list element is not read, at write or at load (a reserved held-out or training-set key still reads its value, and
 for a production member the content checks still see training on fewer simulations).
 
-**Historical synthetic bundles.** Synthetic `h5/2` bundles written by a library before version 0.2.0 (recipe
+**Historical synthetic bundles.** Synthetic `h5/2` bundles written by a library before version 1.0.0 (recipe
 `{"synthetic": true}`, no `all_sims`, a made-up w_c map that does not count the synthetic cache's groups) are
 historical artefacts: the release loaders refuse them (`ALL_SIMS_NOT_TRUE`, and `WCMAP_NOT_FULL_CACHE` for their map)
-and the development path loads them. Synthetic bundles written by 0.2.0 declare `all_sims: true` and count the groups.
+and the development path loads them. Synthetic bundles written by 1.0.0 declare `all_sims: true` and count the groups.
 
 **What protects what.**
 
@@ -267,13 +267,20 @@ without `recipe.research` looks like a production member to every rule.
 
 ## Compatibility with earlier versions of the library
 
-The production and research rules apply from library version 0.2.0 (`hcd_analysis.__version__`), the first version
+The production and research rules apply from library version 1.0.0 (`hcd_analysis.__version__`), the first version
 that carries them. Every earlier version, 0.1.0 included (for example the release line at `372204f` and the frozen
-benchmark's `3496030`), predates them. Differences a user of an earlier version meets:
+benchmark's `3496030`), predates them.
+
+The rules look at what a bundle declares (its members' recipes, its w_c map, its lineage block), never at a version
+number: a bundle stores no version of this library, only the commit it was exported from. Version 0.2.0 was a
+development label and was never released; development code from the commit that introduced these rules on behaves
+as 1.0.0 does.
+
+Differences a user of an earlier version meets:
 
 - synthetic `h5/2` bundles written by an earlier version (recipe without `all_sims`, a made-up w_c map that does not
   count the cache's groups) are refused by the release loaders (`ALL_SIMS_NOT_TRUE`, and `WCMAP_NOT_FULL_CACHE` for
-  the map) and load through the development path; synthetic bundles written by 0.2.0 declare `all_sims: true` and
+  the map) and load through the development path; synthetic bundles written by 1.0.0 declare `all_sims: true` and
   their made-up w_c map counts the synthetic cache's groups, so their digests differ from earlier ones;
 - a bundle whose w_c map does not count every group of its training cache is refused (`WCMAP_NOT_FULL_CACHE`);
 - `ReleaseBundle` has 11 fields (`kind` mandatory, `release_verified` defaulting to False); `MemberMetas(...)` needs

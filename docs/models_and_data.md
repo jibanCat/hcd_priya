@@ -37,15 +37,14 @@ What you need to run the emulator's low-level forward model yourself is modest:
 a current-format trained checkpoint plus at least a slice of the current-format
 τ₀ cache (one fold is enough to exercise the forward model on real cache rows);
 neither is public. You do not need the full 1.1 GB cache or a cluster for that.
-The likelihood needs more, and no inference driver runs at this commit (see
-[Scope and limitations of this release](../README.md#scope-and-limitations-of-this-release)).
+The release's inference is the Gaussian likelihood with the mock-recovery example
+([`likelihood.md`](likelihood.md)), on a model release and a mock data set; no fit to real data is part of this
+release (see [Scope and limitations of this release](../README.md#scope-and-limitations-of-this-release)).
 
-A data and model release is planned but not yet available (work in progress). The
-natural home for the one-fold cache slice and a checkpoint is a dedicated data
-repository, which the PI (M. Ho) will create; it is deferred for now. Until then,
-request the checkpoint and a cache slice from the PI (mfho@umich.edu) or open an
-issue. Please do not commit any large data or model artefacts to this code
-repository.
+The trained model is released in the companion package `hcd-priya-models`, and the example download of the
+mock-recovery example is published with the model release; neither is published yet. The training cache and the
+research checkpoints are not distributed: request a checkpoint and a cache slice from the PI (mfho@umich.edu) or
+open an issue. Please do not commit any large data or model artefacts to this code repository.
 
 ### Release format of the emulator (HDF5 + JSON)
 
@@ -103,8 +102,9 @@ step-by-step guide to production and research bundles, with executable examples:
 The low-fidelity (LF) emulator predicts the per-class P1D of the low-resolution PRIYA simulations. A multi-fidelity
 (MF) record, fitted on matched high- and low-resolution simulation pairs, calibrates it to high resolution:
 P_MF = P_LF exp(g(z, tau0, k)), where g does not depend on the cosmological parameters and is bound to exactly one LF
-backbone bundle. The release MF record has been produced, and its grouped (K-fold) cross-validation results are
-under review; no MF is released before that review is complete. The
+backbone bundle. The release MF record is part of the model release; its grouped (K-fold) cross-validation results
+are not public. The validation summaries that are public, all on simulations or mocks, are listed in the README
+("Status"), and no result from real data is in the release. The
 calls below show the interface only; every path and digest in them is a placeholder.
 
 ```python

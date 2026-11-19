@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Trained models of the hcd_priya Lyman-alpha forest P1D emulator (data only)"
 readme = "README.md"
 authors = [{ name = "Ming-Feng Ho", email = "mfho@umich.edu" }]
-license = "MIT"
+license = "CC-BY-4.0 AND MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 classifiers = [

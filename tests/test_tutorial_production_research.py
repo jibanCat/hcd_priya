@@ -66,8 +66,8 @@ def test_the_runner_refuses_a_malformed_tutorial(tmp_path):
 
 
 # ---------------------------- the library version that carries the D5 rules (PU-0522; R3 delta d1, pre-merge P-M1)
-# It reads pyproject.toml and docs/, so it lives in this source-tier file (Session B's wheel tier copies only tests/).
-D5_VERSION = "0.2.0"
+# It reads pyproject.toml and docs/, so it lives in this source-tier file (the wheel tier copies only tests/).
+D5_VERSION = "1.0.0"
 
 
 def _pyproject_version_source(text):
@@ -107,5 +107,5 @@ def test_the_library_version_is_the_one_the_docs_name_for_the_d5_rules():
     dynamic = (
         '[project]\nname = "x"\ndynamic = ["version"]\n\n[tool.setuptools.dynamic]\n'
         'version = {attr = "hcd_analysis.__version__"}\n'
-    )  # Session B's packaging form
+    )  # the packaging form of this repository's pyproject.toml
     assert _pyproject_version_source(dynamic) == ("dynamic", "hcd_analysis.__version__")

@@ -2,7 +2,7 @@
 
 All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 
-## 0.2.0 (unreleased)
+## 1.0.0 (RELEASE_DATE)
 
 ### Fixed
 - The absorber catalogue no longer lists a system that straddles the box edge twice
@@ -38,8 +38,9 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   from the installed model package, only against the sha256 listed in `hcd_analysis/published_models.py`.
   With no argument it loads the LF+MF model; a name is compared without case and punctuation. The examples write
   the nine parameters out; `example_params` gives the midpoint of the training range of each parameter and prints
-  that statement and the values when it is called. No model is published yet, so the list is empty; tests
-  and CI use a model package built with a synthetic bundle.
+  that statement and the values when it is called. The list holds the LF+MF model release to be published with this
+  version, and `pyproject.toml` pins `hcd-priya-models` to exactly its version; tests and CI use a model package
+  built with a synthetic bundle, whose version is the pinned one with the label `+synthetic`.
 - **Three figures with their scripts and data** ([`docs/model_figures.md`](docs/model_figures.md)): the model's
   incidence dN/dX and its column-density distribution against the DLA measurements of Ho, Bird and Garnett (2021),
   the column-density distribution also against three measurements below the DLA threshold (Zafar et al. 2013;
@@ -120,7 +121,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)): what was compared, the numbers, and what the
   comparison is not.
 - **`python -m hcd_analysis.check_release`**: loads a model from a fresh install, predicts, and compares with
-  reference predictions. Before its last line it prints what was checked.
+  reference predictions. Before its last line it prints what was checked. The last line is `PASSED` only after a
+  comparison with a reference (`--reference`); without one it is `PASSED (no reference compared)`.
 - **Said where a user reads first.** A prediction of a synthetic test build carries the flag and the label
   `synthetic_build`. `w_c_corrected` without a map warns that it uses the historical map (`HistoricalMapWarning`).
   A model that records no trained mean-flux range says so once when it is loaded. The flags `mf_z_clamped` and
@@ -158,6 +160,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   builds it with every warning treated as an error.
 
 ### Changed
+- The model package `hcd-priya-models` declares the licence `CC-BY-4.0 AND MIT`: the trained model files are under
+  the Creative Commons Attribution 4.0 International licence, its few lines of Python under the MIT licence.
 - The literature dN/dX compilation of the historical research inference (`hcd_analysis.emulator.lit_dndx`) uses
   Table 4 of Prochaska, O'Meara and Worseck (2010) as printed in the journal (ApJ 718, 392), checked against the
   survey's catalogue in pyigm, in place of the arXiv v1 table, which differed in four bins. Its switch for the

@@ -5,8 +5,10 @@ code release (see the last section).
 
 ## 1. Version and records
 - [ ] `hcd_analysis.__version__` is the new version; `pyproject.toml` reads it from there.
-- [ ] `CHANGELOG.md` has a dated section for the version.
-- [ ] `CITATION.cff` has the new `version` and a `date-released`.
+- [ ] `CHANGELOG.md` has a dated section for the version: the placeholder `RELEASE_DATE` in its heading is replaced
+      by the date of the tag.
+- [ ] `CITATION.cff` has the new `version` and a `date-released`: its commented `date-released: RELEASE_DATE` line
+      becomes a real line with the same date.
 - [ ] In the commit to be tagged, the three figure images of `README.md` point to absolute URLs at the release tag.
       The README is the long description of the code package, the images are relative links, and the package index
       page shows a relative link as broken; an upload cannot be amended. The README's other relative links (to
@@ -20,8 +22,8 @@ code release (see the last section).
       release validation workflow (`.github/workflows/release-validation.yml`, started by hand on that commit) passes:
       it refuses to go on otherwise. Nightly failures block a release. A failure of a newer-dependency stack is
       fixed, or listed in the release notes and never hidden, before a passing nightly run is made on the commit. A
-      commit that no daily run tested (a commit of the release stack's branch, or any commit before the daily
-      schedule exists on `main`) needs a nightly run started on it by hand first.
+      commit that no daily run tested (a commit of another branch, or any commit before the daily schedule exists on
+      `main`) needs a nightly run started on it by hand first.
 - [ ] The release-level tests (`tests/ci_tiers.toml`) ran with the real assets on the release commit (`python
       tools/ci/run_test_tier.py --tier assets`), and the record of that run is attached to the release.
       The science tests of the model need `HCD_SCIENCE_MODEL_CONFIG` (a JSON naming the release to be published by
@@ -92,12 +94,13 @@ disabled until then.
 - [ ] A model is released only after its own acceptance: a clean lineage, a published manifest digest and a model
       card.
 - [ ] The model package is prepared from the accepted release, in a clean clone: `python model_package/prepare.py
-      --release RELEASE_DIR --release-sha256 SHA256` checks the digest, copies only what the release names and its
-      documentation files, and verifies every file. Its version is the release's version. The model files are not
-      committed.
+      --release RELEASE_DIR --release-sha256 SHA256 --allow-extra examples` checks the digest, copies only what the
+      release names, its documentation files and its `examples` folder, and verifies every file. The release holds
+      an `examples` folder that `release.json` does not name, so the command names it; without the option
+      `prepare.py` stops. Its version is the release's version. The model files are not committed.
 - [ ] The entry that `prepare.py` prints (name, version, format, the sha256 of `release.json`) is in
-      `hcd_analysis/published_models.py` of the commit to be tagged, and the dependency range of
-      `hcd-priya-models` in `pyproject.toml` contains that version.
+      `hcd_analysis/published_models.py` of the commit to be tagged, and `pyproject.toml` pins `hcd-priya-models`
+      to exactly that version (`==`).
 - [ ] The model wheel and source archive are built (`python -m build --outdir <folder> model_package`), and
       `python tools/ci/check_dist_content.py <folder> --release` reports 0 findings.
 - [ ] **Blocking: the fresh install.** In a new environment that holds only the two built wheels (no clone on the
@@ -107,7 +110,12 @@ disabled until then.
       predictions agree with the reference predictions published beside the release). A run that ends in
       "PASSED (synthetic build ...)" is not this check. The reference is written once, on the supported
       environment, with `--write-reference`.
+- [ ] The model release record holds three files: the release archive, `reference_predictions.json` (with its
+      sha256, which the publish workflow checks before it runs `check_release --reference`), and the example
+      download (one archive of the directory `examples/mock_recovery.py` reads; its `example_download.json` and
+      `SHA256SUMS` verify, and its five sha256 equal `DOWNLOAD` in the script). The link to the record is filled in
+      `examples/mock_recovery.py` and `docs/likelihood.md`.
 - [ ] A dry run on the test index, then the model package on the index, then the code package, by the manual
-      workflow. A synthetic build (version `0+synthetic`) cannot be uploaded: the index refuses a local version.
+      workflow. A synthetic build (version `X.Y.Z+synthetic`) cannot be uploaded: the index refuses a local version.
 - [ ] After publication: the statements "not published yet" in `README.md`, `model_package/README.md` and the
       docstrings are updated, and the install commands become `pip install hcd-priya`.

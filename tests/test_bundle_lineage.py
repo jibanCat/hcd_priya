@@ -475,9 +475,9 @@ def test_new_synthetic_bundles_declare_the_full_training_set(info):
 
 
 def test_a_pre_d5_synthetic_bundle_is_historical_it_loads_only_through_the_dev_path(tmp_path):
-    """A3a: a synthetic h5/2 bundle written before version 0.2.0 (recipe {"synthetic": true}, its stored block
+    """A3a: a synthetic h5/2 bundle written before version 1.0.0 (recipe {"synthetic": true}, its stored block
     eligible). The analogue reproduces the old recipe with the current writer, whose made-up w_c map counts the cache's
-    groups; the old writer's map did not, so the refusals of the real pre-0.2.0 bundles also name WCMAP_NOT_FULL_CACHE
+    groups; the old writer's map did not, so the refusals of the real pre-1.0.0 bundles also name WCMAP_NOT_FULL_CACHE
     (T25 checks those bundles)."""
 
     def pre_d5(i, model, meta, nm):

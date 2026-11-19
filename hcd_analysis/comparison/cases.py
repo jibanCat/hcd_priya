@@ -1,4 +1,11 @@
-"""The bounded case matrix of a comparison config (families D and I of phase0_v1) and its mechanical domain check."""
+"""The bounded case matrix of a comparison config (families D and I of phase0_v1) and its mechanical domain check.
+
+The fiducial point of family I in ``phase0_v1.json`` is the eBOSS fit of Fernandez, Bird and Ho (2024,
+arXiv:2309.03943), Table 3, column "FPS + T0" (z 2.6 to 4.6): ns 0.983, Ap 1.46e-9, heref 2.765, alphaq 1.74,
+hub 0.688, hireionz 7.24. Three of its values are not table values: that table gives herei only as a lower limit
+(4.0 here, the limit); it gives omegamh2 only as an upper limit, 0.143 at 68 per cent, and 0.1439 here lies above
+that limit; and bhfeedback 0.05 is the centre of their prior.
+"""
 
 from __future__ import annotations
 

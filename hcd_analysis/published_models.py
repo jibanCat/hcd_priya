@@ -21,9 +21,17 @@ networks and loads only with an explicit switch; see ``load_published``.)
 
 The versioning rule: the version of ``hcd-priya-models`` is the version of the bundle it holds; a version of
 ``hcd-priya`` lists here the exact versions and digests it accepts, and its dependency on ``hcd-priya-models``
-(``pyproject.toml``) is the range that contains them. ``model_package/prepare.py`` prints the entry for a release.
+(``pyproject.toml``) is pinned to exactly that version. ``model_package/prepare.py`` prints the entry for a release.
 
-No model is published yet: ``MODELS`` is empty.
+``MODELS`` holds one entry: the LF+MF model release to be published with this version of the code, the version that
+``pyproject.toml`` pins.
 """
 
-MODELS = []
+MODELS = [
+    {
+        "name": "lfmf",
+        "version": "1.0.0",
+        "format": "hcd_priya.release/1",
+        "anchor_sha256": "cd85d3da45f2942161371236d6d5f33d70ac1bc0eea803bf6b1b52338bf8f38f",
+    },
+]

@@ -1227,8 +1227,7 @@ def run_one_chain(chain, *, n_warmup, n_samples, dense_mass, max_tree_depth, tar
         mock_index = 0
 
     # fold-matched emulator backbone; the error vector is the production (fold0) C_emu (the ONE
-    # matched xclass pair; there is no per-fold error vector — see the archived project
-    # handoffs in the maintainers' private notes).
+    # matched xclass pair; there is no per-fold error vector).
     # Phase-5a shape-floor validation knobs: mf_shape>0 fires the shape-aware MF floor on the
     # tested leg (the survey of this chain) at that inflation; desi_floor turns the EXISTING
     # diagonal MF floor ON for DESI (the simpler-fix comparison arm).

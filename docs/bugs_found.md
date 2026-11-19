@@ -50,7 +50,7 @@ and the compensating `* 1e5` factors in `fit_nhi_from_tau`'s initial guess and `
 
 - `tests/test_tau_sum_rule.py`: sum-rule ratio = 1.0000 for all (log N, b) on the test grid.
 - For NHI = 10²⁰·³, b = 30 km/s, the codebase's `tau_voigt` peak = 5.04 × 10⁶, which matches the canonical textbook τ_peak formula I derived independently from first principles.
-- Real-data spot check on 10 sightlines with max(τ) > 10⁷: post-fix fits give log N ∈ [20.99, 21.87] (all DLAs), pre-fix fits gave log N ∈ [15.99, 16.87] (all discarded).
+- PRIYA-sightline spot check on 10 sightlines with max(τ) > 10⁷: post-fix fits give log N ∈ [20.99, 21.87] (all DLAs), pre-fix fits gave log N ∈ [15.99, 16.87] (all discarded).
 - Snap 017 + snap 010 full rebuilds track Prochaska+2014 CDDF within 0.3–0.8 dex — see `docs/fast_mode_physics.md` §Validation.
 
 **Lesson**. Internal consistency (synth + fit with the same broken model) does not catch normalisation bugs. Every forward-model function should have at least one cross-check against an independent reference — either an external package (fake_spectra, which uses the canonical form), a textbook numerical example, or an analytical sum-rule identity.

@@ -37,7 +37,7 @@ unless ``--allow-stale-legs-cache`` is passed (machinery testing / review only; 
 step must never pass it).
 
 ENV: PYTHONNOUSERSITE=1 PYTHONPATH=<tree> JAX_PLATFORMS=cpu OMP_NUM_THREADS=1 \
-     /home/mfho/.conda/envs/emu-jax/bin/python3 scripts/gen_analysis_lock.py [--check]
+     HCD_PRIYA_NOTES_REPO=<the maintainers' notes checkout> python3 scripts/gen_analysis_lock.py [--check]
 """
 from __future__ import annotations
 import os as _os_rr  # this checkout's root (emulator-debug 2026-10; never an absolute literal)
@@ -64,7 +64,9 @@ from datetime import datetime, timezone
 # ---------------------------------------------------------------------------------------------
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAIN_CHECKPOINTS_DIR = f"{_REPO_ROOT}/checkpoints"
-NOTES_REPO = "/home/mfho/hcd_priya_notes"
+# The maintainers' notes checkout (read-only): HCD_PRIYA_NOTES_REPO if set, else the folder "hcd_priya_notes" next to
+# this checkout. From a git worktree, set the variable: the default then points beside the worktree.
+NOTES_REPO = os.environ.get("HCD_PRIYA_NOTES_REPO") or os.path.join(os.path.dirname(_REPO_ROOT), "hcd_priya_notes")
 
 # PI decision records of record (freeze provenance; READ-ONLY -- we record path + sha256 only).
 PI_DECISION_RECORDS = (

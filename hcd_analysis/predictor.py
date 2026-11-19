@@ -2353,8 +2353,8 @@ def example_params(*, verbose: bool = True) -> dict[str, float]:
 def published_models() -> list[tuple[str, str]]:
     """The models this version of hcd_priya accepts, as (name, version) pairs.
 
-    They are the entries of ``hcd_analysis.published_models.MODELS``. The list is empty until a
-    model is published.
+    They are the entries of ``hcd_analysis.published_models.MODELS``: the model releases this version of the code
+    is published with.
 
     Examples
     --------

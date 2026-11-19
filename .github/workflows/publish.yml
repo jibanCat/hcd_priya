@@ -17,9 +17,11 @@
 #     short-lived token that GitHub issues to the job (id-token: write). No password or API token is stored.
 #   - the model package is built from an accepted release that is NOT in git. The release archive is given by its
 #     URL and its sha256; model_package/prepare.py checks the sha256 of release.json and verifies every file before
-#     anything is built. Where that archive is kept is not decided yet: the inputs below are placeholders.
-#   - a model package built with a synthetic bundle (version 0+synthetic) cannot be uploaded: the index refuses a
-#     version with a local label.
+#     anything is built. The reference predictions published beside the release are given the same way (URL and
+#     sha256); the fresh install compares the installed model's predictions with them (check_release --reference).
+#     Where the archive and the reference are kept is decided at publication: the inputs below are placeholders.
+#   - a model package built with a synthetic bundle (version X.Y.Z+synthetic) cannot be uploaded: the index refuses
+#     a version with a local label.
 name: publish (disabled)
 
 on:
@@ -44,6 +46,12 @@ on:
         required: false
       release_sha256:
         description: "hcd-priya-models only: sha256 of the release's release.json"
+        required: false
+      reference_url:
+        description: "hcd-priya-models only: https URL of the reference predictions published beside the release"
+        required: false
+      reference_sha256:
+        description: "hcd-priya-models only: sha256 of that reference file"
         required: false
 
 permissions: {}
@@ -86,8 +94,14 @@ jobs:
           ARCHIVE_URL: ${{ inputs.release_archive_url }}
           ARCHIVE_SHA256: ${{ inputs.release_archive_sha256 }}
           RELEASE_SHA256: ${{ inputs.release_sha256 }}
+          REFERENCE_URL: ${{ inputs.reference_url }}
+          REFERENCE_SHA256: ${{ inputs.reference_sha256 }}
         run: |
           case "$ARCHIVE_URL" in https://*) ;; *) echo "the release archive must be an https URL"; exit 1;; esac
+          case "$REFERENCE_URL" in https://*) ;; *) echo "the reference predictions must be an https URL"; exit 1;; esac
+          curl --fail --location --proto '=https' --proto-redir '=https' \
+            --output "$RUNNER_TEMP/reference_predictions.json" "$REFERENCE_URL"
+          echo "$REFERENCE_SHA256  $RUNNER_TEMP/reference_predictions.json" | sha256sum --check
           curl --fail --location --proto '=https' --proto-redir '=https' \
             --output "$RUNNER_TEMP/release.tar.gz" "$ARCHIVE_URL"
           echo "$ARCHIVE_SHA256  $RUNNER_TEMP/release.tar.gz" | sha256sum --check
@@ -98,7 +112,9 @@ jobs:
           python tools/ci/wheel_requires.py "$(ls "$RUNNER_TEMP"/code/*.whl)" --without hcd-priya-models > "$RUNNER_TEMP/requirements.txt"
           python -m pip install -c tools/ci/constraints-devenv.txt -r "$RUNNER_TEMP/requirements.txt"
           python -m pip install --no-deps "$(ls "$RUNNER_TEMP"/code/*.whl)"
-          python model_package/prepare.py --release "$RUNNER_TEMP/release" --release-sha256 "$RELEASE_SHA256"
+          # the release holds an examples folder that release.json does not name: it is named here, or prepare.py stops
+          python model_package/prepare.py --release "$RUNNER_TEMP/release" --release-sha256 "$RELEASE_SHA256" \
+            --allow-extra examples
           SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" python -m build --outdir dist model_package
           python tools/ci/check_dist_content.py dist --release
           ls -l dist && sha256sum dist/*
@@ -110,7 +126,8 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/fresh/bin/python" -I "$GITHUB_WORKSPACE/tools/ci/readme_first_example.py" \
             "$GITHUB_WORKSPACE/README.md"
-          "$RUNNER_TEMP/fresh/bin/python" -I -m hcd_analysis.check_release --published
+          "$RUNNER_TEMP/fresh/bin/python" -I -m hcd_analysis.check_release --published \
+            --reference "$RUNNER_TEMP/reference_predictions.json"
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ inputs.package }}

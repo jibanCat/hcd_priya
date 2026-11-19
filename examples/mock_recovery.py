@@ -16,8 +16,9 @@
 
 **The example download** (``--download DIR``, or the environment variable ``HCD_PRIYA_EXAMPLE_DOWNLOAD``) is one
 directory with the mock, the model that goes with it and the stored reference; ``DOWNLOAD`` below names its items and
-the sha256 each must have. IT IS NOT PUBLISHED YET. The model in it is a fold model: it was trained without the
-simulation the mock was made from, so the recovery is a held-out one. It is not the release model. Without the
+the sha256 each must have. It is published with the model release, as a second file of the same record
+(not yet published). The model in it is a fold model: it was trained without the simulation the mock was made
+from, so the recovery is a held-out one. It is not the release model. Without the
 download the example runs on a model and a mock of your own (the second and third command lines below), and then
 has no stored reference.
 
@@ -102,11 +103,11 @@ DOWNLOAD_FORMAT = "hcd_priya.example_download/1"
 DOWNLOAD_MANIFEST = "example_download.json"
 DOWNLOAD = {
     "mock": ("mock.p1d.json", "b7db66e81a20c25de571f39fad1a362d7c844a855487a46b31208354ce5efc34"),
-    "model": ("model", "f8a830af3faaffc4f47d90f2fc596d4d8cc9760fc3057127da22cea0771638e2"),
-    "mf_record": ("mf_record", "e639c4b187eface66e5e99bad1efe5645e409fe916f353cd0ef2f88d97bc2fa5"),
+    "model": ("model", "c1e28ee591640d4ccb98c2f05de3d617448c83a74b0c8e2190e2d8e3b393c451"),
+    "mf_record": ("mf_record", "b38bf9be35c0339a90dd9d062ca68eb18ce7153d2f842f67f8cca90dfe20b776"),
     "incidence_record": (
         "incidence_record",
-        "094522ca1a44f153f6661df5e7eed8211ce836c6864f779021271c109e2eb02f",
+        "33a91a304bb7b228443fee70515a1ff5bbda947fb88fce21fe6df69bfe433d27",
     ),
     "reference": (
         "reference.json",

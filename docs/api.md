@@ -139,7 +139,8 @@ limitations of this release"). Their full docstrings are in the source.
 ## The accepted model versions
 
 The trained models come in the companion package `hcd-priya-models`, which `hcd-priya` requires. `load_published`
-(above) loads a model from that package only against the digest listed here. No model is published yet.
+(above) loads a model from that package only against the digest listed here. The list holds the model release that
+`pyproject.toml` pins, the LF+MF model to be published with this version of the code; it is not published yet.
 
 ```{eval-rst}
 .. autoapimodule:: hcd_analysis.published_models
@@ -149,8 +150,9 @@ The trained models come in the companion package `hcd-priya-models`, which `hcd-
 ## Checking a release from a fresh install
 
 `python -I -m hcd_analysis.check_release --published` (or `RELEASE_DIR RELEASE_SHA256` for a release directory)
-loads a model in an environment that has only the installed packages, predicts, and compares with reference
-predictions published beside the release.
+loads a model in an environment that has only the installed packages and predicts; with `--reference FILE` it
+compares the numbers with reference predictions published beside the release and ends in `PASSED`. Without a
+reference it ends in `PASSED (no reference compared)`: a check of the installation, not of the numbers.
 
 ```{eval-rst}
 .. autoapimodule:: hcd_analysis.check_release

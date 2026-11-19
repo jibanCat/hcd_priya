@@ -1,3 +1,15 @@
+hcd-priya-models: licence
+
+The trained model files in this package (everything under hcd_priya_models/data/) are licensed under the Creative
+Commons Attribution 4.0 International licence (CC BY 4.0). Each model release carries its own LICENSE and
+ATTRIBUTION.md files, which say how to give attribution.
+
+  Licence deed: https://creativecommons.org/licenses/by/4.0/
+  Legal code:   https://creativecommons.org/licenses/by/4.0/legalcode
+
+The Python code of this package, and the example script a model release carries, are licensed under the MIT licence,
+the licence of hcd_priya:
+
 MIT License
 
 Copyright (c) 2026 Ming-Feng Ho
