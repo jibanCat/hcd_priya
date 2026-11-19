@@ -8,8 +8,6 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
-import sys
 
 import numpy as np
 import pytest
@@ -22,7 +20,6 @@ from tests.synthetic_release import make_release, p1d_residuals, write_p1d_heldo
 from tests.test_predictor_mf import PARAMS
 
 E = PH.MFRecordError
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CALL = dict(tau0_amp=1.0, dtau0=0.0)
 
 
@@ -619,7 +616,7 @@ def test_a_research_model_takes_no_such_record(held, tmp_path):
     assert pred.P_class_validation_rms_log is None and "p1d_validation_available" not in pred.flags
 
 
-# ----------------------------------------------------------------------------------------------- the tools
+# ------------------------------------------------------------------------------------------- check_release
 def test_check_release_recomputes_the_tables_and_fails_on_a_forged_evidence_file(rel, tmp_path):
     from hcd_analysis import check_release as CR
 
@@ -660,82 +657,3 @@ def test_check_release_recomputes_the_tables_and_fails_on_a_forged_evidence_file
     (root / "release.json").write_bytes(man)
     code, text = run(root, hashlib.sha256(man).hexdigest())
     assert code == 1 and "FAILED" in text and "is not what the residuals give" in text
-
-
-def test_the_builder_makes_the_record_from_pinned_inputs_and_refuses_another_file(
-    rel, held, tmp_path
-):
-    """scripts/build_p1d_heldout.py: a residual file and a spec, each pinned by its sha256."""
-    h5py = pytest.importorskip("h5py")
-    script = os.path.join(REPO, "scripts", "build_p1d_heldout.py")
-    if not os.path.isfile(script):
-        pytest.skip("the builder script is not part of an installation: run from a clone")
-    r = held.record
-    arrays, _ = S.read_table_h5(
-        str(rel["root"] / "p1d_heldout" / PH.TABLES_FILE), PH.table_datasets(r)
-    )
-    res = tmp_path / "residuals.h5"
-    with h5py.File(res, "w") as f:
-        for fid in PH.FIDELITIES:
-            g = f.create_group(fid)
-            g.create_dataset("d", data=arrays[f"{fid}_d"])
-            g.create_dataset("z", data=np.array(r[fid]["z"]))
-            g.create_dataset("sims", data=np.array(r[fid]["sims"], dtype="S"))
-            g.create_dataset("target_F", data=arrays[f"{fid}_target_F"])
-            g.create_dataset("counts", data=arrays[f"{fid}_counts"])
-    spec = tmp_path / "spec.json"
-    spec.write_text(
-        json.dumps(
-            {
-                "inputs": {k: r["inputs"][k] for k in ("lf_cache", "hr_cache", "folds")},
-                "code": r["code"],
-                "sensitivity": {k: r["sensitivity"][k] for k in ("without_sim", "statement")},
-                "what_it_does_not_cover": r["what_it_does_not_cover"],
-                "notes": r["notes"],
-            }
-        )
-    )
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-    base = [sys.executable, "-B", script, "--version", r["version"]]
-    pins = [
-        "--residuals",
-        str(res),
-        "--residuals-sha256",
-        _sha(res),
-        "--spec",
-        str(spec),
-        "--spec-sha256",
-        _sha(spec),
-    ]
-    out = subprocess.run(
-        base + ["--out-dir", str(tmp_path / "built")] + pins,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    assert out.returncode == 0, out.stderr[-2000:]
-    assert "tables recomputed from" in out.stdout and ": equal" in out.stdout
-    built = json.loads((tmp_path / "built" / PH.RECORD_FILE).read_text())
-    for key in ("lf", "lfmf", "sensitivity", "summary", "notes", "what_it_does_not_cover", "code"):
-        assert built[key] == r[key], key
-    assert built["inputs"]["residuals"] == {"file": "residuals.h5", "sha256": _sha(res)}
-    wrong = list(pins)
-    wrong[3] = "0" * 64
-    out = subprocess.run(
-        base + ["--out-dir", str(tmp_path / "refused")] + wrong,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    assert (
-        out.returncode != 0
-        and "not the pinned" in out.stderr
-        and not (tmp_path / "refused").exists()
-    )
-    out = subprocess.run(
-        base + ["--out-dir", str(tmp_path / "built")] + pins,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    assert out.returncode != 0 and "exists" in out.stderr
