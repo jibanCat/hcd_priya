@@ -2,7 +2,7 @@
 
 All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 
-## 1.0.0 (RELEASE_DATE)
+## 1.0.0 (2026-11-19)
 
 ### Fixed
 - The absorber catalogue no longer lists a system that straddles the box edge twice
