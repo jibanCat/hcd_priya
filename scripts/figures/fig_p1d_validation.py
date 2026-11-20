@@ -98,7 +98,7 @@ def central_rung(target_F, z) -> int:
     return int(np.nanargmin(np.abs(amplitude - 1.0)))
 
 
-def _per_cent_axis(ax, plt):
+def _residual_axis(ax, plt):
     from matplotlib.ticker import FuncFormatter
 
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
@@ -139,7 +139,7 @@ def draw_table(plt, held, fid: str, out: str, model: dict) -> None:
             ax.plot(k, held.e_sens[-1, row], color=C.ORANGE, ls=":", lw=1.6, zorder=4)
         ax.set_xscale("log")
         ax.set_yscale("log")
-        _per_cent_axis(ax, plt)
+        _residual_axis(ax, plt)
         ax.set_title(title, loc="left")
     for ax in axes[-1, :2]:
         ax.set_xlabel("k (s/km)")
