@@ -345,3 +345,185 @@ def test_the_committed_notebook_is_executed_in_order_without_an_error_or_a_priva
             assert (
                 output.get("name") != "stderr"
             ), f"cell {c['id']} wrote to stderr: {''.join(output['text'])[:200]}"
+
+
+# ------------------------------------------------------------------------------------------ the posterior helper
+ZS = (2.6, 3.0)  # two snapshot redshifts that the synthetic model serves under LF+MF
+
+
+@pytest.fixture(scope="module")
+def stand_in(tmp_path_factory):
+    """A synthetic model with untrained networks: a stand-in for the code paths, never for a number."""
+    pytest.importorskip("numpy")
+    import hcd_analysis.predictor as hp
+    from tests.synthetic_release import make_release
+
+    info = make_release(tmp_path_factory.mktemp("tutorial") / "release", incidence=True)
+    return hp.load_release(str(info["root"]), info["sha"])
+
+
+def _made_up_data(emu, theta, *, p1d=None):
+    """A data set at ZS: bins between the model's modes, a covariance that differs from its transpose by rounding
+    (as a summed or inverted matrix does), and a factor on the model vector that is not one."""
+    import numpy as np
+    from hcd_analysis import likelihood as L
+
+    nine = {name: value for name, value in theta.items() if name not in L.MEAN_FLUX_NAMES}
+    pred = emu.predict_many(nine, z=list(ZS), tau0_amp=1.0, dtau0=0.0)
+    rows, blocks = [], []
+    for i, m in enumerate((4, 6)):
+        k = np.asarray(pred.k[i])
+        rows.append(np.linspace(k[len(k) // 4], k[len(k) // 2], m + 2)[1:-1])
+        j = np.arange(m)
+        blocks.append((0.04 + 0.05 * i) * 0.3 ** np.abs(j[:, None] - j[None, :]))
+    blocks[0][0, 1] *= 1.0 + 4e-14  # the transpose keeps the other value
+    n = sum(r.size for r in rows)
+    return L.P1DData.from_blocks(
+        z=ZS,
+        k=rows,
+        p1d=[np.linspace(3.0, 2.0, r.size) for r in rows] if p1d is None else p1d,
+        cov_blocks=blocks,
+        model_factor=np.split(np.linspace(0.9, 1.15, n), np.cumsum([r.size for r in rows])[:-1]),
+    )
+
+
+def _points(ns):
+    truth = dict(ns["TRUTH"])
+    return (
+        truth,
+        dict(truth, ns=0.87, Ap=2.3e-9),
+        dict(truth, tau0_amp=1.12, ns=0.96),
+    )
+
+
+def test_manual_model_vector_equals_the_public_likelihood(stand_in):
+    import numpy as np
+    from hcd_analysis import likelihood as L
+
+    ns = _namespace("helpers-posterior")
+    data = _made_up_data(stand_in, ns["TRUTH"])
+    assert data.cov[0, 1] != data.cov[1, 0] and not np.allclose(data.model_factor, 1.0)
+    base = L.GaussianP1DLikelihood(stand_in, data)
+    compared = 0
+    for r_lls in (0.0, 0.5, 1.0, 2.0):
+        for rel in (
+            {"LLS": r_lls, "subDLA": 1.0, "DLA": 1.0},
+            {"LLS": r_lls, "subDLA": 0.4, "DLA": 1.7},
+        ):
+            public = L.GaussianP1DLikelihood(stand_in, data, hcd_relative_to_priya=rel)
+            for theta in _points(ns):
+                manual = ns["model_vector_free_hcd"](base, theta, rel)
+                want = public.model_vector(theta)
+                assert manual.shape == want.shape == (data.n,)
+                assert np.allclose(manual, want, rtol=1e-12, atol=0), (rel, theta)
+                compared += 1
+    assert compared == 24
+    # the amplitude matters: the vectors at two LLS amplitudes differ (the equality above is not that of two constants)
+    a = ns["model_vector_free_hcd"](base, ns["TRUTH"], {"LLS": 0.0, "subDLA": 1.0, "DLA": 1.0})
+    b = ns["model_vector_free_hcd"](base, ns["TRUTH"], {"LLS": 2.0, "subDLA": 1.0, "DLA": 1.0})
+    assert not np.allclose(a, b, rtol=1e-6, atol=0)
+
+
+def test_manual_loglike_equals_the_public_likelihood(stand_in):
+    import numpy as np
+    from hcd_analysis import likelihood as L
+
+    ns = _namespace("helpers-posterior")
+    data = _made_up_data(stand_in, ns["TRUTH"])
+    base = L.GaussianP1DLikelihood(stand_in, data)
+    values = []
+    for r_lls in (0.0, 0.5, 1.0, 2.0):
+        rel = {"LLS": r_lls, "subDLA": 1.0, "DLA": 1.0}
+        public = L.GaussianP1DLikelihood(stand_in, data, hcd_relative_to_priya=rel)
+        for theta in _points(ns):
+            manual = ns["log_likelihood_free_hcd"](base, theta, rel)
+            want = public.loglike(theta)
+            assert np.isfinite(want) and np.isclose(manual, want, rtol=1e-10, atol=0), (rel, theta)
+            values.append(want)
+    assert len(set(np.round(values, 6))) > 6  # the twelve values are not one constant
+    # a mock made by the public likelihood at a point has chi-square zero there under the manual assembly
+    rel = {"LLS": 1.0, "subDLA": 1.0, "DLA": 1.0}
+    mock = _made_up_data(stand_in, ns["TRUTH"], p1d=None)
+    vector = L.GaussianP1DLikelihood(stand_in, mock).model_vector(ns["TRUTH"])
+    mock = _made_up_data(stand_in, ns["TRUTH"], p1d=[vector[s] for s in mock.slices()])
+    like = L.GaussianP1DLikelihood(stand_in, mock)
+    assert ns["chi_square_free_hcd"](like, ns["TRUTH"], rel) == pytest.approx(0.0, abs=1e-18)
+    # and not elsewhere: without the LLS sightlines, and at another mean flux
+    for theta, other in ((ns["TRUTH"], dict(rel, LLS=0.0)), (dict(ns["TRUTH"], tau0_amp=1.1), rel)):
+        elsewhere = ns["chi_square_free_hcd"](like, theta, other)
+        assert elsewhere > 1e-6, (elsewhere, theta, other)
+        assert elsewhere == pytest.approx(
+            L.GaussianP1DLikelihood(stand_in, mock, hcd_relative_to_priya=other).chi2(theta),
+            rel=1e-9,
+        )
+
+
+def test_log_posterior_is_minus_infinity_outside_the_prior_and_on_a_refusal(stand_in):
+    import math
+
+    import numpy as np
+    from hcd_analysis import likelihood as L
+
+    ns = _namespace("helpers-posterior")
+    truth = ns["TRUTH"]
+    assert ns["FREE"] == ("ns", "Ap", "tau0_amp", "r_LLS") and ns["REL_TRUTH"] == {
+        "LLS": 1.0,
+        "subDLA": 1.0,
+        "DLA": 1.0,
+    }
+    like = L.GaussianP1DLikelihood(stand_in, _made_up_data(stand_in, truth))
+    ns["LIKE"] = like
+    ns["PRIOR"] = {
+        "ns": (0.8, 1.05),
+        "Ap": (1.2e-9, 2.6e-9),
+        "tau0_amp": (0.7, 1.3),
+        "r_LLS": (0.0, 60.0),
+    }
+    x0 = np.array([truth["ns"], truth["Ap"], truth["tau0_amp"], 1.0])
+    inside = ns["log_posterior"](x0)
+    assert math.isfinite(inside)
+    assert inside == pytest.approx(
+        ns["log_likelihood_free_hcd"](like, truth, ns["REL_TRUTH"]), rel=1e-13
+    )
+    assert inside == pytest.approx(
+        like.loglike(truth), rel=1e-10
+    )  # all amplitudes at 1: the public default
+    assert ns["REFUSALS"] == {}
+    for i, name in enumerate(ns["FREE"]):
+        low, high = ns["PRIOR"][name]
+        for value in (low - 0.01 * (high - low), high + 0.01 * (high - low), math.nan):
+            x = x0.copy()
+            x[i] = value
+            assert ns["log_posterior"](x) == -math.inf, (name, value)
+        for value in (low, high):  # the edges belong to the box
+            x = x0.copy()
+            x[i] = value
+            if name != "r_LLS":
+                assert math.isfinite(ns["log_posterior"](x)), (name, value)
+    assert ns["REFUSALS"] == {}, "a point outside the prior is not a refusal of the model"
+    # inside the prior, a point the predictor refuses: so many LLS sightlines that the fractions sum to more than one
+    x = x0.copy()
+    x[3] = 55.0
+    assert ns["log_posterior"](x) == -math.inf
+    assert (
+        list(ns["REFUSALS"]) == ["PredictorInputError"]
+        and ns["REFUSALS"]["PredictorInputError"][0] == 1
+    )
+    assert ns["log_posterior"](x) == -math.inf and ns["REFUSALS"]["PredictorInputError"][0] == 2
+    assert math.isfinite(ns["log_posterior"](x0))  # and the sampler goes on
+
+
+def test_the_flat_prior_is_the_trained_box_and_the_recorded_mean_flux_range():
+    import types
+
+    import hcd_analysis.predictor as hp
+
+    ns = _namespace("helpers-posterior")
+    fake = types.SimpleNamespace(
+        provenance={"lineage": {"cache": {"settings": {"alpha_range": [0.61, 1.37]}}}}
+    )
+    prior = ns["flat_prior"](fake)
+    assert list(prior) == list(ns["FREE"])
+    limits = dict(zip(hp.PARAM_NAMES, (tuple(float(v) for v in row) for row in hp.PARAM_LIMITS)))
+    assert prior["ns"] == limits["ns"] and prior["Ap"] == limits["Ap"]
+    assert prior["tau0_amp"] == (0.61, 1.37) and prior["r_LLS"] == (0.0, 3.0)

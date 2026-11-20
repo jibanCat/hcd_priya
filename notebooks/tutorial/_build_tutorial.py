@@ -159,6 +159,11 @@ def sha256_of(path):
     return digest.hexdigest()
 
 
+def tutorial_cache():
+    # the folder downloaded files are kept in
+    return pathlib.Path(os.environ.get("HCD_PRIYA_TUTORIAL_CACHE", "~/.cache/hcd_priya_tutorial")).expanduser()
+
+
 def tutorial_file(relpath):
     # The path of a stored file of the tutorial, with the pinned sha256: a local copy in a clone, a copy
     # downloaded earlier, or a new download into the cache folder (the environment variable
@@ -170,7 +175,7 @@ def tutorial_file(relpath):
         local = pathlib.Path(root) / relpath
         if local.is_file() and sha256_of(local) == pinned:
             return local
-    cache = pathlib.Path(os.environ.get("HCD_PRIYA_TUTORIAL_CACHE", "~/.cache/hcd_priya_tutorial")).expanduser()
+    cache = tutorial_cache()
     target = cache / relpath
     if target.is_file() and sha256_of(target) == pinned:
         return target
@@ -846,7 +851,7 @@ code(
     r"""
 # Fig. 8. Left: the PRIYA training simulations with the filtered troughs restored, against Eq. 6 of Rogers et al.
 # (2018), at z = 3 (the repository's comparison, redrawn for two classes). Right: the response of the emulator's
-# LLS class ratio to n_s and A_p, which the template does not have.
+# LLS class ratio to n_s, A_p and the mean flux, which the template does not have; and a ranking over all inputs.
 from hcd_analysis.hcd_template import class_ratio
 
 
@@ -883,23 +888,45 @@ ax.set_title("troughs restored (lighter band: all mean-flux rungs;\ndotted: belo
 ax.legend(fontsize=8)
 
 ax = axes[1]
-shown = pred.k < 0.03
+shown = pred.k < 0.03  # the box modes below 0.03 s/km at the midpoint
 ratio_mid = pred.P_class[1] / pred.P_class[0]
-for name, style in (("ns", "-"), ("Ap", "--")):
-    low, high = hp.PARAM_LIMITS[hp.PARAM_NAMES.index(name)]
-    deviation = 0.0
-    for value, shade in zip(np.linspace(low, high, 5), np.linspace(0.15, 0.85, 5)):
-        other = emu.predict(dict(PARAMS, **{name: value}), z=3.0, tau0_amp=1.0, dtau0=0.0)
-        if not np.allclose(other.k, pred.k, rtol=1e-12, atol=0.0):
-            raise ValueError("the wavenumbers moved with the parameter")
-        relative = (other.P_class[1] / other.P_class[0]) / ratio_mid
-        deviation = max(deviation, float(np.max(np.abs(relative[shown] - 1.0))))
-        ax.semilogx(pred.k[shown], relative[shown], style, color=plt.cm.viridis(shade), label=f"{name} = {value:.4g}")
-    print(f"the emulator's LLS class ratio changes by up to {100 * deviation:.2f} per cent across the trained range of {name} (k < 0.03 s/km)")
+
+
+def lls_ratio_relative(name, value):
+    # the LLS class ratio with one input changed, over its value at the midpoint, box mode by box mode (hub and
+    # omegamh2 move the wavenumber in s/km of a mode; the ratio is compared at the same mode)
+    params = dict(PARAMS, **({name: value} if name in PARAMS else {}))
+    other = emu.predict(params, z=3.0, tau0_amp=value if name == "tau0_amp" else 1.0, dtau0=0.0)
+    return (other.P_class[1] / other.P_class[0]) / ratio_mid
+
+
+INPUTS = list(zip(hp.PARAM_NAMES, hp.PARAM_LIMITS)) + [("tau0_amp", TAU0_AMP_RANGE)]
+largest = {}
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    for name, (low, high) in INPUTS:
+        largest[name] = max(
+            float(np.max(np.abs(lls_ratio_relative(name, value)[shown] - 1.0))) for value in np.linspace(low, high, 5)
+        )
+    for name, style in (("ns", "-"), ("Ap", "--")):
+        low, high = hp.PARAM_LIMITS[hp.PARAM_NAMES.index(name)]
+        for value, shade in zip(np.linspace(low, high, 5), np.linspace(0.15, 0.85, 5)):
+            ax.semilogx(pred.k[shown], lls_ratio_relative(name, value)[shown], style, color=plt.cm.viridis(shade),
+                        label=f"{name} = {value:.4g}")
+    for value, colour in ((0.8, "tab:red"), (1.2, "tab:brown")):
+        ax.semilogx(pred.k[shown], lls_ratio_relative("tau0_amp", value)[shown], ":", lw=2.2, color=colour,
+                    label=f"tau0_amp = {value:g}")
+print("The largest change of the emulator's LLS class ratio below k = 0.03 s/km at z = 3 across the trained range of")
+print("each input (five values; the others at the midpoint, tau0_amp = 1), largest first:")
+for name in sorted(largest, key=lambda name: -largest[name]):
+    print(f"  {name:11s} {100 * largest[name]:5.2f} per cent")
+print("dtau0 is not varied: at one redshift it acts only through tau_eff, which tau0_amp already covers")
+if caught:
+    print(f"{len(caught)} of these predictions warned, the first: {str(caught[0].message)[:160]} ...")
 ax.axhline(1.0, color="black", lw=2.5, label="Rogers et al. (2018) template: no dependence")
 ax.set_xlabel("k [s/km]")
 ax.set_ylabel("LLS class ratio / its value at the midpoint")
-ax.set_title("the response to n_s (solid) and A_p (dashed)")
+ax.set_title("the response to n_s (solid), A_p (dashed) and the mean flux (dotted)")
 ax.legend(fontsize=8, ncol=4, loc="upper center", bbox_to_anchor=(0.5, -0.16))
 fig.suptitle("Fig. 8. The class ratios beside the template of Rogers et al. (2018), z = 3")
 fig.tight_layout(rect=(0, 0.1, 1, 1))
@@ -913,8 +940,255 @@ text(
 **PROVISIONAL (PI to refine).** The two panels of Fig. 8 answer different questions. On the left the filtered
 troughs are restored, so levels can be compared with the template; the printed lines say on how many modes the
 template lies inside the range of the simulations. On the right the emulator's class spectra are PRIYA-filtered,
-so their level is not compared with the template: only the response to the parameters is shown, which a
-template with no dependence on cosmology does not carry.
+so their level is not compared with the template: only the response to the inputs is shown, which a template
+with no dependence on cosmology does not carry. The printed list ranks the inputs by the size of that response.
+""",
+)
+
+# ============================================================================================ Part III
+text(
+    "part-3",
+    r"""
+## Part III. Mock inference
+
+**PROVISIONAL (PI to refine).** This part is a self-consistency demonstration on a mock made by the model
+itself: not an independent validation, not a result from data.
+
+### The Gaussian likelihood
+
+For a data vector $d$ with covariance $C$ and a model vector $m(\theta)$,
+
+$$\ln L(\theta) = -\tfrac{1}{2}\,[d - m(\theta)]^{T} C^{-1} [d - m(\theta)] - \tfrac{1}{2} \ln\det C - \tfrac{N}{2}\ln 2\pi .$$
+
+The model vector is built in four steps: the prediction at $\theta$ at the redshifts of the data; the mixture of
+the class spectra; linear interpolation in $k$ to the wavenumbers of the data; and the data set's own factor on the
+model, when it has one. Three approximations are made, and `docs/likelihood.md` of the repository discusses each:
+the covariance is that of the data alone, with no term for the error of the emulator; the model is interpolated
+linearly to the data's bins; and the model is treated as exact.
+""",
+)
+
+text(
+    "ho2026",
+    r"""
+### Relation to Ho et al. (2026)
+
+**PROVISIONAL (PI to refine).** PLACEHOLDER: what the analysis of Ho et al. (2026) fitted, and with which
+treatment of the HCD absorbers; each sentence is to be checked against the paper before it is written here.
+
+What this notebook does instead: a mock, four free parameters, everything else fixed. It demonstrates the
+machinery. It is not that analysis.
+""",
+)
+
+code(
+    "helpers-posterior",
+    r"""
+# The posterior of four parameters, assembled from public pieces of the package: like.prediction, hp.add_hcd and
+# interp_to_bins. With all three amplitudes at 1 it is the public Gaussian likelihood.
+import numpy as np
+from scipy.linalg import solve_triangular
+
+import hcd_analysis.predictor as hp
+from hcd_analysis import likelihood as hl
+
+# The point the mock is made at: the midpoint of the nine trained ranges, and PRIYA's mean flux at its centre.
+TRUTH = {
+    "ns": 0.925,
+    "Ap": 1.9e-9,
+    "herei": 4.0,
+    "heref": 2.7,
+    "alphaq": 2.15,
+    "hub": 0.70,
+    "omegamh2": 0.143,
+    "hireionz": 7.25,
+    "bhfeedback": 0.05,
+    "tau0_amp": 1.0,
+    "dtau0": 0.0,
+}
+# The amplitude of each HCD class in the mixture, relative to the model's own sightline fraction at the point.
+REL_TRUTH = {"LLS": 1.0, "subDLA": 1.0, "DLA": 1.0}
+# The four free parameters, in the order of the vector x of log_posterior. r_LLS is the LLS amplitude relative to
+# the model's own fraction. Everything else stays at TRUTH and REL_TRUTH.
+FREE = ("ns", "Ap", "tau0_amp", "r_LLS")
+LIKE = None  # the likelihood object that holds the data; set by the notebook
+PRIOR = None  # {name: (low, high)}, flat; set by the notebook from flat_prior
+REFUSALS = {}  # {kind of refusal: [count, the first message]}, filled by log_posterior
+
+
+def flat_prior(emu):
+    # The flat prior of the four free parameters: ns and Ap on the ranges the model was trained on, tau0_amp on the
+    # range of the mean-flux amplitude the model records with its training data, r_LLS from 0 to 3.
+    limits = dict(zip(hp.PARAM_NAMES, hp.PARAM_LIMITS))
+    low, high = emu.provenance["lineage"]["cache"]["settings"]["alpha_range"]
+    return {
+        "ns": (float(limits["ns"][0]), float(limits["ns"][1])),
+        "Ap": (float(limits["Ap"][0]), float(limits["Ap"][1])),
+        "tau0_amp": (float(low), float(high)),
+        "r_LLS": (0.0, 3.0),
+    }
+
+
+def model_vector_free_hcd(like, theta, rel):
+    # The model vector at theta (the eleven parameters by name) with the amplitude of each HCD class at rel[class]
+    # times the model's own fraction: the four steps of the public likelihood, written out.
+    data = like.data
+    pred = like.prediction(theta)  # 1. the prediction at the redshifts of the data, on the model's own modes
+    factors = np.array([rel[name] for name in hp.HCD_CLASSES], dtype=float)
+    mixed = hp.add_hcd(pred, factors * pred.w_c)  # 2. P_clean + sum over classes of A_c (P_c - P_clean)
+    if not np.all(np.isfinite(mixed)):
+        raise hl.NonFiniteModelError("the model's spectrum is not finite at this point")
+    out = np.empty(data.n)
+    for i, (where, k_data) in enumerate(zip(data.slices(), data.k)):
+        out[where] = hl.interp_to_bins(pred.k[i], mixed[i], k_data)  # 3. linear in k, never extrapolated
+    if data.model_factor is not None:
+        out = out * data.model_factor  # 4. the data set's own factor on the model
+    return out
+
+
+def chi_square_free_hcd(like, theta, rel):
+    # r^T C^-1 r with r = model - data and C the symmetric part of the data covariance, through C = L L^T
+    data = like.data
+    lower = np.linalg.cholesky(0.5 * (data.cov + data.cov.T))
+    white = solve_triangular(lower, model_vector_free_hcd(like, theta, rel) - data.p1d, lower=True)
+    return float(white @ white)
+
+
+def log_likelihood_free_hcd(like, theta, rel):
+    # ln L = -1/2 chi-square - 1/2 ln det C - N/2 ln(2 pi)
+    data = like.data
+    lower = np.linalg.cholesky(0.5 * (data.cov + data.cov.T))
+    log_det = 2.0 * float(np.sum(np.log(np.diag(lower))))
+    white = solve_triangular(lower, model_vector_free_hcd(like, theta, rel) - data.p1d, lower=True)
+    return -0.5 * float(white @ white) - 0.5 * log_det - 0.5 * data.n * np.log(2.0 * np.pi)
+
+
+def log_posterior(x):
+    # The log posterior at x = (ns, Ap, tau0_amp, r_LLS), up to a constant: the log likelihood inside the flat
+    # prior, minus infinity outside it. Where the model cannot serve a point (the predictor refuses it, a data bin
+    # falls outside the model's modes, or the spectrum is not finite) it is minus infinity too, and the refusal
+    # is counted in REFUSALS, as the package's sampler_logp does.
+    x = np.asarray(x, dtype=float)
+    for value, name in zip(x, FREE):
+        low, high = PRIOR[name]
+        if not (low <= value <= high):  # a value that is not a number fails this too
+            return -np.inf
+    theta = dict(TRUTH, ns=float(x[0]), Ap=float(x[1]), tau0_amp=float(x[2]))
+    rel = dict(REL_TRUTH, LLS=float(x[3]))
+    try:
+        return log_likelihood_free_hcd(LIKE, theta, rel)
+    except (hp.MFUnavailableError, hp.MFRangeError):
+        raise  # wrong for every point, never a refusal of one point
+    except (hp.PredictorInputError, hl.OutsideModesError, hl.NonFiniteModelError) as error:
+        entry = REFUSALS.setdefault(type(error).__name__, [0, str(error)])
+        entry[0] += 1
+        return -np.inf
+""",
+)
+
+code(
+    "mock",
+    r"""
+# The mock. Its bins, its covariance and its factor on the model are those of the public example data set of the
+# release; its data vector is made here by the published model at TRUTH, with the model's own class fractions.
+import dataclasses
+import tarfile
+
+EXAMPLE_MOCK_SHA256 = "b7db66e81a20c25de571f39fad1a362d7c844a855487a46b31208354ce5efc34"  # of mock.p1d.json
+
+
+def example_member(name, sha256):
+    # one file of the example download, taken out of its archive into the cache folder and checked by sha256
+    target = tutorial_cache() / "hcd_priya_example_download" / name
+    if not (target.is_file() and sha256_of(target) == sha256):
+        with tarfile.open(tutorial_file("hcd_priya_example_download.tar.gz")) as archive:
+            content = archive.extractfile("hcd_priya_example_download/" + name).read()
+        if hashlib.sha256(content).hexdigest() != sha256:
+            raise RuntimeError(f"{name} in the example download does not have the sha256 {sha256}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        handle, partial = tempfile.mkstemp(dir=target.parent, prefix=name + ".", suffix=".part")
+        with os.fdopen(handle, "wb") as out:
+            out.write(content)
+        os.replace(partial, target)
+    return target
+
+
+example = hl.read_p1d_data(example_member("mock.p1d.json", EXAMPLE_MOCK_SHA256), expected_sha256=EXAMPLE_MOCK_SHA256)
+print(f"the example data set: {example.n} bins at {len(example.z)} redshifts")
+for z, k_row in zip(example.z, example.k):
+    print(f"  z = {z:.1f}: {k_row.size} bins, k from {k_row[0]:.2e} to {k_row[-1]:.2e} s/km")
+print("its factor on the model vector:", "none" if example.model_factor is None
+      else f"from {example.model_factor.min():.4f} to {example.model_factor.max():.4f}")
+
+mock_vector = hl.GaussianP1DLikelihood(emu, example).model_vector(TRUTH)
+MOCK = dataclasses.replace(
+    example,
+    p1d=mock_vector,
+    truth=dict(TRUTH, r_LLS=REL_TRUTH["LLS"]),
+    provenance={
+        "what": "a mock made by the published model itself at a stated point; no noise is added",
+        "model_release_sha256": emu.provenance["release"]["release_sha256"],
+        "bins_covariance_and_factor_from": "mock.p1d.json of the example download, sha256 " + EXAMPLE_MOCK_SHA256,
+    },
+)
+LIKE = hl.GaussianP1DLikelihood(emu, MOCK)
+
+at_truth = LIKE.prediction(TRUTH)
+print()
+print("the truth of the mock:", ", ".join(f"{name} = {value:g}" for name, value in TRUTH.items()))
+print("class amplitudes: the model's own fractions (relative amplitudes", REL_TRUTH, ")")
+print("flags of the prediction at the truth:", sorted(name for name, value in at_truth.flags.items() if np.any(value == True)))  # noqa: E712
+chi2_truth = LIKE.chi2(TRUTH)
+assert chi2_truth == 0.0, chi2_truth
+print("chi-square at the truth:", chi2_truth, "(the data vector is the model vector there)")
+""",
+)
+
+text(
+    "provenance-box",
+    r"""
+> **What this mock is. PROVISIONAL (PI to refine).**
+>
+> - The data vector is made by the same published model that is fitted to it, at the stated point. The truth of
+>   every parameter is known by construction.
+> - No noise is added to the data vector. The covariance is that of the public example data set.
+> - It tests the machinery and shows degeneracies. It is a self-consistency demonstration: **not an independent
+>   validation of the model, and not a result from data.**
+""",
+)
+
+code(
+    "posterior",
+    r"""
+# The four free parameters and their flat prior. The other seven PRIYA parameters, dtau0 and the subDLA and DLA
+# amplitudes are fixed at the truth.
+PRIOR = flat_prior(emu)
+print("free parameters and their flat prior:")
+for name in FREE:
+    truth = REL_TRUTH["LLS"] if name == "r_LLS" else TRUTH[name]
+    print(f"  {name:9s} from {PRIOR[name][0]:.6g} to {PRIOR[name][1]:.6g}   (truth {truth:g})")
+print("  ns and Ap: the ranges the model was trained on (hp.PARAM_LIMITS); tau0_amp: the range of the mean-flux")
+print("  amplitude recorded with the model's training data (emu.provenance); r_LLS: the LLS amplitude relative")
+print("  to the model's own fraction, from 0 to 3")
+print("fixed at the truth:", ", ".join(name for name in TRUTH if name not in FREE), "and the subDLA and DLA amplitudes")
+
+X_TRUTH = np.array([TRUTH["ns"], TRUTH["Ap"], TRUTH["tau0_amp"], REL_TRUTH["LLS"]])
+print()
+print(f"log posterior at the truth: {log_posterior(X_TRUTH):.6f}   the public likelihood there: {LIKE.loglike(TRUTH):.6f}")
+
+# The assembly above against the public likelihood at fixed HCD amplitudes: four LLS amplitudes, three points.
+POINTS = (TRUTH, dict(TRUTH, ns=0.87, Ap=2.3e-9), dict(TRUTH, tau0_amp=1.12, ns=0.96))
+worst_vector = worst_loglike = 0.0
+for r_lls in (0.0, 0.5, 1.0, 2.0):
+    rel = dict(REL_TRUTH, LLS=r_lls)
+    public = hl.GaussianP1DLikelihood(emu, MOCK, hcd_relative_to_priya=rel)
+    for theta in POINTS:
+        ours, theirs = model_vector_free_hcd(LIKE, theta, rel), public.model_vector(theta)
+        worst_vector = max(worst_vector, float(np.max(np.abs(ours / theirs - 1.0))))
+        worst_loglike = max(worst_loglike, abs(log_likelihood_free_hcd(LIKE, theta, rel) / public.loglike(theta) - 1.0))
+print(f"against the public likelihood at 12 points: largest relative difference of the model vector {worst_vector:.1e}, "
+      f"of the log likelihood {worst_loglike:.1e}")
+assert worst_vector < 1e-12 and worst_loglike < 1e-10
 """,
 )
 
