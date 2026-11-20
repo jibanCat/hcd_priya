@@ -81,6 +81,14 @@
       "url": "https://github.com/jibanCat/hcd_priya/releases/download/v1.0.0/hcd_priya_example_download.tar.gz",
       "what": "the example data set of the release: a mock P1D with its covariance, a model and a stored reference",
       "source": "a file of the GitHub release v1.0.0 of this repository; examples/mock_recovery.py names the same file and digest"
+    },
+    {
+      "path": "notebooks/tutorial/assets/figures/joss_architecture.png",
+      "sha256": "47302de8ce8d49e523312e1a67590ce8f0829cfa3d728e8cb304723bd3f6c68d",
+      "bytes": 172404,
+      "url": "https://raw.githubusercontent.com/jibanCat/hcd_priya/7caaeb52c9ecffd9c6472a8231533389c990cc86/notebooks/tutorial/assets/figures/joss_architecture.png",
+      "what": "the schematic of the emulator (Figure 1 of the manuscript on hcd_priya)",
+      "source": "added for this tutorial in the commit its URL names; notebooks/tutorial/assets/figures/PROVENANCE.md says how it was made and who approved it"
     }
   ]
 }

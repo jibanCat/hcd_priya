@@ -16,6 +16,7 @@ import importlib.util
 import json
 import pathlib
 import re
+import sys
 import threading
 
 import pytest
@@ -265,3 +266,82 @@ def test_tutorial_file_names_the_file_the_url_and_the_cache_when_the_download_fa
         ns["tutorial_file"]("unreachable.txt")
     assert "http://127.0.0.1:9/unreachable.txt" in str(err.value) and str(cache) in str(err.value)
     assert _files_under(cache) == []
+
+
+# ------------------------------------------------------------------------------------------ the incidence helper
+def _figure_script(name):
+    scripts = ROOT / "scripts" / "figures"
+    sys.path.insert(0, str(scripts))
+    try:
+        spec = importlib.util.spec_from_file_location(name, scripts / (name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(scripts))
+    return module
+
+
+def test_cumulative_incidence_equals_the_figure_script():
+    np = pytest.importorskip("numpy")
+    ns = _namespace("helpers-incidence")
+    script = _figure_script("fig_dndx_vs_ho21")
+    log_nhi = 17.1 + 0.2 * np.arange(30)  # thirty bin centres, as a prediction has
+    rng = np.random.default_rng(7)
+    cddf = 10.0 ** (-17.0 - 1.5 * (log_nhi - 17.0)) * rng.uniform(
+        0.5, 2.0, size=(4, 30)
+    )  # synthetic, four rows
+    cddf[1, 25:] = np.nan  # bins without a value are left out
+    cddf[2, :] = np.nan  # a row with no value at all
+    for threshold in (17.5, 17.2, 19.0, 20.37):
+        ours = ns["cumulative_incidence"](cddf, log_nhi, threshold)
+        assert ours.shape == (4,)
+        assert np.array_equal(
+            ours, script.cumulative_dndx(cddf, log_nhi, threshold), equal_nan=True
+        )
+    assert np.isnan(ns["cumulative_incidence"](cddf, log_nhi)[2])
+    assert np.array_equal(
+        ns["cumulative_incidence"](cddf, log_nhi),
+        script.cumulative_dndx(cddf, log_nhi),
+        equal_nan=True,
+    )
+    # the threshold inside a bin counts that bin from the threshold to its upper edge
+    one = np.zeros(30)
+    one[2] = 1.0  # the bin centred on 17.5, from 17.4 to 17.6
+    assert ns["cumulative_incidence"](one, log_nhi, 17.5) == pytest.approx(
+        10.0**17.6 - 10.0**17.5, rel=1e-12
+    )
+    with pytest.raises(ValueError):
+        ns["cumulative_incidence"](cddf, log_nhi**1.01)
+
+
+def test_absorption_distance_equals_the_figure_scripts():
+    np = pytest.importorskip("numpy")
+    ns = _namespace("helpers-incidence")
+    sys.path.insert(0, str(ROOT / "scripts" / "figures"))
+    try:
+        common = _figure_script("figures_common")
+    finally:
+        sys.path.remove(str(ROOT / "scripts" / "figures"))
+    for z1, z2, omega_m in ((2.0, 2.5, 0.3), (3.0, 4.0, 0.279), (1.5, 5.4, 0.25)):
+        assert ns["absorption_distance"](z1, z2, omega_m) == pytest.approx(
+            common.absorption_distance(z1, z2, omega_m), rel=1e-6
+        )
+    assert np.isclose(ns["absorption_distance"](2.0, 2.0, 0.3), 0.0)
+
+
+# ------------------------------------------------------------------------------------------ the committed notebook
+def test_the_committed_notebook_is_executed_in_order_without_an_error_or_a_private_path():
+    raw = NOTEBOOK.read_text(encoding="utf-8")
+    for private in PRIVATE_PATHS:
+        assert private not in raw, f"the committed notebook holds {private!r}"
+    assert "—" not in raw
+    code = [c for c in json.loads(raw)["cells"] if c["cell_type"] == "code"]
+    assert [c["execution_count"] for c in code] == list(
+        range(1, len(code) + 1)
+    ), "not executed top to bottom"
+    for c in code:
+        for output in c["outputs"]:
+            assert output["output_type"] != "error", f"cell {c['id']} ended in an error"
+            assert (
+                output.get("name") != "stderr"
+            ), f"cell {c['id']} wrote to stderr: {''.join(output['text'])[:200]}"
