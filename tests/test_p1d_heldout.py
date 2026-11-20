@@ -397,6 +397,18 @@ def test_the_statements_use_the_agreed_term_and_keep_three_cases_apart(held):
             text.index("Above z 4.6"),
         )
         assert a < b < c
+        # a size is e itself with the range it gives on a spectrum, each end from the exponential on its own; it is
+        # never written as a percentage (for a large e the two ends are far from equal distances)
+        assert "per cent" not in low and "%" not in text and "percent" not in low
+        fid = "lfmf" if lfmf else "lf"
+        for regime in ("typical", "largest_modes", "above_z_4p6"):
+            for q in ("median", "max"):
+                e = held.record["summary"][fid][regime][q]
+                assert f"{e:.2g} (times {np.exp(-e):.3f} to times {np.exp(e):.3f})" in text, (
+                    regime,
+                    q,
+                )
+        assert "the value times exp(-e) to the value times exp(+e)" in text
         assert "for other fractions it is an indication only" in text
         assert held.record["what_it_does_not_cover"] in text
         for note in held.record["notes"].values():

@@ -109,8 +109,8 @@ process for each record.
 **The held-out prediction residual of the class spectra.** A release may also name a P1D held-out record, an
 optional part of its manifest (format ``hcd_priya.p1d_heldout_record/1``, ``emulator.p1d_heldout``). Then every
 prediction carries ``P_class_validation_rms_log``: for each class and wavenumber, the rms of ln(prediction / truth)
-over simulations the model was made without, for the fidelity of the prediction (LF: a fold backbone against its
-held-out low-fidelity simulation; LF+MF: the backbone and the multi-fidelity table both made without the
+over simulations the model was made without and over the mean-flux rungs, for the fidelity of the prediction (LF:
+a fold backbone against its held-out low-fidelity simulation; LF+MF: the backbone and the multi-fidelity table both made without the
 high-resolution run it is compared with). It is a number on the logarithm. On the spectrum itself the range is
 ``P_class_validation_lower`` to ``P_class_validation_upper``: ``P_class * exp(-rms_log)`` and
 ``P_class * exp(+rms_log)``, each end computed on its own. ``P_mix_validation_rms_log`` is the same residual for

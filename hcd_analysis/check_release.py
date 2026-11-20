@@ -23,6 +23,13 @@ The reference file is made once by whoever publishes the release, with ``--write
 environment. It holds, for each case, the wavenumbers, the four class spectra, the HCD fractions and dN/dX
 (format ``hcd_priya.reference_predictions/1``). A comparison passes when every number agrees to ``--rtol``
 (default 1e-6: different processors and library versions change the last digits, not more).
+
+What the reference does not compare: only the four arrays named in ``ARRAYS`` are in it (``k``, ``P_class``,
+``w_c`` and ``dndx``). The CDDF, the held-out errors of dN/dX and the CDDF, and the validation fields of the
+class spectra are not compared here. For those, this command checks the files (every file of the release
+against its digest, and the P1D held-out record's tables against its residual vectors); their values are
+compared with stored golden values by the release-level science tests (``tests/test_science_model.py``, run
+with the release's files: ``docs/release_checklist.md``), which the publishing workflow does not run.
 """
 
 from __future__ import annotations

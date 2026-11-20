@@ -24,7 +24,7 @@ The versioning rule: the version of ``hcd-priya-models`` is the version of the b
 ``hcd-priya`` lists here the exact versions and digests it accepts, and its dependency on ``hcd-priya-models``
 (``pyproject.toml``) is pinned to exactly that version. ``model_package/prepare.py`` prints the entry for a release.
 
-``MODELS`` holds one entry: the LF+MF model release to be published with this version of the code, the version that
+``MODELS`` holds one entry: the LF+MF model release published with this version of the code, the version that
 ``pyproject.toml`` pins.
 """
 

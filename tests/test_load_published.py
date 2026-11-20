@@ -327,7 +327,7 @@ def test_the_list_of_accepted_models_is_well_formed():
 
 
 def test_the_accepted_model_is_the_one_release_the_code_pins():
-    """One accepted model, the LF+MF release to be published with this version, and the installed hcd-priya requires
+    """One accepted model, the LF+MF release published with this version, and the installed hcd-priya requires
     exactly its version of hcd-priya-models (no range: a later model release must not install with this code). This
     test changes with every model release."""
     import importlib.metadata as md

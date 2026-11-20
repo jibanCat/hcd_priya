@@ -1051,9 +1051,9 @@ def _gate_steps(job):
 
 def test_a_release_is_refused_unless_the_latest_nightly_run_on_its_commit_passed():
     """The release validation workflow starts only by hand, reads Actions with its own token (read access only),
-    and checks the gate before anything else. The publishing workflow (publish.yml), disabled until the maintainer
-    approves a release, checks the same gate first in its build job, without a token (the repository is public), so its
-    permissions stay as they are."""
+    and checks the gate before anything else. The publishing workflow (publish.yml) checks the same gate first in
+    its build job, without a token (the repository is public), so its permissions stay as they are.
+    """
     flow = _workflow("release-validation.yml")
     # YAML 1.1 reads the workflow key `on` as the boolean True, so the parsed dict may hold it under either name
     on = flow.get("on", flow.get(True))
@@ -1097,3 +1097,259 @@ def test_a_release_is_refused_unless_the_latest_nightly_run_on_its_commit_passed
     assert len(prepare) == 1 and "--allow-extra examples" in " ".join(
         prepare[0].split()
     ), "publish.yml: prepare.py must be told of the release's examples folder, or it stops"
+
+
+# ---- the publishing workflow, as it is enabled
+PUBLISH_ENVIRONMENTS = {
+    ("hcd-priya-models", "testpypi"): "testpypi-models",
+    ("hcd-priya-models", "pypi"): "pypi-models",
+    ("hcd-priya", "testpypi"): "testpypi",
+    ("hcd-priya", "pypi"): "pypi",
+}
+
+
+def _publish_text():
+    return open(os.path.join(REPO, ".github", "workflows", "publish.yml"), encoding="utf-8").read()
+
+
+def test_the_publishing_workflow_starts_only_by_hand_and_no_job_is_switched_off():
+    flow = _workflow("publish.yml")
+    on = flow.get("on", flow.get(True))
+    assert list(on) == ["workflow_dispatch"], "publish.yml must start only by hand"
+    assert flow["name"] == "publish"
+    assert set(flow["jobs"]) == {"build", "publish"}
+    for name, job in flow["jobs"].items():
+        assert (
+            "if" not in job
+        ), f"publish.yml job {name}: a job-level condition would switch it off or on by itself"
+    assert flow["jobs"]["publish"]["needs"] == "build"
+    inputs = on["workflow_dispatch"]["inputs"]
+    assert inputs["package"]["options"] == ["hcd-priya-models", "hcd-priya"]
+    assert (
+        inputs["index"]["options"] == ["testpypi", "pypi"]
+        and inputs["index"]["default"] == "testpypi"
+    )
+    assert "DISABLED" not in _publish_text() and "if: false" not in _publish_text()
+
+
+def test_the_publishing_workflow_holds_no_token_and_only_the_upload_job_may_ask_for_an_identity():
+    flow = _workflow("publish.yml")
+    assert flow["permissions"] == {}, "publish.yml: no permission at the workflow level"
+    assert flow["jobs"]["build"]["permissions"] == {"contents": "read"}
+    assert flow["jobs"]["publish"]["permissions"] == {"id-token": "write"}
+    text = _publish_text()
+    for word in ("secrets.", "PYPI_API_TOKEN", "password:", "TWINE_"):
+        assert word not in text, f"publish.yml must not use a stored credential ({word})"
+
+
+def test_each_package_and_index_has_its_own_protected_environment():
+    """The index allows one pending trusted publisher per owner, repository, workflow and environment, so the two
+    packages cannot share an environment. The expression is evaluated here as GitHub evaluates it: `a && b || c`
+    gives b when a is true (b is a non-empty string) and c otherwise."""
+    expression = _workflow("publish.yml")["jobs"]["publish"]["environment"]
+    assert expression == (
+        "${{ inputs.package == 'hcd-priya-models' && format('{0}-models', inputs.index) || inputs.index }}"
+    )
+
+    def evaluate(package, index):
+        return f"{index}-models" if package == "hcd-priya-models" else index
+
+    got = {key: evaluate(*key) for key in PUBLISH_ENVIRONMENTS}
+    assert got == PUBLISH_ENVIRONMENTS and len(set(got.values())) == 4
+    for name in PUBLISH_ENVIRONMENTS.values():
+        assert (
+            name in _publish_text()
+        ), f"the header of publish.yml must name the environment {name}"
+
+
+def test_the_upload_action_is_pinned_to_a_commit_with_its_tag_beside_it():
+    steps = _workflow("publish.yml")["jobs"]["publish"]["steps"]
+    uploads = [s for s in steps if s.get("uses", "").startswith("pypa/gh-action-pypi-publish@")]
+    assert len(uploads) == 2 and {s["if"] for s in uploads} == {
+        "${{ inputs.index == 'testpypi' }}",
+        "${{ inputs.index == 'pypi' }}",
+    }
+    refs = {s["uses"].split("@", 1)[1] for s in uploads}
+    assert len(refs) == 1 and re.fullmatch(
+        r"[0-9a-f]{40}", refs.pop()
+    ), "the upload action must be pinned to a commit"
+    test_index = [s for s in uploads if s["if"] == "${{ inputs.index == 'testpypi' }}"][0]
+    assert test_index["with"] == {"repository-url": "https://test.pypi.org/legacy/"}
+    real = [s for s in uploads if s["if"] == "${{ inputs.index == 'pypi' }}"][0]
+    assert "with" not in real, "the upload to the index uses the action's default, the real index"
+    lines = [ln for ln in _publish_text().split("\n") if "pypa/gh-action-pypi-publish@" in ln]
+    assert len(lines) == 2 and all(
+        re.search(r"@[0-9a-f]{40}  # v\d+\.\d+\.\d+$", ln) for ln in lines
+    )
+
+
+DATED = "2026-01-31"  # a made-up day, for the tests below
+
+
+def _release_files(tmp_path, changelog_date, citation_date):
+    """A folder with the three files the tag check reads: the package's version, the changelog whose first heading
+    carries `changelog_date`, and the citation file with a real `date-released` line (or, for None, the commented
+    placeholder line as committed)."""
+    import hcd_analysis
+
+    (tmp_path / "hcd_analysis").mkdir()
+    (tmp_path / "hcd_analysis" / "__init__.py").write_text(
+        f'__version__ = "{hcd_analysis.__version__}"\n', encoding="utf-8"
+    )
+    (tmp_path / "CHANGELOG.md").write_text(
+        f"# Changelog\n\n## {hcd_analysis.__version__} ({changelog_date})\n\n- a change\n",
+        encoding="utf-8",
+    )
+    line = (
+        "# date-released: RELEASE_DATE (the day of publication)\n"
+        if citation_date is None
+        else f"date-released: {citation_date}\n"
+    )
+    (tmp_path / "CITATION.cff").write_text(
+        f"cff-version: 1.2.0\nversion: {hcd_analysis.__version__}\n{line}license: MIT\n",
+        encoding="utf-8",
+    )
+    return hcd_analysis.__version__
+
+
+@pytest.mark.parametrize(
+    "ref, changelog_date, citation_date, passes, says",
+    [
+        ("refs/tags/v{version}", DATED, DATED, True, ""),
+        ("refs/heads/main", DATED, DATED, False, "starts from the tag v{version}"),
+        ("refs/tags/v0.0.0", DATED, DATED, False, "starts from the tag v{version}"),
+        ("refs/tags/{version}", DATED, DATED, False, "starts from the tag v{version}"),
+        (
+            "refs/tags/v{version}",
+            "RELEASE_DATE",
+            DATED,
+            False,
+            "still the placeholder RELEASE_DATE",
+        ),
+        ("refs/tags/v{version}", DATED, None, False, "still the placeholder RELEASE_DATE"),
+    ],
+)
+def test_an_upload_to_the_index_starts_from_the_tag_of_this_version_with_its_date_written(
+    ref, changelog_date, citation_date, passes, says, tmp_path
+):
+    """The step is run here as GitHub runs it (bash -eo pipefail, in a folder with the three files it reads), with
+    the ref GitHub would set."""
+    import shutil
+    import subprocess
+    import sys
+
+    build = _workflow("publish.yml")["jobs"]["build"]["steps"]
+    (step,) = [
+        s
+        for s in build
+        if s.get("name")
+        == "The real index takes the tag of this version only, with its release date written"
+    ]
+    assert step["if"] == "${{ inputs.index == 'pypi' }}"
+    runs = [s for s in build if "run" in s]
+    assert (
+        runs.index(step) == 1
+    ), "the tag check comes right after the nightly gate, before anything is built"
+    version = _release_files(tmp_path, changelog_date, citation_date)
+    bash = shutil.which("bash")
+    assert bash is not None, "the supported platform is Linux: bash is there"
+    path = os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
+    out = subprocess.run(
+        [bash, "-eo", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env=dict(os.environ, GITHUB_REF=ref.format(version=version), PATH=path),
+        capture_output=True,
+        text=True,
+    )
+    assert (out.returncode == 0) is passes, out.stdout + out.stderr
+    assert says.format(version=version) in out.stdout
+
+
+def test_the_release_date_is_one_line_in_each_of_two_files_and_the_two_agree():
+    """Either both files hold the placeholder RELEASE_DATE (before the day of publication is known), or both hold the
+    same day: the heading of the version in CHANGELOG.md and `date-released` in CITATION.cff."""
+    import hcd_analysis
+
+    changelog = open(os.path.join(REPO, "CHANGELOG.md"), encoding="utf-8").read()
+    headings = re.findall(r"(?m)^## (\d+\.\d+\.\d+) \(([^)]*)\)$", changelog)
+    assert (
+        headings and headings[0][0] == hcd_analysis.__version__
+    ), "the first heading is this version's"
+    day = headings[0][1]
+    assert day == "RELEASE_DATE" or re.fullmatch(r"\d{4}-\d{2}-\d{2}", day), day
+    citation = open(os.path.join(REPO, "CITATION.cff"), encoding="utf-8").read()
+    real = re.findall(r'(?m)^date-released: "?(\d{4}-\d{2}-\d{2})"?$', citation)
+    commented = re.findall(r"(?m)^# date-released: RELEASE_DATE\b", citation)
+    assert changelog.count("RELEASE_DATE") == (1 if day == "RELEASE_DATE" else 0)
+    if day == "RELEASE_DATE":
+        assert (
+            real == [] and len(commented) == 1
+        ), "the placeholder stands in both files or in neither"
+    else:
+        assert real == [day] and commented == [] and "RELEASE_DATE" not in citation
+
+
+# ---- the README is the page of the package on the index: its links must work from there
+def test_the_readme_links_into_this_repository_are_absolute_at_the_tag_of_this_version():
+    """The index shows the README of the uploaded package and cannot resolve a relative link or image, and an
+    upload cannot be amended. Every link and image of the README into this repository is therefore an absolute URL
+    at the tag of this version, and each names a file or folder that exists in this tree. Links inside the page
+    (#section) stay as they are."""
+    import hcd_analysis
+
+    tag = f"v{hcd_analysis.__version__}"
+    text = open(os.path.join(REPO, "README.md"), encoding="utf-8").read()
+    targets = re.findall(r"\]\(([^()\s]+)\)", text)
+    assert len(targets) > 40
+    relative = [u for u in targets if not re.match(r"(https?://|mailto:|#)", u)]
+    assert relative == [], f"relative links or images in README.md: {relative[:5]}"
+    own = re.compile(
+        r"https://(?:github\.com/jibanCat/hcd_priya/(blob|tree)|raw\.githubusercontent\.com/jibanCat/hcd_priya)"
+        r"/([^/]+)/([^#]+)(?:#.*)?$"
+    )
+    seen = {"blob": 0, "tree": 0, None: 0}
+    for url in targets:
+        m = own.match(url)
+        if m is None:
+            continue
+        kind, ref, path = m.groups()
+        assert ref == tag, f"{url}: the link must be at the tag {tag}"
+        full = os.path.join(REPO, path)
+        assert (
+            os.path.isdir(full) if kind == "tree" else os.path.isfile(full)
+        ), f"{url}: not in this tree"
+        seen[kind] += 1
+    images = re.findall(r"!\[[^\]]*\]\((https://raw\.githubusercontent\.com/[^)]+)\)", text)
+    assert seen[None] == len(images) == 3 and seen["blob"] >= 30 and seen["tree"] >= 2
+
+
+def test_the_checklist_names_the_four_environments_and_the_order_of_publication():
+    """docs/release_checklist.md is what the maintainer follows: it names the environment of each package and
+    index as the workflow does, rehearses on the test index before the index, publishes the model package before
+    the code package, and brings the texts to their final wording before the tag, not after the upload.
+    """
+    text = open(os.path.join(REPO, "docs", "release_checklist.md"), encoding="utf-8").read()
+    # the table of the checklist: one row per package, its environment on the test index and on the index
+    table = re.findall(
+        r"(?m)^\s*\| `(hcd-priya(?:-models)?)` \| `([a-z-]+)` \| `([a-z-]+)` \|$", text
+    )
+    assert len(table) == 2
+    named = {(p, "testpypi"): a for p, a, _ in table} | {(p, "pypi"): b for p, _, b in table}
+    assert (
+        named == PUBLISH_ENVIRONMENTS
+    ), "the checklist's table and the workflow name different environments"
+    order = [
+        "The release pull request is merged",
+        "The nightly workflow is started by hand on the release commit",
+        "as a **pre-release**",
+        "Rehearsal on the test index, model package",
+        "Rehearsal on the test index, code package",
+        "**The upload to the index, which cannot be undone.**",
+        "un-marks the pre-release",
+    ]
+    places = [text.index(s) for s in order]
+    assert places == sorted(places), "the steps of publication are not in their order"
+    assert "After publication" not in text and "This is done before the tag, not after the" in text
+    assert (
+        "`k`,\n      `P_class`, `w_c` and `dndx`" in text
+    ), "the checklist says which arrays the reference compares"

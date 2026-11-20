@@ -1,7 +1,7 @@
 {
  "dashed": "redshifts above 4.6",
  "fidelity": "LF+MF",
- "figure": "the held-out prediction residual of the class P1D: 100 e against k, one line per redshift",
+ "figure": "the held-out prediction residual of the class P1D: e against k, one line per redshift",
  "held_out": "a fold backbone with a multi-fidelity table fitted without the high-resolution run of the same design point, against that run",
  "midpoint": {
   "hub": 0.7,
@@ -36,98 +36,99 @@
   5.2,
   5.4
  ],
- "summary_per_cent": {
+ "summary": {
   "DLA": {
    "above_z_4p6": {
-    "max": 5.413,
-    "median": 2.39
+    "max": 0.05413,
+    "median": 0.0239
    },
    "above_z_4p6_largest_modes": {
-    "max": 13.284,
-    "median": 8.281
+    "max": 0.13284,
+    "median": 0.08281
    },
    "largest_modes": {
-    "max": 7.749,
-    "median": 3.315
+    "max": 0.07749,
+    "median": 0.03315
    },
    "typical": {
-    "max": 3.488,
-    "median": 1.345
+    "max": 0.03488,
+    "median": 0.01345
    }
   },
   "LLS": {
    "above_z_4p6": {
-    "max": 4.854,
-    "median": 1.908
+    "max": 0.04854,
+    "median": 0.01908
    },
    "above_z_4p6_largest_modes": {
-    "max": 9.798,
-    "median": 5.344
+    "max": 0.09798,
+    "median": 0.05344
    },
    "largest_modes": {
-    "max": 4.497,
-    "median": 2.158
+    "max": 0.04497,
+    "median": 0.02158
    },
    "typical": {
-    "max": 2.912,
-    "median": 1.045
+    "max": 0.02912,
+    "median": 0.01045
    }
   },
   "clean": {
    "above_z_4p6": {
-    "max": 5.623,
-    "median": 1.829
+    "max": 0.05623,
+    "median": 0.01829
    },
    "above_z_4p6_largest_modes": {
-    "max": 11.162,
-    "median": 5.991
+    "max": 0.11162,
+    "median": 0.05991
    },
    "largest_modes": {
-    "max": 4.99,
-    "median": 2.394
+    "max": 0.0499,
+    "median": 0.02394
    },
    "typical": {
-    "max": 2.721,
-    "median": 1.06
+    "max": 0.02721,
+    "median": 0.0106
    }
   },
   "mixture": {
    "above_z_4p6": {
-    "max": 4.981,
-    "median": 1.908
+    "max": 0.04981,
+    "median": 0.01908
    },
    "above_z_4p6_largest_modes": {
-    "max": 9.85,
-    "median": 5.771
+    "max": 0.0985,
+    "median": 0.05771
    },
    "largest_modes": {
-    "max": 4.781,
-    "median": 2.403
+    "max": 0.04781,
+    "median": 0.02403
    },
    "typical": {
-    "max": 2.678,
-    "median": 1.037
+    "max": 0.02678,
+    "median": 0.01037
    }
   },
   "subDLA": {
    "above_z_4p6": {
-    "max": 4.852,
-    "median": 2.14
+    "max": 0.04852,
+    "median": 0.0214
    },
    "above_z_4p6_largest_modes": {
-    "max": 8.581,
-    "median": 5.71
+    "max": 0.08581,
+    "median": 0.0571
    },
    "largest_modes": {
-    "max": 5.059,
-    "median": 2.256
+    "max": 0.05059,
+    "median": 0.02256
    },
    "typical": {
-    "max": 3.03,
-    "median": 1.105
+    "max": 0.0303,
+    "median": 0.01105
    }
   }
  },
+ "vertical_axis": "e, the rms of ln(prediction / truth): a number on the natural logarithm, not a percentage; on a spectrum it is the range from the value times exp(-e) to the value times exp(+e)",
  "wavenumbers": "the modes of the box in s/km at each redshift, for hub and omegamh2 of the midpoint",
  "what_it_is": "an empirical validation diagnostic, not a calibrated uncertainty"
 }

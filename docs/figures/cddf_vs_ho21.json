@@ -64,7 +64,8 @@
     "incidence_heldout_error_available",
     "incidence_mf_applied",
     "k_downweighted",
-    "mf_applied"
+    "mf_applied",
+    "p1d_validation_available"
    ],
    "model_z": 2.2
   },
@@ -91,7 +92,8 @@
     "incidence_heldout_error_available",
     "incidence_mf_applied",
     "k_downweighted",
-    "mf_applied"
+    "mf_applied",
+    "p1d_validation_available"
    ],
    "model_z": 2.8
   },
@@ -120,7 +122,8 @@
     "incidence_heldout_error_available",
     "incidence_mf_applied",
     "k_downweighted",
-    "mf_applied"
+    "mf_applied",
+    "p1d_validation_available"
    ],
    "model_z": 3.4
   }

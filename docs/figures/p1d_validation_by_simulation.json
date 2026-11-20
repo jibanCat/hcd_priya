@@ -1,6 +1,6 @@
 {
  "evidence_file_sha256": "df8a29e2ad6d1abaf71055d0dcb35a5f76563a1d86fa0d45c0752883af5d04fe",
- "figure": "the residual of the mixture per held-out simulation: 100 ln(prediction / truth) against k",
+ "figure": "the residual of the mixture per held-out simulation: ln(prediction / truth) against k",
  "in_the_first_hue": {
   "design_point": "ns0.979Ap1.78e-09",
   "why": "the record's sensitivity table leaves it out"
@@ -102,7 +102,7 @@
   "ns0.972Ap1.69e-09",
   "ns0.979Ap1.78e-09"
  ],
- "vertical_axis": "linear within 5 per cent, logarithmic beyond",
+ "vertical_axis": "d = ln(prediction / truth), not a percentage; linear within 0.05, logarithmic beyond",
  "wavenumbers": "the modes of the box in s/km at each redshift, for hub and omegamh2 of the midpoint",
  "what_it_is": "an empirical validation diagnostic, not a calibrated uncertainty"
 }

@@ -28,7 +28,9 @@ shape of pred.P_class, the P1D of clean, LLS, subDLA, DLA: (4, 172)
 - **How it is checked.** `hcd-priya` pins the sha256 of the release it accepts. `load_published` loads the files of
   this package only if they verify against that digest, file by file. This package loads nothing itself.
 - **How it is built.** The model files are not in git. `python model_package/prepare.py --release RELEASE_DIR
-  --release-sha256 SHA256` copies an accepted release in after checking its digest and verifies every file;
+  --release-sha256 SHA256 --allow-extra examples` copies an accepted release in after checking its digest and
+  verifies every file (the release holds an `examples` folder that `release.json` does not name, so the command
+  names it; without the option `prepare.py` stops);
   `python -m build --outdir <dir> model_package` then builds the wheel and the source archive. For tests,
   `prepare.py --synthetic` makes a stand-in with untrained networks (the pinned version with the label `+synthetic`,
   never published), which
@@ -39,5 +41,6 @@ shape of pred.P_class, the P1D of clean, LLS, subDLA, DLA: (4, 172)
 - **Licence.** The model files are released under the Creative Commons Attribution 4.0 International licence
   (CC BY 4.0); the few lines of Python in this package, and the example script a release carries, are under the MIT
   licence, like the code. See `LICENSE`, and the `LICENSE` file of the release inside the package.
-- **No model is published yet.** The package is built and tested in the hcd_priya repository
-  (`model_package/`); the model files are copied in at build time and are not in git.
+- **Where it comes from.** The package is built and tested in the hcd_priya repository (`model_package/`); the
+  model files are copied in at build time and are not in git. The same release is published as files, with its
+  reference predictions, on the GitHub release of that version: <https://github.com/jibanCat/hcd_priya/releases/tag/v1.0.0>.

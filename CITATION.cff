@@ -8,7 +8,7 @@ authors:
     family-names: Ho
     email: mfho@umich.edu
 version: 1.0.0
-# date-released: RELEASE_DATE (set when the release is tagged; docs/release_checklist.md, section 1)
+date-released: 2026-11-19
 license: MIT
 repository-code: "https://github.com/jibanCat/hcd_priya"
 references:

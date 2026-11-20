@@ -9,8 +9,8 @@ This repository holds the code of an emulator of the one-dimensional flux power 
 absorbers contaminating it, together with the research pipeline it was built
 for: measuring two cosmological parameters, the forest power amplitude A_p and
 the tilt n_s, from the P1D. The supported interface of this release is the
-predictor of the per-class P1D; the measurement itself is research code that does
-not run at this commit (see
+predictor of the per-class P1D and a Gaussian data likelihood with a mock-recovery
+example; the measurement itself is research code that is not part of the release (see
 [Scope and limitations of this release](#scope-and-limitations-of-this-release)).
 It is built on the PRIYA suite of cosmological hydrodynamic simulations.
 
@@ -20,53 +20,40 @@ It is built on the PRIYA suite of cosmological hydrodynamic simulations.
 
 <!-- docs:install:start -->
 `hcd-priya` installs the Python package `hcd_analysis` and the command `hcd`. It requires `hcd-priya-models`, a
-data-only package that holds the trained models. It needs Python 3.11 or later on Linux (x86-64).
-
-**What works today: an install from a clone, with a stand-in model.** Neither package is on a package index yet, and
-no trained model is published yet. What someone outside the project can install today is the code together with a
-stand-in model package: a synthetic bundle of untrained networks. It shows that the installation and the interface
-work; its numbers are not science. These are the commands that continuous integration runs:
+data package that holds the trained model; pip installs it by itself. It needs Python 3.11 or later on Linux (x86-64).
 
 ```bash
-git clone https://github.com/jibanCat/hcd_priya && cd hcd_priya
 python3.11 -m venv .venv && source .venv/bin/activate
-pip install build && python -m build --wheel --outdir dist .
-# builds the stand-in model wheel into dist/models and installs both wheels, with pinned dependencies
-tools/ci/install_with_synthetic_models.sh python "$(ls dist/*.whl)[test]" dist/models \
-    -c tools/ci/constraints-devenv.txt
-export HCD_PRIYA_ALLOW_SYNTHETIC=1      # the stand-in loads only with this switch, and with a warning
+pip install hcd-priya
 python -c "import hcd_analysis; print(hcd_analysis.__version__)"
 hcd --help
 ```
 
-- **The switch.** `load_published` refuses the stand-in unless `HCD_PRIYA_ALLOW_SYNTHETIC=1` is set, so that untrained
-  networks are never taken for a model. With it, the first example of the README runs and prints the shapes and
-  flags of the stand-in, which differ from those of the trained model.
-- **With a model wheel in hand.** The model wheel is built in this repository
-  ([`model_package/`](model_package/README.md)) from an accepted release. Whoever holds one installs it as a file,
-  which is never looked up on an index: `pip install . path/to/hcd_priya_models-VERSION-py3-none-any.whl`.
+This installs the code and the trained LF+MF model together (the model package is about 40 MB; nothing is
+downloaded later). The first example of the README then runs as written, with no switch and no warning, and
+`python -I -m hcd_analysis.check_release --published` checks the installed model file by file.
+
 - **The supported install** pins every dependency to the versions the test suite is developed and run with
-  ([`tools/ci/constraints-devenv.txt`](tools/ci/constraints-devenv.txt)), on CPython 3.11, as the commands above
-  do. [`CONTRIBUTING.md`](CONTRIBUTING.md) adds the editable install for development.
-
-**What will work after publication (not available yet).** Once both packages are published, the whole install will
-be one line. It does not work today:
-
-```bash
-pip install hcd-priya        # NOT AVAILABLE YET: neither package is on a package index
-```
-
-It will install the code and the trained LF+MF model together, and the first example of the README will then run as
-written, with no switch and no warning.
+  ([`tools/ci/constraints-devenv.txt`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/tools/ci/constraints-devenv.txt)), on CPython 3.11: take that file from this
+  repository at the release tag and add `-c constraints-devenv.txt` to the pip command.
+- **From a clone, for development and tests.** [`CONTRIBUTING.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/CONTRIBUTING.md) gives the commands. They do not
+  use the trained model: continuous integration and the tests build a stand-in model package, a synthetic bundle of
+  untrained networks whose numbers are not science (`tools/ci/install_with_synthetic_models.sh`).
+- **The switch of the stand-in.** `load_published` refuses the stand-in unless `HCD_PRIYA_ALLOW_SYNTHETIC=1` is set,
+  so that untrained networks are never taken for a model. With it, the first example of the README runs and prints
+  the shapes and flags of the stand-in, which differ from those of the trained model.
+- **With a model wheel in hand.** A model wheel built in this repository from a release's files
+  ([`model_package/`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/model_package/README.md)) installs as a file, which is never looked up on an index:
+  `pip install . path/to/hcd_priya_models-VERSION-py3-none-any.whl`.
 
 **Notes.**
 
 - Newer dependency versions and Python 3.12 are tested in the nightly continuous integration but not supported yet; macOS and
-  Windows are not tested. [`docs/compatibility.md`](docs/compatibility.md) lists what is tested and what is not.
+  Windows are not tested. [`docs/compatibility.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/compatibility.md) lists what is tested and what is not.
 - **Extras:** `test` (pytest), `tutorials` (jupyter, nbformat) and `dev`. `pyproject.toml` declares the
   dependencies; `requirements.txt` only points to the install above.
-- **Working in a clone.** To run the scripts or the pipeline from the clone, make the install editable after the
-  commands above: `pip install --no-deps -e .`. The pipeline records the clone's commit, and only
+- **Working in a clone.** To run the scripts or the pipeline from the clone, make the install editable:
+  `pip install --no-deps -e .` after either install above. The pipeline records the clone's commit, and only
   an editable install makes that commit the code that runs (with your changes committed); a plain install runs the
   copy made when it was installed. The scripts under `scripts/` are not part of the installed package; run them from
   the repository root.
@@ -74,7 +61,7 @@ written, with no switch and no warning.
   structural identities of the model need: they hold only to bit-level accuracy and break under JAX's default
   float32. Run scripts with `JAX_PLATFORMS=cpu python <your_script.py>`.
 - **The simulation side** (building absorber catalogs and P1D from raw spectra) also needs `fake_spectra`, installed
-  separately ([`docs/fake_spectra_integration.md`](docs/fake_spectra_integration.md)); the predictor does not. On
+  separately ([`docs/fake_spectra_integration.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/fake_spectra_integration.md)); the predictor does not. On
   the Great Lakes cluster, `bash scripts/install_greatlakes.sh` creates a conda environment with both.
 <!-- docs:install:end -->
 
@@ -116,8 +103,8 @@ print("shape of pred.k, the wavenumbers in s/km:", pred.k.shape)
 print("flags that are set (read them before you use the numbers):", sorted(n for n, v in pred.flags.items() if v is True))
 ```
 
-With the trained LF+MF model this prints (the model has 172 wavenumbers; no spectrum value is shown here). The
-stand-in model of today's install has another number of wavenumbers, carries no incidence record and no P1D
+With the trained LF+MF model, which `pip install hcd-priya` brings, this prints (the model has 172 wavenumbers; no
+spectrum value is shown here). The stand-in model of the tests has another number of wavenumbers, carries no incidence record and no P1D
 held-out record (so none of the three flags of those records), and its predictions carry the flag
 `synthetic_build`:
 
@@ -138,13 +125,14 @@ own wavenumbers lie below 1e-3 s/km, where training gave less weight (`k_downwei
 
 - **What "LF+MF" is.** The emulator trained on the low-fidelity (low-resolution) PRIYA simulations, with the
   multi-fidelity correction that calibrates its class spectra to the high-resolution simulations
-  ([`docs/models_and_data.md`](docs/models_and_data.md); which validation summaries are public is listed under
+  ([`docs/models_and_data.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/models_and_data.md); which validation summaries are public is listed under
   "Status" below). It is the model this package publishes, and
   `hp.load_published()` loads it without a name.
 - **Where the model comes from.** The trained model is in a companion package, `hcd-priya-models`, which `hcd-priya`
-  requires. Nothing is downloaded when you load it. **Neither package is published yet**: [Install](#install) says
-  what works today, and [Models and data](#models-and-data) what `load_published` checks. With a release's files
-  in hand, the same model loads from its directory and the sha256 published with it:
+  requires and pip installs with it. Nothing is downloaded when you load it;
+  [Models and data](#models-and-data) says what `load_published` checks. The same model is also published as
+  files, on the [GitHub release of this version](https://github.com/jibanCat/hcd_priya/releases/tag/v1.0.0); with a release's files
+  in hand, it loads from its directory and the sha256 published with it:
 
   ```python
   emu = hp.load_release("path/to/release", "<published release sha256>")
@@ -169,18 +157,18 @@ What goes in and what comes out:
   damping-wing core (`pred.labels["omissions"]`).
 - **Conventions.** `pred.k` is the angular wavenumber, 2 pi divided by the wavelength in velocity, in s/km.
   `pred.P_class` is the power spectrum of `F / mean(F) - 1`, with `mean(F)` the mean flux of the whole sample, in
-  km/s ([`docs/p1d_definition.md`](docs/p1d_definition.md); that page writes k in the other common convention, one
+  km/s ([`docs/p1d_definition.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/p1d_definition.md); that page writes k in the other common convention, one
   over the wavelength). A spectrum in that other convention has a k smaller by a factor of 2 pi and the same P at
   the corresponding k: only k is converted, never P. Wavenumbers given to the likelihood must be in s/km too: a
   data set in h/Mpc with a bin at or above about 0.1 is refused, but one whose bins all lie below that may pass
-  undetected ([`docs/likelihood.md`](docs/likelihood.md)).
+  undetected ([`docs/likelihood.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/likelihood.md)).
 - **Read `pred.flags` before using the numbers**: a parameter outside the training box, or an LF+MF prediction
   above z 4.6, is returned and flagged, not refused.
 
 Without any model file, the same calls run on a synthetic bundle (untrained networks, so it shows the interface and
 behaviour, not science): `hcd_analysis.emulator.release_testing.write_synthetic_bundle` writes one that
 `hp.load_bundle` loads, and the tutorial
-[`docs/tutorials/production_and_research_bundles.md`](docs/tutorials/production_and_research_bundles.md) walks
+[`docs/tutorials/production_and_research_bundles.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/tutorials/production_and_research_bundles.md) walks
 through production and research bundles on synthetic data. Every function named above has a docstring with an
 example that a test runs (for instance `help(hp.Prediction)`).
 
@@ -219,7 +207,7 @@ hcd_priya is the continuation of the analysis of Ho et al. 2026,
 "Small-scale Lyman alpha forest cosmology with PRIYA: constraints from XQ100 and KODIAQ-SQUAD one-dimensional flux
 power spectra", JCAP 2026 (07) 094
 ([doi:10.1088/1475-7516/2026/07/094](https://doi.org/10.1088/1475-7516/2026/07/094),
-[arXiv:2509.18271](https://arxiv.org/abs/2509.18271)). How to cite the software: [`CITATION.cff`](CITATION.cff).
+[arXiv:2509.18271](https://arxiv.org/abs/2509.18271)). How to cite the software: [`CITATION.cff`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/CITATION.cff).
 <!-- docs:about:end -->
 
 ---
@@ -266,23 +254,23 @@ hcd run-sim --sim SIMULATION --config config/default.yaml             # every sn
 ```
 
 How the finder works, its settings, its products and the checks of a catalogue are in
-[`docs/pipeline.md`](docs/pipeline.md).
+[`docs/pipeline.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/pipeline.md).
 
 ---
 
 ## Figures
 
-Drawn by the scripts in [`scripts/figures/`](scripts/figures/); the data files are in
-[`docs/figures/data/`](docs/figures/data/). The class-ratio figure regenerates from the repository alone. The dN/dX
+Drawn by the scripts in [`scripts/figures/`](https://github.com/jibanCat/hcd_priya/tree/v1.0.0/scripts/figures); the data files are in
+[`docs/figures/data/`](https://github.com/jibanCat/hcd_priya/tree/v1.0.0/docs/figures/data). The class-ratio figure regenerates from the repository alone. The dN/dX
 and CDDF figures need a model with an incidence record; their measured points and the 60
-design points of their bands are in the repository. No model is published yet: the two model figures were drawn
-from the candidate LF+MF release (staged, not yet public). The full captions and what each figure does not test:
-[`docs/model_figures.md`](docs/model_figures.md). That page also shows the model's held-out prediction residual of
+design points of their bands are in the repository. The model figures are drawn from the model release of this
+version. The full captions and what each figure does not test:
+[`docs/model_figures.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/model_figures.md). That page also shows the model's held-out prediction residual of
 the class P1D against wavenumber and redshift, and per held-out simulation
 (`scripts/figures/fig_p1d_validation.py`): empirical validation diagnostics, not calibrated predictive
 uncertainties.
 
-![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS and of every absorber above 10^17.5 cm^-2 against redshift, with the DLA measurement of Ho, Bird and Garnett (2021) and five published measurements of the incidence of Lyman limit systems](docs/figures/dndx_vs_ho21.png)
+![The incidence dN/dX of the LF+MF model for DLAs, subDLAs and LLS and of every absorber above 10^17.5 cm^-2 against redshift, with the DLA measurement of Ho, Bird and Garnett (2021) and five published measurements of the incidence of Lyman limit systems](https://raw.githubusercontent.com/jibanCat/hcd_priya/v1.0.0/docs/figures/dndx_vs_ho21.png)
 
 **The incidence dN/dX against redshift.** Lines: the LF+MF model (`pred.dndx`) for DLAs, subDLAs and LLS, bins of
 column density (10^20.3 cm^-2 and above, 10^19 to 10^20.3, 10^17.2 to 10^19), at the midpoint of each parameter's
@@ -292,18 +280,18 @@ here is not validated at any redshift). Dashed line: the model's count of every 
 the quantity the LLS points measure. Bands: the lowest and the highest value over the 60 design points of the
 training simulations; they are not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
 [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) with 68 per cent intervals, from the tables of the DLA data
-collection [sbird/DLA_data](https://github.com/sbird/DLA_data) ([provenance](docs/figures/data/ho21/PROVENANCE.md));
+collection [sbird/DLA_data](https://github.com/sbird/DLA_data) ([provenance](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/figures/data/ho21/PROVENANCE.md));
 and the incidence of Lyman limit systems (tau_912 >= 2) of five published samples: Prochaska, O'Meara and Worseck
 (2010), O'Meara et al. (2013) with Ribaudo, Lehner and Howk (2011), Fumagalli et al. (2013), Crighton et al. (2019)
-and Fumagalli, Fotopoulou and Thomson (2020) ([provenance](docs/figures/data/lls_incidence/PROVENANCE.md)). Read the
+and Fumagalli, Fotopoulou and Thomson (2020) ([provenance](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/figures/data/lls_incidence/PROVENANCE.md)). Read the
 LLS points against the dashed line, not against the LLS line: they count every absorber above 10^17.5, subDLAs and
 DLAs included. At z = 3.45 the points of Prochaska et al. and of Fumagalli et al. (2020) overlap; the two samples
 share quasars. Every point is drawn per unit X in the cosmology of the model line; the bands are not converted.
 Bars on the lines: the model's held-out range, from dN/dX times exp(-e) to dN/dX times exp(+e), with e the rms over
 five held-out simulations of ln(prediction / truth); each bound is computed on its own, so the bars are asymmetric.
-They are an indication of size, not a standard deviation. [Full caption](docs/model_figures.md).
+They are an indication of size, not a standard deviation. [Full caption](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/model_figures.md).
 
-![The column-density distribution f(N_HI) of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021) in three redshift bins and three measurements below the DLA threshold](docs/figures/cddf_vs_ho21.png)
+![The column-density distribution f(N_HI) of the LF+MF model at three snapshots, with the DLA measurement of Ho, Bird and Garnett (2021) in three redshift bins and three measurements below the DLA threshold](https://raw.githubusercontent.com/jibanCat/hcd_priya/v1.0.0/docs/figures/cddf_vs_ho21.png)
 
 **The column-density distribution f(N_HI).** Line: the LF+MF model (`pred.cddf`) at the midpoint of each
 parameter's training range (the nine values are written in the script; nothing is fitted), at the snapshots z = 2.2,
@@ -312,14 +300,14 @@ not an uncertainty. Points: the DLAs of Ho, Bird and Garnett (2021,
 [arXiv:2103.10964](https://arxiv.org/abs/2103.10964)) in three redshift bins, with 68 per cent intervals (bins
 where the measured value is zero are not drawn). Below the DLA threshold: the subDLAs of Zafar et al. (2013) in every
 panel and, in the panel 3 < z < 4, the points of O'Meara et al. (2007) and the region allowed for LLS by Prochaska,
-O'Meara and Worseck (2010) ([provenance](docs/figures/data/lls_subdla/PROVENANCE.md)). Every measurement is drawn per
+O'Meara and Worseck (2010) ([provenance](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/figures/data/lls_subdla/PROVENANCE.md)). Every measurement is drawn per
 unit X in the cosmology of the model line; the band is not converted. One snapshot stands beside each bin (z = 3.4
 for the bin 3 to 4). The bin 4 to 5 is left out because it reaches beyond z = 4.6, the edge of the range that the
 grouped validation of the model's P1D correction covers; the correction of the CDDF itself is not validated at any
 redshift. The model's held-out range is not drawn here; a prediction carries it per bin (`pred.cddf_lower` to
-`pred.cddf_upper`). [Full caption](docs/model_figures.md).
+`pred.cddf_upper`). [Full caption](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/model_figures.md).
 
-![The class power ratio at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](docs/figures/class_ratio_vs_rogers18.png)
+![The class power ratio at z = 3: the PRIYA training simulations with the troughs restored, and Eq. 6 of Rogers et al. (2018)](https://raw.githubusercontent.com/jibanCat/hcd_priya/v1.0.0/docs/figures/class_ratio_vs_rogers18.png)
 
 **The class power ratio P_class / P_clean at z = 3.** Blue: the low-resolution PRIYA training simulations with the
 filtered troughs restored (z = 3.0): the range over the 60 simulations at all mean-flux rungs (lighter), the range
@@ -330,7 +318,7 @@ amplitude of its k-dependent term between 0.5 and 2 times; a fit leaves that amp
 figure's choice, not a prior from the paper. Shaded: below 7.85e-4 s/km, the lowest mode of their 8000 km/s box, where
 the template is evaluated by extrapolation. This figure holds no emulator prediction: the emulator predicts the
 filtered class spectra and was not tested with the troughs restored
-([`docs/rogers_comparison.md`](docs/rogers_comparison.md)).
+([`docs/rogers_comparison.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/rogers_comparison.md)).
 
 ---
 
@@ -346,7 +334,7 @@ Not in this release:
 
 - **No fit to measured data is supported:** the example fits a simulated mock; any fit to a measurement is the
   user's, with the data likelihood as documented. The research fits (Stages 3 and 4 of
-  [`docs/pipeline.md`](docs/pipeline.md); [`tests/DEFERRED.md`](tests/DEFERRED.md)) are not part of the release.
+  [`docs/pipeline.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/pipeline.md); [`tests/DEFERRED.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/tests/DEFERRED.md)) are not part of the release.
 - **No HCD fitting, and no model of how the HCD content changes with redshift.** `add_hcd` evaluates any physical
   amplitudes, one per class per redshift, and fits nothing; the incidence law and its priors are research code.
 - **No prediction between snapshot redshifts.** Predictions exist at z = 2.0, 2.2, ..., 5.4 only; an LF+MF prediction
@@ -359,13 +347,19 @@ Not in this release:
   simulation beside it.
 - **No bandpower model.** A prediction is a per-class spectrum at points in k: no metal lines, no
   spectrograph-resolution correction and no bin window. `hcd_analysis.likelihood` brings it to a data set's bins by
-  linear interpolation and an optional factor ([`docs/likelihood.md`](docs/likelihood.md)).
+  linear interpolation and an optional factor ([`docs/likelihood.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/likelihood.md)).
 - **No calibrated emulator error.** `member_std` is the spread over ensemble members that differ only in their random
   seed; it is not an error bar and not a covariance. With the model release, each class spectrum carries a held-out
   prediction residual (`P_class_validation_rms_log`: the rms of ln(prediction / truth) over simulations the model
   was made without). It is an empirical validation diagnostic from five or six simulations, not a calibrated
   predictive uncertainty, and the likelihood adds no emulator term to the data covariance.
-- **No trained model, catalogue or derived product of this project is public yet** (see
+- **The CDDF is poorly known at the highest column densities.** In its four bins from 10^22.2 cm^-2 up, the
+  held-out error of the CDDF (`pred.cddf_err`, a number on the logarithm) has a median of 0.48 over the LF+MF
+  redshifts and reaches 1.35: the range `pred.cddf_lower` to `pred.cddf_upper` is the value times 0.62 to the
+  value times 1.61 in the median, and the value times 0.26 to the value times 3.9 at the largest. Below those
+  bins the median is 0.03.
+- **No catalogue or derived product of this project is public.** The trained LF+MF model is; the absorber
+  catalogues, the training cache and the research checkpoints are not (see
   [Models and data](#models-and-data)).
 
 ---
@@ -381,19 +375,21 @@ from the authors of Bird et al. 2023, JCAP 2023 (10) 037
 repository, and their release is planned but not yet available.
 <!-- docs:data:end -->
 
-**Trained models.** They come in the companion package `hcd-priya-models` (data only, MIT licence), which
-`hcd-priya` requires. `hp.load_published()` finds the model in the installed package and loads it only against
+**Trained models.** They come in the companion package `hcd-priya-models`, which `hcd-priya` requires: a data
+package whose model files are under the Creative Commons Attribution 4.0 licence (CC BY 4.0) and whose few lines of
+Python are under the MIT licence. `hp.load_published()` finds the model in the installed package and loads it only against
 the sha256 that `hcd-priya` itself lists for that model version (`hcd_analysis/published_models.py`): for a
 published model the digest comes from the code package, never from the model package, so changed model files are
 refused, and so is a model version this version of the code does not list. That list holds the model release that
-`pyproject.toml` pins, the LF+MF model to be published with this version of the code; it is not published yet.
+`pyproject.toml` pins: the LF+MF model published with this version of the code. Its files (the release archive,
+the reference predictions and the example download) are on the [GitHub release of this version](https://github.com/jibanCat/hcd_priya/releases/tag/v1.0.0).
 `hp.load_release(release_dir, sha256)` loads a release whose files you hold yourself. To check a model from a fresh
 install, run `python -I -m hcd_analysis.check_release --published`, or with `RELEASE_DIR SHA256` for a release
 directory (`-I` keeps a clone in the current directory out of the import path, so the installation is what is
 tested); add `--reference FILE` to compare the numbers with the reference predictions published beside the release
 (without it the last line reads `PASSED (no reference compared)`).
 
-The details are in [`docs/models_and_data.md`](docs/models_and_data.md): what is and is not distributed, the release
+The details are in [`docs/models_and_data.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/models_and_data.md): what is and is not distributed, the release
 format (HDF5 + JSON, no pickle), the LF+MF correction, and the environment variables of the observed P1D files that
 the research code reads.
 
@@ -401,29 +397,33 @@ the research code reads.
 
 ## Where to go next
 
-- To report an issue, ask for help or contribute: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- To report an issue, ask for help or contribute: [`CONTRIBUTING.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/CONTRIBUTING.md).
 - The API reference of the predictor and the loaders is on the documentation site, built from
-  [`docs/api.md`](docs/api.md); a step-by-step guide to production and research bundles with executable examples
-  is [`docs/tutorials/production_and_research_bundles.md`](docs/tutorials/production_and_research_bundles.md).
+  [`docs/api.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/api.md); a step-by-step guide to production and research bundles with executable examples
+  is [`docs/tutorials/production_and_research_bundles.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/tutorials/production_and_research_bundles.md).
 - The research pipeline (catalogue construction, and the four stages from the simulation P1D to inference, a
-  historical record) is described in [`docs/pipeline.md`](docs/pipeline.md).
+  historical record) is described in [`docs/pipeline.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/pipeline.md).
 - The emulator deep-dive covers the architecture, the τ₀ cache, the training
   recipe, the forward model, the input contract and the conventions:
-  [`hcd_analysis/emulator/README.md`](hcd_analysis/emulator/README.md).
-- The tutorials are five short notebooks that introduce the per-(sim, snap) HCD
-  data products from the ground up, with a recommended reading order:
-  [`notebooks/tutorials/README.md`](notebooks/tutorials/README.md).
+  [`hcd_analysis/emulator/README.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/hcd_analysis/emulator/README.md).
+- Five short notebooks introduce the per-(sim, snap) HCD data products of the catalogue pipeline from the ground
+  up, for readers who hold the simulation outputs. They need the raw spectra and the pipeline's outputs, which
+  are not distributed, and they do not use the emulator:
+  [`notebooks/tutorials/README.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/notebooks/tutorials/README.md).
 - The science walkthrough and the record of bugs found on the catalog/P1D side
-  are in [`docs/analysis.md`](docs/analysis.md),
-  [`docs/bugs_found.md`](docs/bugs_found.md),
-  [`docs/data_layout.md`](docs/data_layout.md) and
-  [`docs/p1d_definition.md`](docs/p1d_definition.md).
+  are in [`docs/analysis.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/analysis.md),
+  [`docs/bugs_found.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/bugs_found.md),
+  [`docs/data_layout.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/data_layout.md) and
+  [`docs/p1d_definition.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/p1d_definition.md).
 - The public validation summaries, all on simulations or mocks: the held-out errors of dN/dX and the CDDF that the
-  model carries (`pred.dndx_err`, `pred.cddf_err`); the emulator-covariance check on the example's mock and the
-  interpolation checks ([`docs/likelihood.md`](docs/likelihood.md)); the comparison with the template of Rogers et
-  al. (2018) ([`docs/rogers_comparison.md`](docs/rogers_comparison.md)). The full validation of the class spectra
-  (held-out LOSO error, coverage and the Fisher checks) is not public, and no result from real data is in this
-  release; the closure gates belong to the research path and are not part of it.
+  model carries (`pred.dndx_err`, `pred.cddf_err`); the held-out prediction residual of the class spectra that
+  the model carries (`pred.P_class_validation_rms_log`, with every residual vector in the model release and three
+  figures of it in [`docs/model_figures.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/model_figures.md)); the emulator-covariance check on the
+  example's mock and the interpolation checks ([`docs/likelihood.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/likelihood.md)); the comparison with
+  the template of Rogers et al. (2018) ([`docs/rogers_comparison.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/rogers_comparison.md)). That residual
+  rests on six (LF) and five (LF+MF) held-out simulations; the leave-one-simulation-out validation of the class
+  spectra over all training simulations, the coverage tests and the Fisher checks are not public. No result from
+  real data is in this release; the closure gates belong to the research path and are not part of it.
 
 ---
 
@@ -436,13 +436,13 @@ JAX_PLATFORMS=cpu python -m pytest -q tests/test_cli_config.py
 ```
 
 Many tests need real assets that are not in this repository (the training cache, trained emulator members,
-observational data, raw simulation outputs). [`tests/ci_tiers.toml`](tests/ci_tiers.toml) assigns every test
+observational data, raw simulation outputs). [`tests/ci_tiers.toml`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/tests/ci_tiers.toml) assigns every test
 file to a tier and a level (pr, nightly or release) and says why a file or test is not run in continuous
-integration. The workflow [`.github/workflows/tests.yml`](.github/workflows/tests.yml) builds the wheel and the
+integration. The workflow [`.github/workflows/tests.yml`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/.github/workflows/tests.yml) builds the wheel and the
 source archive, checks their contents against the commit, installs the wheel into a fresh environment and runs the
-"wheel" and "source" tiers at the pr level with [`tools/ci/run_test_tier.py`](tools/ci/run_test_tier.py), which
+"wheel" and "source" tiers at the pr level with [`tools/ci/run_test_tier.py`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/tools/ci/run_test_tier.py), which
 reports every skipped, deferred or deselected test as not run, never as passed; the nightly level runs in
-[`.github/workflows/nightly.yml`](.github/workflows/nightly.yml) ([`docs/compatibility.md`](docs/compatibility.md)
+[`.github/workflows/nightly.yml`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/.github/workflows/nightly.yml) ([`docs/compatibility.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/compatibility.md)
 says what runs where). The same runner works from a clone:
 
 ```bash

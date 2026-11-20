@@ -8,9 +8,8 @@ model that holds an incidence record; their measured points and the 60 design po
 repository. The scripts save their figures to files under the matplotlib backend of your session, which they do not
 choose; without a display, set `MPLBACKEND=Agg`.
 
-**What the model figures are drawn from.** No model is published yet. The two model figures below were drawn from the
-candidate LF+MF release (staged, not yet public) with the multi-fidelity correction of the incidence built from
-five high-resolution simulations. They will be redrawn from the published model.
+**What the model figures are drawn from.** The model release of this version (`hp.load_published()`), whose
+multi-fidelity correction of the incidence is built from five high-resolution simulations.
 
 **The parameters of every model curve,** written out in `scripts/figures/figures_common.py`:
 
@@ -170,7 +169,9 @@ python scripts/figures/fig_dndx_vs_ho21.py --release RELEASE_DIR SHA256
   any redshift.
 - **Not shown and not tested here.** The held-out error of the model's CDDF is not drawn in this figure (with 29
   bins and five held-out simulations per bin it would hide the comparison); a prediction carries its range per bin as
-  `pred.cddf_lower` and `pred.cddf_upper`. The measurement's tables
+  `pred.cddf_lower` and `pred.cddf_upper`. In the four bins from 10^22.2 cm^-2 up that range is wide: `pred.cddf_err`
+  has a median of 0.48 over the LF+MF redshifts there (the value times 0.62 to the value times 1.61) and reaches
+  1.35 (the value times 0.26 to the value times 3.9); below those bins its median is 0.03. The measurement's tables
   start at log10 N_HI = 20.05; below it the points are the three measurements above, at other redshifts. The simulations and the
   survey define and find absorbers differently; that difference was not assessed.
 
@@ -224,15 +225,17 @@ These figures show what `P_class_validation_rms_log` and `P_mix_validation_rms_l
 drawn from the model's own P1D held-out record (`docs/release_format_h5.md`, section "The P1D held-out record"), by
 one script. They show an empirical validation diagnostic, not a calibrated uncertainty: for simulations the model
 was made without, how far the predicted spectrum lies from the simulation. Like the two model figures above, they
-were drawn from the candidate LF+MF release and will be redrawn from the published model.
+are drawn from the model release of this version.
 
-![The held-out prediction residual of the class P1D for the LF model: the rms of ln(prediction / truth) in per cent against the wavenumber, one line per redshift, in five panels (clean, LLS, subDLA, DLA and the mixture). An empirical validation diagnostic, not a calibrated uncertainty](figures/p1d_validation_lf.png)
+![The held-out prediction residual of the class P1D for the LF model: the rms of ln(prediction / truth) against the wavenumber, one line per redshift, in five panels (clean, LLS, subDLA, DLA and the mixture). An empirical validation diagnostic, not a calibrated uncertainty](figures/p1d_validation_lf.png)
 
-![The same for the LF+MF model: the rms of ln(prediction / truth) in per cent against the wavenumber, one line per redshift, in five panels. An empirical validation diagnostic, not a calibrated uncertainty](figures/p1d_validation_lfmf.png)
+![The same for the LF+MF model: the rms of ln(prediction / truth) against the wavenumber, one line per redshift, in five panels. An empirical validation diagnostic, not a calibrated uncertainty](figures/p1d_validation_lfmf.png)
 
 - **What is drawn.** e = the rms of ln(prediction / truth) over the held-out simulations and the 20 mean-flux
-  rungs, as 100 e in per cent, for each class and for the mixture (the class spectra mixed with each held-out
-  simulation's own class fractions), one line per snapshot redshift. The colour, light to dark, is the redshift.
+  rungs, for each class and for the mixture (the class spectra mixed with each held-out
+  simulation's own class fractions), one line per snapshot redshift. e is a number on the natural logarithm and
+  is not a percentage: on a spectrum it is the range from the value times exp(-e) to the value times exp(+e), so
+  e = 0.01 is the value times 0.990 to 1.010, and e = 0.7 is the value times 0.50 to 2.01. The colour, light to dark, is the redshift.
   LF: a fold model against the low-fidelity simulation it was trained without, six simulations. LF+MF: a fold model
   with a multi-fidelity table fitted without the high-resolution run of the same design point, against that run,
   five simulations.
@@ -250,12 +253,12 @@ were drawn from the candidate LF+MF release and will be redrawn from the publish
 - **The side files** (`p1d_validation_lf.json`, `p1d_validation_lfmf.json`) hold, per row, the median and the
   largest value in each of these cases, and the record the figure was drawn from.
 
-![The residual ln(prediction / truth) of the mixture in per cent against the wavenumber, one line per held-out simulation, at redshifts 2.2, 3, 4 and 5.4, for the LF model (top) and the LF+MF model (bottom). An empirical validation diagnostic, not a calibrated uncertainty](figures/p1d_validation_by_simulation.png)
+![The residual ln(prediction / truth) of the mixture against the wavenumber, one line per held-out simulation, at redshifts 2.2, 3, 4 and 5.4, for the LF model (top) and the LF+MF model (bottom). An empirical validation diagnostic, not a calibrated uncertainty](figures/p1d_validation_by_simulation.png)
 
-- **What is drawn.** The residual itself, d = ln(prediction / truth) of the mixture, with its sign, as 100 d in per
-  cent, one line per held-out simulation, at the mean-flux rung nearest the mean flux of Kim et al. (2007). These
-  are the vectors of the record's evidence file, which ships with the model. The vertical axis is linear within 5
-  per cent and logarithmic beyond.
+- **What is drawn.** The residual itself, d = ln(prediction / truth) of the mixture, with its sign, one line per
+  held-out simulation, at the mean-flux rung nearest the mean flux of Kim et al. (2007). These are the vectors of
+  the record's evidence file, which ships with the model. The vertical axis is linear within 0.05 and logarithmic
+  beyond; d = -1 means that the prediction is the truth times exp(-1) = 0.37.
 - **Two simulations are drawn in a colour.** Orange, `ns0.914Ap1.32e-09`: the prediction lies above the simulation
   at the largest scales, more so at higher redshift. Blue, `ns0.979Ap1.78e-09`: at z = 5.4 its LF line leaves the
   others by far; this is the simulation with the incomplete source file, and the one the dotted line above leaves

@@ -2,7 +2,7 @@
 
 All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 
-## 1.0.0 (RELEASE_DATE)
+## 1.0.0 (2026-11-19)
 
 ### Fixed
 - The absorber catalogue no longer lists a system that straddles the box edge twice
@@ -48,12 +48,12 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   clean-lineage bundle, with free HCD amplitudes and no informative HCD priors.
 - **Production and research bundles kept apart.** A bundle trained without some simulations (a validation fold) can
   only be loaded through the explicit research path.
-- **The trained models come in a companion package, `hcd-priya-models`** (`model_package/`; data only, MIT
-  licence), which `hcd-priya` now requires. **`load_published`** (`hcd_analysis.predictor`) loads a model by name
+- **The trained models come in a companion package, `hcd-priya-models`** (`model_package/`; a data package: the
+  model files under CC BY 4.0, its few lines of Python under the MIT licence), which `hcd-priya` now requires. **`load_published`** (`hcd_analysis.predictor`) loads a model by name
   from the installed model package, only against the sha256 listed in `hcd_analysis/published_models.py`.
   With no argument it loads the LF+MF model; a name is compared without case and punctuation. The examples write
   the nine parameters out; `example_params` gives the midpoint of the training range of each parameter and prints
-  that statement and the values when it is called. The list holds the LF+MF model release to be published with this
+  that statement and the values when it is called. The list holds the LF+MF model release published with this
   version, and `pyproject.toml` pins `hcd-priya-models` to exactly its version; tests and CI use a model package
   built with a synthetic bundle, whose version is the pinned one with the label `+synthetic`.
 - **Three figures with their scripts and data** ([`docs/model_figures.md`](docs/model_figures.md)): the model's
@@ -78,7 +78,7 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
   fixed HR/LF ratio of dN/dX per HCD class and redshift, built by the functions that `multifidelity.py` has held
   since June 2026 and by the new `scripts/build_incidence_mf.py`. With it, an LF+MF prediction's `dndx` is
   multiplied by that ratio and `w_c` follows through the shipped map (flag `incidence_mf_applied`). A release
-  without that part loads and predicts as before. No such record is released yet.
+  without that part loads and predicts as before. The model release of this version carries one.
 - **The column-density distribution as an output.** With an incidence record a prediction carries `cddf` and
   `log_nhi`: the CDDF at the record's bin centres, the linear mean over the ensemble members, and under LF+MF that
   mean times the record's HR/LF ratio per bin. A bin is NaN, never a number, where no HR/LF simulation pair has
@@ -109,7 +109,8 @@ All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 - **The example download.** `examples/mock_recovery.py --download DIR` (or the environment variable
   `HCD_PRIYA_EXAMPLE_DOWNLOAD`) reads the mock, a fold model trained without the mock's simulation, its two records
   and a stored reference from one directory, each item against the sha256 written in the script, and draws the
-  chain of a run over the stored reference. The download is NOT published yet; `docs/likelihood.md` lists its items
+  chain of a run over the stored reference. The download is published with the model release, as a file of the
+  GitHub release of this version; `docs/likelihood.md` lists its items
   and their sha256.
 - **A research (fold) model can take an incidence record.** `load_research_bundle` accepts `incidence_dir` and
   `incidence_record_sha256`. The record is refused unless its table was built without the simulations the model
