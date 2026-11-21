@@ -945,3 +945,32 @@ def test_the_registered_run_refuses_a_preflight_that_did_not_pass_or_is_too_shor
         with pytest.raises(SystemExit, match=word):
             script.run(tmp_path / "never", folder)
         assert not (tmp_path / "never").exists()
+
+
+# ------------------------------------------------------------------------------------------ the older notebooks
+LEGACY = ROOT / "notebooks" / "tutorials"
+LEGACY_BANNER = (
+    "> Legacy internal research workflows. These notebooks need PRIYA simulation outputs that are not distributed. "
+    "They are not supported public tutorials. The public tutorial is `notebooks/tutorial/`."
+)
+
+
+def test_the_five_legacy_notebooks_and_their_readme_carry_the_banner():
+    notebooks = sorted(LEGACY.glob("*.ipynb"))
+    assert [p.name[:2] for p in notebooks] == ["00", "01", "02", "03", "04"]
+    for path in notebooks:
+        first = json.loads(path.read_text(encoding="utf-8"))["cells"][0]
+        assert first["cell_type"] == "markdown" and first["id"] == "legacy-banner", path.name
+        assert "".join(first["source"]) == LEGACY_BANNER, path.name
+    readme = (LEGACY / "README.md").read_text(encoding="utf-8")
+    assert readme.startswith(
+        LEGACY_BANNER + "\n\n# "
+    ), "the README of the older notebooks does not begin with the banner"
+    # the script that writes the five notebooks puts the same cell first, so a rebuild keeps it
+    builder_text = (LEGACY / "_build_notebooks.py").read_text(encoding="utf-8")
+    assert 'new_markdown_cell(LEGACY_BANNER, id="legacy-banner")] + cells' in builder_text
+    scope = {}
+    start = builder_text.index("LEGACY_BANNER = (")
+    exec(builder_text[start : builder_text.index(")\n", start) + 2], scope)
+    assert scope["LEGACY_BANNER"] == LEGACY_BANNER
+    assert (TUTORIAL / "hcd_priya_tutorial.ipynb").is_file()  # what the banner points to exists
