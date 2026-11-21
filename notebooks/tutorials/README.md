@@ -1,3 +1,5 @@
+> Legacy internal research workflows. These notebooks need PRIYA simulation outputs that are not distributed. They are not supported public tutorials. The public tutorial is `notebooks/tutorial/`.
+
 # HCD tutorials
 
 Five short notebooks that walk a new student through the per-(sim, snap)

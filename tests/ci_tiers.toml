@@ -192,6 +192,7 @@ release = "only with the real assets, before a release (the assets job); listed 
 "tests/test_tau0_rescale.py" = { tier = "wheel", level = "nightly" }
 "tests/test_tau_threshold_sensitivity.py" = { tier = "source", level = "nightly" }
 "tests/test_train_release_meta.py" = { tier = "source", level = "nightly" }
+"tests/test_tutorial_notebook.py" = { tier = "source", level = "pr" }
 "tests/test_tutorial_production_research.py" = { tier = "source", level = "pr" }
 "tests/test_xclass_cemu.py" = { tier = "wheel", level = "nightly" }
 "tests/test_zflat_alpha_guard.py" = { tier = "wheel", level = "nightly" }
