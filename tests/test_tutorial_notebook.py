@@ -104,7 +104,7 @@ def test_every_code_cell_parses():
 
 def test_no_private_attribute_no_private_path_no_em_dash():
     texts = {f"cell {cell_id}": source for _, cell_id, source in _builder().CELLS}
-    for path in (BUILDER, MANIFEST, TUTORIAL / "README.md"):
+    for path in (BUILDER, MANIFEST, TUTORIAL / "README.md", TUTORIAL / "run_mock_chain.py"):
         texts[path.name] = path.read_text(encoding="utf-8")
     for name, text in texts.items():
         assert "—" not in text, f"{name} holds an em-dash"
@@ -714,3 +714,234 @@ def test_levels_enclose_68_and_95_per_cent_of_a_gaussian():
     assert np.allclose(
         ns["levels_68_95"](weighted), (2.5 * l68, 2.5 * l95)
     )  # the levels scale with the histogram
+
+
+# ------------------------------------------------------------------------------------------ the chain script
+def _chain_script():
+    spec = importlib.util.spec_from_file_location("run_mock_chain", TUTORIAL / "run_mock_chain.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _synthetic_posterior_namespace():
+    """The notebook's sampler, diagnostics and chain-file cells with a made-up log posterior of four parameters: a
+    Gaussian inside a box, a wall where it 'refuses' as the predictor does, and a strip where it warns as the
+    predictor does at the edge of the multi-fidelity tables."""
+    import warnings
+
+    import numpy as np
+
+    import hcd_analysis.predictor as hp
+
+    ns = _namespace(
+        "helpers-posterior", "helpers-sampler", "helpers-diagnostics", "helpers-chain-files"
+    )
+    centre = np.array([0.0, 1.0, 5.0, 1.0])
+    width = np.array([1.0, 0.5, 2.0, 0.6])
+    ns["PRIOR"] = {
+        "ns": (-6.0, 6.0),
+        "Ap": (-2.0, 4.0),
+        "tau0_amp": (-7.0, 17.0),
+        "r_LLS": (0.0, 3.0),
+    }
+    ns["X_TRUTH"] = centre.copy()
+
+    def log_posterior(x):
+        x = np.asarray(x, dtype=float)
+        for value, name in zip(x, ns["FREE"]):
+            low, high = ns["PRIOR"][name]
+            if not (low <= value <= high):
+                return -np.inf
+        if x[3] > 2.2:  # the wall
+            entry = ns["REFUSALS"].setdefault(
+                "PredictorInputError", [0, "the fractions sum to more than one"]
+            )
+            entry[0] += 1
+            return -np.inf
+        if x[2] > 8.0:  # the strip
+            warnings.warn(hp.MeanFluxRangeWarning("outside the tables"))
+        return -0.5 * float(np.sum(((x - centre) / width) ** 2))
+
+    ns["log_posterior"] = log_posterior
+    return ns, np.diag(width**2)
+
+
+def test_the_chain_script_has_no_option_that_changes_a_setting(capsys):
+    script = _chain_script()
+    assert (script.N_CHAINS, script.BURN_IN, script.MAX_STEPS, script.MIN_STEPS) == (
+        4,
+        1000,
+        10000,
+        5000,
+    )
+    assert (script.START_SEED, script.SAMPLER_SEED, script.START_SCALE) == (20261120, 20261130, 9.0)
+    assert (script.RHAT_MAX, script.ESS_BULK_MIN, script.ESS_TAIL_MIN, script.ACCEPTANCE_RANGE) == (
+        1.01,
+        1000.0,
+        1000.0,
+        (0.15, 0.50),
+    )
+    assert (
+        script.PRIOR_WORDS
+        == "uniform within the stated ranges, restricted to physically allowed class fractions"
+    )
+    with pytest.raises(SystemExit):
+        script.main(["--help"])
+    options = set(re.findall(r"(?<![\w-])--[a-z][a-z-]*", capsys.readouterr().out))
+    assert options == {"--help", "--preflight", "--run", "--from-preflight"}
+    for bad in (
+        ["--run", "x"],
+        ["--preflight", "a", "--run", "b"],
+        ["--run", "x", "--from-preflight", "p", "--steps", "9"],
+        [],
+    ):
+        with pytest.raises(SystemExit):
+            script.main(bad)
+        capsys.readouterr()
+
+
+def test_the_verdict_holds_every_criterion_and_names_what_fails():
+    script = _chain_script()
+    names = ("ns", "Ap", "tau0_amp", "r_LLS")
+    good = {
+        "rhat": dict.fromkeys(names, 1.01),
+        "ess_bulk": dict.fromkeys(names, 1000.0),
+        "ess_tail": dict.fromkeys(names, 1000.0),
+    }
+    assert script.verdict_of(good, [0.15, 0.3, 0.3, 0.50]) == ("PASSED", [])
+    for key, value, word in (
+        ("rhat", 1.0101, "split R-hat of Ap"),
+        ("ess_bulk", 999.0, "ess_bulk of Ap"),
+        ("ess_tail", 999.0, "ess_tail of Ap"),
+        ("rhat", float("nan"), "split R-hat of Ap"),
+    ):
+        bad = {k: dict(v) for k, v in good.items()}
+        bad[key]["Ap"] = value
+        verdict, failed = script.verdict_of(bad, [0.3] * 4)
+        assert verdict == "FAILED" and len(failed) == 1 and word in failed[0], (key, value)
+    for acceptance in (0.149, 0.501, float("nan")):
+        verdict, failed = script.verdict_of(good, [0.3, acceptance, 0.3, 0.3])
+        assert verdict == "FAILED" and "chain 2" in failed[0]
+    verdict, failed = script.verdict_of(
+        {k: dict.fromkeys(names, 0.0 if k != "rhat" else 2.0) for k in good}, [0.0] * 4
+    )
+    assert (
+        verdict == "FAILED" and len(failed) == 16
+    )  # four parameters times three statistics, and four chains
+
+
+def test_the_registered_run_writes_its_files_once_and_records_the_two_edges(tmp_path):
+    import numpy as np
+
+    script = _chain_script()
+    ns, sigma = _synthetic_posterior_namespace()
+    n_steps = 1400
+    chains, logps, records, proposal, edges = script.sample(ns, sigma, n_steps, say=lambda *a: None)
+    assert (
+        chains.shape == (4, n_steps, 4)
+        and logps.shape == (4, n_steps)
+        and edges.shape == (4, n_steps)
+    )
+    assert np.allclose(proposal, (2.38**2 / 4) * sigma)
+    assert [r["start_seed"] for r in records] == [20261120 + i for i in range(4)]
+    assert [r["sampler_seed"] for r in records] == [20261130 + i for i in range(4)]
+    # each chain has its own two generators, the registered ones: its start is the first draw of
+    # default_rng(20261120 + i) around the truth with covariance 9 SIGMA that lies inside the prior, and its steps
+    # are those of the notebook's sampler with default_rng(20261130 + i)
+    lower = np.linalg.cholesky(9.0 * sigma)
+    for i, r in enumerate(records):
+        rng = np.random.default_rng(20261120 + i)
+        for _ in range(r["start_redraws"] + 1):
+            start = ns["X_TRUTH"] + lower @ rng.standard_normal(4)
+        assert np.array_equal(r["start"], start) and np.isfinite(ns["log_posterior"](start))
+        direct, _, _ = ns["metropolis"](
+            ns["log_posterior"], start, proposal, 60, np.random.default_rng(20261130 + i)
+        )
+        assert np.array_equal(direct, chains[i, :60])
+    assert len({tuple(r["start"]) for r in records}) == 4
+    again = script.sample(ns, sigma, 50, say=lambda *a: None)
+    assert np.array_equal(again[0], chains[:, :50])  # the seeds fix the run
+    for i, r in enumerate(records):
+        assert r["proposals"] == n_steps and r["steps"] == n_steps
+        assert np.all(chains[i, :, 3] <= 2.2) and r["largest_r_LLS"] == chains[i, :, 3].max()
+        assert (
+            r["proposals_refused_class_fractions_above_one"] > 0
+        )  # the wall was met, and never crossed
+        assert r["proposals_at_the_mean_flux_edge"] > 0
+        assert (
+            r["steps_at_the_mean_flux_edge"]
+            == int(np.sum(chains[i, :, 2] > 8.0))
+            == int(edges[i].sum())
+        )
+        assert 0.0 < r["acceptance"] < 1.0
+
+    out = script.new_folder(tmp_path / "run")
+    extra = {
+        "edge_steps": edges,
+        "smallest_r_max_at_the_truth": 2.2,
+        "identities": {"truth": {"x": 1.0}},
+    }
+    doc = script.finish_run(ns, out, chains, logps, records, proposal, sigma, n_steps, extra)
+    names = sorted(p.name for p in out.iterdir())
+    assert names == [f"mock_chain_4p.{i}.txt" for i in (1, 2, 3, 4)] + [
+        "mock_chain_4p.paramnames",
+        "mock_chain_4p.provenance.json",
+        "mock_chain_4p.ranges",
+    ]
+    stored = json.loads((out / "mock_chain_4p.provenance.json").read_text())
+    assert stored == json.loads(json.dumps(doc)) and stored["truth"] == {"x": 1.0}
+    assert stored["files_sha256"] == {
+        n: _sha256((out / n).read_bytes()) for n in names if "provenance" not in n
+    }
+    assert stored["steps_per_chain"] == n_steps and stored["kept_steps_per_chain"] == n_steps - 1000
+    # the diagnostics are those of the files as read back, after the burn-in; the verdict follows from them alone
+    back = ns["expand_chains"](*ns["read_chains"](out / "mock_chain_4p"))[:, 1000:]
+    diag = script.diagnostics(ns, back)
+    assert stored["diagnostics_after_burn_in"] == json.loads(json.dumps(diag))
+    assert (stored["verdict"], stored["criteria_not_met"]) == tuple(
+        script.verdict_of(diag, stored["acceptance"])
+    )
+    assert (
+        stored["verdict"] == "FAILED" and stored["criteria_not_met"]
+    )  # 400 kept steps cannot reach an ESS of 1000
+    # the two edges, each a block of its own
+    boundary, edge = stored["class_fraction_boundary"], stored["mean_flux_edge"]
+    assert boundary["proposals"] == 4 * n_steps
+    assert boundary["proposals_refused"] == sum(
+        r["proposals_refused_class_fractions_above_one"] for r in records
+    )
+    assert boundary["largest_r_LLS_kept"] == pytest.approx(back[:, :, 3].max(), rel=1e-12)
+    assert edge["kept_steps_at_the_edge"] == int(edges[:, 1000:].sum()) > 0
+    kept = chains[:, 1000:].reshape(-1, 4)
+    without = kept[~edges[:, 1000:].reshape(-1)]
+    assert edge["summaries_with_all_kept_steps"]["tau0_amp"]["mean"] == pytest.approx(
+        kept[:, 2].mean(), rel=1e-9
+    )
+    assert edge["summaries_without_the_steps_at_the_edge"]["tau0_amp"]["mean"] == pytest.approx(
+        without[:, 2].mean(), rel=1e-9
+    )
+    assert edge["largest_shift_of_a_mean_in_units_of_its_sd"] > 0
+    # an output folder is never reused, and the files in it are never written twice
+    before = {n: (out / n).read_bytes() for n in names}
+    with pytest.raises(SystemExit):
+        script.new_folder(out)
+    with pytest.raises(FileExistsError):
+        script.finish_run(ns, out, chains, logps, records, proposal, sigma, n_steps, extra)
+    assert {n: (out / n).read_bytes() for n in names} == before
+
+
+def test_the_registered_run_refuses_a_preflight_that_did_not_pass_or_is_too_short(tmp_path):
+    script = _chain_script()
+    for verdict, n_steps, word in (
+        ("PREFLIGHT FAILED: the equality or the mock", 9000, "did not pass"),
+        ("PREFLIGHT DONE: no chain was run", 4999, "below 5000"),
+    ):
+        folder = tmp_path / word.replace(" ", "_")
+        folder.mkdir()
+        (folder / "preflight.json").write_text(
+            json.dumps({"verdict": verdict, "timing": {"n_steps": n_steps}})
+        )
+        with pytest.raises(SystemExit, match=word):
+            script.run(tmp_path / "never", folder)
+        assert not (tmp_path / "never").exists()
