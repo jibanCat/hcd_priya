@@ -4,8 +4,7 @@ Every cell of the notebook is held here as source, in order, in ``CELLS``: a lis
 with kind ``"markdown"`` or ``"code"``. ``build(path)`` writes them as a notebook without outputs; the committed
 notebook is that file, executed. The helper functions the notebook needs are cells of the notebook, so the
 notebook imports nothing beyond the installed packages; ``helper_source(cell_id)`` returns the source of one code
-cell, which is how the tests (``tests/test_tutorial_notebook.py``) and ``run_mock_chain.py`` run the same code a
-reader runs.
+cell, which is how the tests (``tests/test_tutorial_notebook.py``) run the same code a reader runs.
 
 Run::
 
@@ -94,7 +93,7 @@ def build(out_path=NOTEBOOK) -> pathlib.Path:
 text(
     "title",
     r"""
-# From HCD absorbers to a mock inference: a tutorial for `hcd_priya`
+# From HCD absorbers to the public likelihood: a tutorial for `hcd_priya`
 
 **PROVISIONAL (PI to refine).** This notebook has three parts.
 
@@ -102,12 +101,12 @@ text(
    sightlines: Lyman limit systems (LLS), sub-damped and damped Lyman-alpha absorbers (subDLAs, DLAs).
 2. **The emulator.** What the published model `hcd_priya` 1.0.0 returns: the flux power spectrum (P1D) of four
    classes of sightline, the incidence of the absorbers, and a mixture of the classes.
-3. **Mock inference.** A Gaussian likelihood on a mock made by the model itself, with four free parameters. It is
-   a self-consistency demonstration: not an independent validation, not a result from data.
+3. **The public likelihood and the mock-recovery example.** The package's Gaussian likelihood on the mock of the
+   repository's example, at the mock's truth, and the stored result of that example redrawn. Nothing is fitted.
 
 **To run it:** `pip install "hcd-priya[tutorials]"` in Python 3.11 or later, then open this file with Jupyter. The
-trained model comes with the package. The few stored files the notebook reads are found in a clone of the
-repository or downloaded once, each checked against its sha256 (next cell).
+trained model comes with the package. The few stored files the notebook reads, and the released scripts it runs,
+are found in a clone of the repository or downloaded once, each checked against its sha256 (next cell).
 """,
 )
 
@@ -398,44 +397,12 @@ print(f"{'tau0_amp':11s} {TAU0_AMP_RANGE[0]:13.4g} {TAU0_AMP_RANGE[1]:10.4g} {1.
 """,
 )
 
-code(
-    "helpers-incidence",
-    r"""
-import numpy as np
-
-
-def cumulative_incidence(cddf, log_nhi, threshold=17.5):
-    # dN/dX of every absorber with N_HI >= 10^threshold, from a column density distribution f(N_HI) at the bin
-    # centres log_nhi: the sum of f times the width in N_HI of each bin's part above the threshold. The bin that
-    # holds the threshold counts from it to its upper edge, with f taken constant within the bin; a bin without a
-    # value (NaN) is left out. On the last axis.
-    cddf = np.asarray(cddf, dtype=float)
-    log_nhi = np.asarray(log_nhi, dtype=float)
-    step = np.diff(log_nhi)
-    if not np.allclose(step, step[0], rtol=0.0, atol=1e-9):
-        raise ValueError("the bin centres of the CDDF are not evenly spaced")
-    low = np.maximum(log_nhi - step[0] / 2.0, threshold)
-    high = log_nhi + step[0] / 2.0
-    widths = np.where(high > low, 10.0**high - 10.0**low, 0.0)
-    counted = (widths > 0) & np.isfinite(cddf)
-    total = np.where(counted, cddf * widths, 0.0).sum(axis=-1)
-    return np.where(counted.any(axis=-1), total, np.nan)
-
-
-def absorption_distance(z1, z2, omega_m):
-    # Delta X from z1 to z2 in a flat cosmology with matter density omega_m:
-    # the integral of (1 + z)^2 / sqrt(omega_m (1 + z)^3 + 1 - omega_m) dz (trapezoid rule on 2001 points)
-    z = np.linspace(z1, z2, 2001)
-    y = (1.0 + z) ** 2 / np.sqrt(omega_m * (1.0 + z) ** 3 + 1.0 - omega_m)
-    return float(np.sum(0.5 * (y[1:] + y[:-1]) * np.diff(z)))
-""",
-)
 
 code(
     "fig3-incidence-response",
     r"""
-# Fig. 3. The predicted incidence of LLS, and of all absorbers above 10^17.5 cm^-2, at z = 3 while one parameter at
-# a time crosses the range it was trained on (five values; the other eight at the midpoint, the mean flux fixed).
+# Fig. 3. The predicted incidence of the LLS class at z = 3 while one parameter at a time crosses the range it was
+# trained on (five values; the other eight at the midpoint, the mean flux fixed).
 Z0 = 3.0
 I_LLS = hp.HCD_CLASSES.index("LLS")
 mid = emu.predict(PARAMS, z=Z0, tau0_amp=1.0, dtau0=0.0)
@@ -445,30 +412,25 @@ response, new_flags = {}, {}
 for name, (low, high) in zip(hp.PARAM_NAMES, hp.PARAM_LIMITS):
     values = np.linspace(low, high, 5)
     rows = [emu.predict(dict(PARAMS, **{name: value}), z=Z0, tau0_amp=1.0, dtau0=0.0) for value in values]
-    lls = np.array([row.dndx[I_LLS] for row in rows]) / mid.dndx[I_LLS]
-    above = np.array([cumulative_incidence(row.cddf, row.log_nhi) for row in rows]) / cumulative_incidence(mid.cddf, mid.log_nhi)
-    response[name] = (values, lls, above)
+    response[name] = (values, np.array([row.dndx[I_LLS] for row in rows]) / mid.dndx[I_LLS])
     new_flags[name] = sorted({f for row in rows for f, value in row.flags.items() if value is True} - mid_flags)
 
 fig, axes = plt.subplots(3, 3, figsize=(13, 9.5), sharey=True)
-for ax, (name, (values, lls, above)) in zip(axes.ravel(), response.items()):
-    ax.plot(values, lls, "o-", color=CLASS_COLOURS["LLS"], label="LLS class, dN/dX")
-    ax.plot(values, above, "s--", color="black", label=r"all absorbers with $N_\mathrm{HI} \geq 10^{17.5}$")
+for ax, (name, (values, lls)) in zip(axes.ravel(), response.items()):
+    ax.plot(values, lls, "o-", color=CLASS_COLOURS["LLS"])
     ax.axhline(1.0, color="grey", lw=0.8)
     ax.set_xlabel(name)
-fig.supylabel("incidence / its value at the midpoint")
-axes[0, 0].legend(fontsize=9)
-fig.suptitle("Fig. 3. Predicted absorber incidence at z = 3 across the trained range of each parameter")
+fig.supylabel("dN/dX of the LLS class / its value at the midpoint")
+fig.suptitle("Fig. 3. Predicted incidence of the LLS class at z = 3 across the trained range of each parameter")
 fig.tight_layout()
 plt.show()
 
-print(f"at the midpoint: dN/dX of the LLS class = {mid.dndx[I_LLS]:.4f}, "
-      f"of all absorbers above 10^17.5 = {float(cumulative_incidence(mid.cddf, mid.log_nhi)):.4f}")
+print(f"at the midpoint: dN/dX of the LLS class = {mid.dndx[I_LLS]:.4f}")
 print("The change of the predicted LLS incidence across the trained range of each parameter, largest first")
 print("(the largest of the five values over the smallest; the value at the low and at the high end over the midpoint):")
 RANKING = sorted(response, key=lambda name: -(response[name][1].max() / response[name][1].min()))
 for name in RANKING:
-    values, lls, above = response[name]
+    values, lls = response[name]
     note = f"   flags set along the way: {', '.join(new_flags[name])}" if new_flags[name] else ""
     print(f"  {name:11s} x {lls.max() / lls.min():.3f}   low end {lls[0]:.3f}, high end {lls[-1]:.3f}{note}")
 """,
@@ -651,79 +613,144 @@ plt.show()
 )
 
 code(
+    "helpers-released",
+    r"""
+# Running a released script of the repository as it is. The scripts and the tables they read are files of the tag
+# v1.0.0, each pinned by its sha256 (ASSETS). They are put at their repository paths under one folder, the cache
+# folder, because a script finds its data three folders above itself; then the script is run with this Python.
+import shutil
+import subprocess
+import sys
+import tarfile
+
+RELEASED_FIGURE_FILES = (
+    "scripts/figures/figures_common.py",
+    "docs/figures/data/SHA256SUMS",
+    "docs/figures/data/priya_lf_design_60.csv",
+    "docs/figures/data/class_ratio_ranges_z3p0_lf60.csv",
+    "docs/figures/data/ho21/cddf_z225.txt",
+    "docs/figures/data/ho21/cddf_z253.txt",
+    "docs/figures/data/ho21/cddf_z34.txt",
+    "docs/figures/data/ho21/dndx_all.txt",
+    "docs/figures/data/lls_incidence/lls_lz_literature.dat",
+    "docs/figures/data/lls_subdla/zafar_2013.txt",
+    "docs/figures/data/lls_subdla/omeara2007_fn_all19p0.dat",
+    "docs/figures/data/lls_subdla/prochaska2010_lls_region.dat",
+)
+OUT = pathlib.Path("tutorial_output")  # the figures the released code writes, beside this notebook
+OUT.mkdir(exist_ok=True)
+
+
+def released_tree(relpaths):
+    # the files named, each with its pinned sha256, at their repository paths under the cache folder
+    root = tutorial_cache()
+    for relpath in relpaths:
+        source, target = tutorial_file(relpath), root / relpath
+        if source != target and not (target.is_file() and sha256_of(target) == ASSETS[relpath]["sha256"]):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            handle, partial = tempfile.mkstemp(dir=target.parent, prefix=target.name + ".", suffix=".part")
+            os.close(handle)
+            shutil.copyfile(source, partial)
+            os.replace(partial, target)
+    return root
+
+
+def run_released_script(script, arguments, needs=RELEASED_FIGURE_FILES):
+    # runs a released script, unchanged, and returns what it printed
+    root = released_tree([script, *needs])
+    done = subprocess.run(
+        [sys.executable, str(root / script), *arguments],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, MPLBACKEND="Agg"),
+    )
+    if done.returncode != 0:
+        raise RuntimeError(f"the released script {script} ended with code {done.returncode}:\n{done.stderr[-2000:]}")
+    return done.stdout
+
+
+def unpack_archive(relpath, top, marker):
+    # A pinned archive of the release, unpacked once into the cache folder. Every entry must be a plain file or
+    # folder under the one folder `top`; anything else is refused and nothing is unpacked. `marker` is a file of the
+    # archive whose presence says that an earlier unpacking was finished.
+    root = tutorial_cache() / top
+    if not (root / marker).is_file():
+        archive_path = tutorial_file(relpath)
+        tutorial_cache().mkdir(parents=True, exist_ok=True)
+        scratch = pathlib.Path(tempfile.mkdtemp(dir=tutorial_cache(), prefix="unpack."))
+        try:
+            with tarfile.open(archive_path) as archive:
+                members = archive.getmembers()
+                for member in members:
+                    inside = pathlib.PurePosixPath(member.name)
+                    plain = member.isfile() or member.isdir()
+                    if inside.is_absolute() or ".." in inside.parts or inside.parts[0] != top or not plain:
+                        raise RuntimeError(f"{relpath} holds an entry that is not a plain file under {top}: {member.name}")
+                safe = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+                archive.extractall(scratch, members=members, **safe)
+            if root.exists():  # an unfinished copy from an earlier run
+                shutil.rmtree(root)
+            os.replace(scratch / top, root)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+    return root
+
+
+def show_script_output(printed):
+    # what a released script printed; its indented detail lines are counted, not shown
+    lines = printed.splitlines()
+    for line in lines:
+        if line.strip() and not line.startswith(" "):
+            print("the script printed:", line)
+    detail = sum(1 for line in lines if line.startswith(" ") and line.strip())
+    if detail:
+        print(f"({detail} indented detail lines of the script are not shown here)")
+""",
+)
+
+
+code(
     "fig7-incidence",
     r"""
-# Fig. 7. The incidence dN/dX the model predicts, against redshift, with published measurements.
-Z_VALIDATED = [z for z in hp.Z_GRID if 2.2 - 1e-9 <= z <= 4.6 + 1e-9]
-inc = emu.predict_many(PARAMS, z=Z_VALIDATED, tau0_amp=1.0, dtau0=0.0)
-inc_above = cumulative_incidence(inc.cddf, inc.log_nhi)
-OMEGA_M = PARAMS["omegamh2"] / PARAMS["hub"] ** 2  # the flat cosmology of the model line
+# Fig. 7. The incidence dN/dX the model predicts, against redshift, with published measurements: drawn by the
+# released script scripts/figures/fig_dndx_vs_ho21.py, unchanged, with the published model.
+show_script_output(run_released_script("scripts/figures/fig_dndx_vs_ho21.py", ["--published", "--out", str(OUT / "dndx_vs_ho21.png")]))
+display(Image(filename=str(OUT / "dndx_vs_ho21.png"), width=900))
 
-# DLAs, Ho, Bird and Garnett (2021): the bin centre in z, dN/dX, the two limits of the 68 per cent interval (and of
-# the 95 per cent interval, not drawn), per unit X of their flat cosmology with Omega_m = 0.279. A measurement per
-# unit X is drawn in the cosmology of the model line: times Delta X(its own) / Delta X(the line's) over its bin.
-ho21 = np.loadtxt(tutorial_file(DATA + "ho21/dndx_all.txt"))
-half_bin = (ho21[0][1] - ho21[0][0]) / 2.0
-ho21_factor = np.array([
-    absorption_distance(z - half_bin, z + half_bin, 0.279) / absorption_distance(z - half_bin, z + half_bin, OMEGA_M)
-    for z in ho21[0]
-])
-
-# Absorbers with tau_912 >= 2 (N_HI >= 10^17.5, counted cumulatively), published as l(z) = dN/dz. The samples drawn
-# are those of the repository's figure docs/figures/dndx_vs_ho21.png: (label, marker, whether the printed plus
-# error is the smaller one and the two are swapped, as that figure does).
-LLS_DRAWN = {
-    "prochaska10_t4": ("Prochaska, O'Meara and Worseck (2010)", "^", True),
-    "omeara13_t5_comb": ("O'Meara et al. (2013) with Ribaudo, Lehner and Howk (2011)", "s", False),
-    "fumagalli13_nc": ("Fumagalli et al. (2013)", "D", False),
-    "crighton19_corr": ("Crighton et al. (2019)", "v", False),
-    "fumagalli20_dr16": ("Fumagalli, Fotopoulou and Thomson (2020)", "o", False),
-}
-lls_points = {source: [] for source in LLS_DRAWN}
-with open(tutorial_file(DATA + "lls_incidence/lls_lz_literature.dat"), encoding="utf-8") as handle:
-    for line in handle:
-        if line.startswith("#") or not line.strip():
-            continue
-        z_lo, z_hi, value, err_lo, err_hi, quantity, _, source = line.rstrip("\n").split("\t")
-        if source not in LLS_DRAWN:
-            continue
-        if quantity != "lz":
-            raise ValueError(f"a row of {source} is not an l(z)")
-        z_lo, z_hi, value, below, above = (float(v) for v in (z_lo, z_hi, value, err_lo, err_hi))
-        if LLS_DRAWN[source][2]:
-            below, above = above, below
-        to_x = (z_hi - z_lo) / absorption_distance(z_lo, z_hi, OMEGA_M)  # l(X) = l(z) Delta z / Delta X
-        lls_points[source].append((0.5 * (z_lo + z_hi), 0.5 * (z_hi - z_lo), to_x * value, to_x * below, to_x * above))
-
-fig, ax = plt.subplots(figsize=(11, 8.5))
+print("At z = 3 at the midpoint, the model's dN/dX with its held-out range (value x exp(-e) to value x exp(+e)):")
 for c, name in enumerate(hp.HCD_CLASSES):
-    ax.plot(Z_VALIDATED, inc.dndx[:, c], color=CLASS_COLOURS[name], lw=2, label=f"model, {name} class")
-    ax.fill_between(Z_VALIDATED, inc.dndx_lower[:, c], inc.dndx_upper[:, c], color=CLASS_COLOURS[name], alpha=0.25, lw=0)
-ax.plot(Z_VALIDATED, inc_above, color="black", lw=2, ls="--", label=r"model, all absorbers with $N_\mathrm{HI} \geq 10^{17.5}$")
-ax.errorbar(ho21[0], ho21_factor * ho21[1], yerr=[ho21_factor * (ho21[1] - ho21[2]), ho21_factor * (ho21[3] - ho21[1])],
-            fmt="o", ms=4, color=CLASS_COLOURS["DLA"], mec="black", mew=0.5, elinewidth=0.8,
-            label="DLAs: Ho, Bird and Garnett (2021)")
-for source, (label, marker, _) in LLS_DRAWN.items():
-    zc, zh, value, below, above = np.array(lls_points[source]).T
-    ax.errorbar(zc, value, xerr=zh, yerr=[below, above], fmt=marker, ms=5, color="black", mfc="white", elinewidth=0.8,
-                label=r"$N_\mathrm{HI} \geq 10^{17.5}$: " + label)
-ax.set_yscale("log")
-ax.set_xlim(1.9, 5.5)
-ax.set_xlabel("redshift z")
-ax.set_ylabel("dN/dX")
-fig.legend(*ax.get_legend_handles_labels(), fontsize=9, ncol=2, loc="lower center")
-ax.set_title("Fig. 7. Predicted incidence at the midpoint parameters (bands: the held-out range of each class line);\n"
-             "open symbols count every absorber above 10^17.5 and belong with the dashed line, not with the LLS class line")
-fig.tight_layout(rect=(0, 0.2, 1, 1))
-plt.show()
+    print(f"  {name:7s} {pred.dndx[c]:.4f}   range {pred.dndx_lower[c]:.4f} to {pred.dndx_upper[c]:.4f}")
+""",
+)
 
-j3 = Z_VALIDATED.index(3.0)
-print("At z = 3, the model's dN/dX with its held-out range (value x exp(-e) to value x exp(+e)):")
-for c, name in enumerate(hp.HCD_CLASSES):
-    print(f"  {name:7s} {inc.dndx[j3, c]:.4f}   range {inc.dndx_lower[j3, c]:.4f} to {inc.dndx_upper[j3, c]:.4f}")
-print(f"  all absorbers above 10^17.5: {inc_above[j3]:.4f}")
-print(f"factors applied to the measurements: Ho, Bird and Garnett (2021) {ho21_factor.min():.4f} to {ho21_factor.max():.4f} "
-      f"(their Omega_m 0.279 to the line's {OMEGA_M:.4f})")
+
+text(
+    "fig7-caption",
+    r"""
+**Fig. 7. PROVISIONAL (PI to refine).** The incidence dN/dX the model predicts for the three classes, and for all
+absorbers above $10^{17.5}$ cm$^{-2}$, against redshift, with published measurements. Drawn by the released script
+`fig_dndx_vs_ho21.py`, unchanged; the full caption is in `docs/model_figures.md` of the repository.
+""",
+)
+
+
+code(
+    "fig7b-cddf",
+    r"""
+# Fig. 7b. The column density distribution the model predicts, with published measurements: drawn by the released
+# script scripts/figures/fig_cddf_vs_ho21.py, unchanged, with the published model.
+show_script_output(run_released_script("scripts/figures/fig_cddf_vs_ho21.py", ["--published", "--out", str(OUT / "cddf_vs_ho21.png")]))
+display(Image(filename=str(OUT / "cddf_vs_ho21.png"), width=900))
+""",
+)
+
+
+text(
+    "fig7b-caption",
+    r"""
+**Fig. 7b. PROVISIONAL (PI to refine).** The column density distribution the model predicts, in three redshift
+bins, with the published measurements of Fig. 2. Drawn by the released script `fig_cddf_vs_ho21.py`, unchanged;
+the full caption is in `docs/model_figures.md` of the repository.
 """,
 )
 
@@ -807,10 +834,12 @@ below it, and between snapshot redshifts, it is refused.
 code(
     "validation-numbers",
     r"""
-e_mix = inc.P_mix_validation_rms_log  # one row per redshift of Z_VALIDATED, one value per wavenumber
+Z_VALIDATED = [z for z in hp.Z_GRID if 2.2 - 1e-9 <= z <= 4.6 + 1e-9]
+validated = emu.predict_many(PARAMS, z=Z_VALIDATED, tau0_amp=1.0, dtau0=0.0)
+e_mix = validated.P_mix_validation_rms_log  # one row per redshift of Z_VALIDATED, one value per wavenumber
 print("The held-out prediction residual e of the mixture, by redshift (the value x exp(-e) to x exp(+e)):")
 for j, z in enumerate(Z_VALIDATED):
-    e, k = e_mix[j], inc.k[j]
+    e, k = e_mix[j], validated.k[j]
     worst = int(np.nanargmax(e))
     print(f"  z = {z:.1f}  median e = {np.nanmedian(e):.3f} (x {np.exp(-np.nanmedian(e)):.3f} to x {np.exp(np.nanmedian(e)):.3f}); "
           f"largest e = {e[worst]:.3f} (x {np.exp(-e[worst]):.3f} to x {np.exp(e[worst]):.3f}) at k = {k[worst]:.2e} s/km")
@@ -849,47 +878,27 @@ are emulated across nine parameters and the mean flux; they are PRIYA-filtered; 
 code(
     "fig8-rogers",
     r"""
-# Fig. 8. Left: the PRIYA training simulations with the filtered troughs restored, against Eq. 6 of Rogers et al.
-# (2018), at z = 3 (the repository's comparison, redrawn for two classes). Right: the response of the emulator's
-# LLS class ratio to n_s, A_p and the mean flux, which the template does not have; and a ranking over all inputs.
+# Fig. 8, left. The PRIYA training simulations with the filtered troughs restored, against Eq. 6 of Rogers et al.
+# (2018), at z = 3: drawn by the released script scripts/figures/fig_class_ratio_vs_rogers18.py, unchanged.
+show_script_output(run_released_script("scripts/figures/fig_class_ratio_vs_rogers18.py", ["--out", str(OUT / "class_ratio_vs_rogers18.png")]))
+display(Image(filename=str(OUT / "class_ratio_vs_rogers18.png"), width=900))
+""",
+)
+
+
+code(
+    "fig8-response",
+    r"""
+# Fig. 8, right. The response of the emulator's LLS class ratio to n_s, A_p and the mean flux, and a ranking over
+# all inputs. The template of Rogers et al. (2018) is hcd_template.class_ratio(k, z): it takes a wavenumber and a
+# redshift, and nothing else.
 from hcd_analysis.hcd_template import class_ratio
 
-
-def read_table(path):
-    # a table with comment lines; the last comment line holds the column names
-    with open(path, encoding="utf-8") as handle:
-        names = [line for line in handle if line.startswith("#")][-1].lstrip("# ").strip().split(",")
-    values = np.loadtxt(path, delimiter=",", comments="#")
-    return {name: values[:, i] for i, name in enumerate(names)}
-
-
-sims = read_table(tutorial_file(DATA + "class_ratio_ranges_z3p0_lf60.csv"))
-k_sims = sims["k_s_per_km"]
-eq6 = class_ratio(k_sims, 3.0)  # by class: "LLS", "Sub-DLA", "Small-DLA", "Large-DLA"
-
-fig, axes = plt.subplots(1, 2, figsize=(15, 6.6))
-ax = axes[0]
-for stem, key in (("LLS", "LLS"), ("subDLA", "Sub-DLA")):
-    wide = (sims[f"R_{stem}_sims60_allrungs_min"], sims[f"R_{stem}_sims60_allrungs_max"])
-    narrow = (sims[f"R_{stem}_sims60_rung1_min"], sims[f"R_{stem}_sims60_rung1_max"])
-    ax.fill_between(k_sims, *wide, color=CLASS_COLOURS[stem], alpha=0.18, lw=0)
-    ax.fill_between(k_sims, *narrow, color=CLASS_COLOURS[stem], alpha=0.45, lw=0,
-                    label=f"{stem}: 60 PRIYA simulations, troughs restored")
-    ax.plot(k_sims, eq6[key], color=CLASS_COLOURS[stem], ls="--", lw=2, label=f"{stem}: Rogers et al. (2018), Eq. 6")
-    inside_wide = (eq6[key] >= wide[0]) & (eq6[key] <= wide[1])
-    inside_narrow = (eq6[key] >= narrow[0]) & (eq6[key] <= narrow[1])
-    print(f"{stem:7s} Eq. 6 lies inside the range of the 60 simulations on {int(inside_narrow.sum())} of {k_sims.size} modes "
-          f"at the mean-flux rung nearest 1, and on {int(inside_wide.sum())} at all mean-flux rungs")
-ax.axvline(2.0 * np.pi / 8000.0, color="grey", lw=0.8, ls=":")
-ax.set_xscale("log")
-ax.set_xlabel("k [s/km]")
-ax.set_ylabel("class spectrum / clean spectrum")
-ax.set_title("troughs restored (lighter band: all mean-flux rungs;\ndotted: below it Eq. 6 is an extrapolation)")
-ax.legend(fontsize=8)
-
-ax = axes[1]
 shown = pred.k < 0.03  # the box modes below 0.03 s/km at the midpoint
 ratio_mid = pred.P_class[1] / pred.P_class[0]
+eq6_lls = class_ratio(pred.k[shown], 3.0)["LLS"]
+print(f"Eq. 6 of Rogers et al. (2018) for the LLS class at z = 3, on these wavenumbers: {eq6_lls.min():.3f} to {eq6_lls.max():.3f};")
+print("it is a function of k and z alone, so across the inputs below it does not change")
 
 
 def lls_ratio_relative(name, value):
@@ -902,6 +911,7 @@ def lls_ratio_relative(name, value):
 
 INPUTS = list(zip(hp.PARAM_NAMES, hp.PARAM_LIMITS)) + [("tau0_amp", TAU0_AMP_RANGE)]
 largest = {}
+fig, ax = plt.subplots(figsize=(9, 6.2))
 with warnings.catch_warnings(record=True) as caught:
     warnings.simplefilter("always")
     for name, (low, high) in INPUTS:
@@ -916,6 +926,14 @@ with warnings.catch_warnings(record=True) as caught:
     for value, colour in ((0.8, "tab:red"), (1.2, "tab:brown")):
         ax.semilogx(pred.k[shown], lls_ratio_relative("tau0_amp", value)[shown], ":", lw=2.2, color=colour,
                     label=f"tau0_amp = {value:g}")
+ax.axhline(1.0, color="black", lw=2.5, label="Rogers et al. (2018) template: no dependence")
+ax.set_xlabel("k [s/km]")
+ax.set_ylabel("LLS class ratio / its value at the midpoint")
+ax.set_title("Fig. 8, right. The response of the emulator's LLS class ratio at z = 3\nto n_s (solid), A_p (dashed) and the mean flux (dotted)")
+ax.legend(fontsize=8, ncol=4, loc="upper center", bbox_to_anchor=(0.5, -0.14))
+fig.tight_layout()
+plt.show()
+
 print("The largest change of the emulator's LLS class ratio below k = 0.03 s/km at z = 3 across the trained range of")
 print("each input (five values; the others at the midpoint, tau0_amp = 1), largest first:")
 for name in sorted(largest, key=lambda name: -largest[name]):
@@ -923,570 +941,182 @@ for name in sorted(largest, key=lambda name: -largest[name]):
 print("dtau0 is not varied: at one redshift it acts only through tau_eff, which tau0_amp already covers")
 if caught:
     print(f"{len(caught)} of these predictions warned, the first: {str(caught[0].message)[:160]} ...")
-ax.axhline(1.0, color="black", lw=2.5, label="Rogers et al. (2018) template: no dependence")
-ax.set_xlabel("k [s/km]")
-ax.set_ylabel("LLS class ratio / its value at the midpoint")
-ax.set_title("the response to n_s (solid), A_p (dashed) and the mean flux (dotted)")
-ax.legend(fontsize=8, ncol=4, loc="upper center", bbox_to_anchor=(0.5, -0.16))
-fig.suptitle("Fig. 8. The class ratios beside the template of Rogers et al. (2018), z = 3")
-fig.tight_layout(rect=(0, 0.1, 1, 1))
-plt.show()
 """,
 )
 
 text(
     "rogers-caveat",
     r"""
-**PROVISIONAL (PI to refine).** The two panels of Fig. 8 answer different questions. On the left the filtered
-troughs are restored, so levels can be compared with the template; the printed lines say on how many modes the
-template lies inside the range of the simulations. On the right the emulator's class spectra are PRIYA-filtered,
-so their level is not compared with the template: only the response to the inputs is shown, which a template
-with no dependence on cosmology does not carry. The printed list ranks the inputs by the size of that response.
+**Fig. 8. PROVISIONAL (PI to refine).** The two parts of Fig. 8 answer different questions. On the left (drawn by
+the released script `fig_class_ratio_vs_rogers18.py`, unchanged; the full caption is in `docs/rogers_comparison.md`
+of the repository) the filtered troughs are restored, so levels can be compared with the template. On the right
+the emulator's class spectra are PRIYA-filtered, so their level is not compared with the template: only the
+response to the inputs is shown, which a template with no dependence on cosmology does not carry. The printed
+list ranks the inputs by the size of that response.
 """,
 )
+
 
 # ============================================================================================ Part III
 text(
     "part-3",
     r"""
-## Part III. Mock inference
+## Part III. The public likelihood and the mock-recovery example
 
-**PROVISIONAL (PI to refine).** This part is a self-consistency demonstration on a mock made by the model
-itself: not an independent validation, not a result from data.
+**PROVISIONAL (PI to refine).** This part uses the package's own Gaussian likelihood and the mock-recovery example
+of the repository, with the files of the release. Nothing is fitted here.
 
 ### The Gaussian likelihood
 
-For a data vector $d$ with covariance $C$ and a model vector $m(\theta)$,
+`hcd_analysis.likelihood.GaussianP1DLikelihood` compares a data vector $d$ with covariance $C$ to a model vector
+$m(\theta)$:
 
 $$\ln L(\theta) = -\tfrac{1}{2}\,[d - m(\theta)]^{T} C^{-1} [d - m(\theta)] - \tfrac{1}{2} \ln\det C - \tfrac{N}{2}\ln 2\pi .$$
 
-The model vector is built in four steps: the prediction at $\theta$ at the redshifts of the data; the mixture of
-the class spectra; linear interpolation in $k$ to the wavenumbers of the data; and the data set's own factor on the
-model, when it has one. Three approximations are made, and `docs/likelihood.md` of the repository discusses each:
-the covariance is that of the data alone, with no term for the error of the emulator; the model is interpolated
-linearly to the data's bins; and the model is treated as exact.
-""",
-)
-
-text(
-    "ho2026",
-    r"""
-### Relation to Ho et al. (2026)
-
-**PROVISIONAL (PI to refine).** PLACEHOLDER: what the analysis of Ho et al. (2026) fitted, and with which
-treatment of the HCD absorbers; each sentence is to be checked against the paper before it is written here.
-
-What this notebook does instead: a mock, four free parameters, everything else fixed. It demonstrates the
-machinery. It is not that analysis.
+The class builds the model vector in four steps: the prediction at $\theta$ at the redshifts of the data; the
+mixture of the class spectra (`hp.add_hcd`); linear interpolation in $k$ to the wavenumbers of the data; and the
+data set's own factor on the model, when it has one. `docs/likelihood.md` of the repository describes the class,
+its options and its approximations.
 """,
 )
 
 code(
-    "helpers-posterior",
+    "example-files",
     r"""
-# The posterior of four parameters, assembled from public pieces of the package: like.prediction, hp.add_hcd and
-# interp_to_bins. With all three amplitudes at 1 it is the public Gaussian likelihood.
-import numpy as np
-from scipy.linalg import solve_triangular
+# The files of the mock-recovery example: the example download of the release, unpacked into the cache folder, and
+# the example script of the repository at the tag v1.0.0, loaded from its file. Its function open_download returns
+# the model, the mock and the stored reference, each read against the sha256 written in the script.
+import importlib.util
 
-import hcd_analysis.predictor as hp
 from hcd_analysis import likelihood as hl
 
-# The point the mock is made at: the midpoint of the nine trained ranges, and PRIYA's mean flux at its centre.
-TRUTH = {
-    "ns": 0.925,
-    "Ap": 1.9e-9,
-    "herei": 4.0,
-    "heref": 2.7,
-    "alphaq": 2.15,
-    "hub": 0.70,
-    "omegamh2": 0.143,
-    "hireionz": 7.25,
-    "bhfeedback": 0.05,
-    "tau0_amp": 1.0,
-    "dtau0": 0.0,
-}
-# The amplitude of each HCD class in the mixture, relative to the model's own sightline fraction at the point.
-REL_TRUTH = {"LLS": 1.0, "subDLA": 1.0, "DLA": 1.0}
-# The four free parameters, in the order of the vector x of log_posterior. r_LLS is the LLS amplitude relative to
-# the model's own fraction. Everything else stays at TRUTH and REL_TRUTH.
-FREE = ("ns", "Ap", "tau0_amp", "r_LLS")
-LIKE = None  # the likelihood object that holds the data; set by the notebook
-PRIOR = None  # {name: (low, high)}, flat; set by the notebook from flat_prior
-REFUSALS = {}  # {kind of refusal: [count, the first message]}, filled by log_posterior
 
+spec = importlib.util.spec_from_file_location("mock_recovery", tutorial_file("examples/mock_recovery.py"))
+example = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(example)
 
-def flat_prior(emu):
-    # The flat prior of the four free parameters: ns and Ap on the ranges the model was trained on, tau0_amp on the
-    # range of the mean-flux amplitude the model records with its training data, r_LLS from 0 to 3.
-    limits = dict(zip(hp.PARAM_NAMES, hp.PARAM_LIMITS))
-    low, high = emu.provenance["lineage"]["cache"]["settings"]["alpha_range"]
-    return {
-        "ns": (float(limits["ns"][0]), float(limits["ns"][1])),
-        "Ap": (float(limits["Ap"][0]), float(limits["Ap"][1])),
-        "tau0_amp": (float(low), float(high)),
-        "r_LLS": (0.0, 3.0),
-    }
-
-
-def model_vector_free_hcd(like, theta, rel):
-    # The model vector at theta (the eleven parameters by name) with the amplitude of each HCD class at rel[class]
-    # times the model's own fraction: the four steps of the public likelihood, written out.
-    data = like.data
-    pred = like.prediction(theta)  # 1. the prediction at the redshifts of the data, on the model's own modes
-    factors = np.array([rel[name] for name in hp.HCD_CLASSES], dtype=float)
-    mixed = hp.add_hcd(pred, factors * pred.w_c)  # 2. P_clean + sum over classes of A_c (P_c - P_clean)
-    if not np.all(np.isfinite(mixed)):
-        raise hl.NonFiniteModelError("the model's spectrum is not finite at this point")
-    out = np.empty(data.n)
-    for i, (where, k_data) in enumerate(zip(data.slices(), data.k)):
-        out[where] = hl.interp_to_bins(pred.k[i], mixed[i], k_data)  # 3. linear in k, never extrapolated
-    if data.model_factor is not None:
-        out = out * data.model_factor  # 4. the data set's own factor on the model
-    return out
-
-
-def chi_square_free_hcd(like, theta, rel):
-    # r^T C^-1 r with r = model - data and C the symmetric part of the data covariance, through C = L L^T
-    data = like.data
-    lower = np.linalg.cholesky(0.5 * (data.cov + data.cov.T))
-    white = solve_triangular(lower, model_vector_free_hcd(like, theta, rel) - data.p1d, lower=True)
-    return float(white @ white)
-
-
-def log_likelihood_free_hcd(like, theta, rel):
-    # ln L = -1/2 chi-square - 1/2 ln det C - N/2 ln(2 pi)
-    data = like.data
-    lower = np.linalg.cholesky(0.5 * (data.cov + data.cov.T))
-    log_det = 2.0 * float(np.sum(np.log(np.diag(lower))))
-    white = solve_triangular(lower, model_vector_free_hcd(like, theta, rel) - data.p1d, lower=True)
-    return -0.5 * float(white @ white) - 0.5 * log_det - 0.5 * data.n * np.log(2.0 * np.pi)
-
-
-def log_posterior(x):
-    # The log posterior at x = (ns, Ap, tau0_amp, r_LLS), up to a constant: the log likelihood inside the flat
-    # prior, minus infinity outside it. Where the model cannot serve a point (the predictor refuses it, a data bin
-    # falls outside the model's modes, or the spectrum is not finite) it is minus infinity too, and the refusal
-    # is counted in REFUSALS, as the package's sampler_logp does.
-    x = np.asarray(x, dtype=float)
-    for value, name in zip(x, FREE):
-        low, high = PRIOR[name]
-        if not (low <= value <= high):  # a value that is not a number fails this too
-            return -np.inf
-    theta = dict(TRUTH, ns=float(x[0]), Ap=float(x[1]), tau0_amp=float(x[2]))
-    rel = dict(REL_TRUTH, LLS=float(x[3]))
-    try:
-        return log_likelihood_free_hcd(LIKE, theta, rel)
-    except (hp.MFUnavailableError, hp.MFRangeError):
-        raise  # wrong for every point, never a refusal of one point
-    except (hp.PredictorInputError, hl.OutsideModesError, hl.NonFiniteModelError) as error:
-        entry = REFUSALS.setdefault(type(error).__name__, [0, str(error)])
-        entry[0] += 1
-        return -np.inf
+example_root = unpack_archive("hcd_priya_example_download.tar.gz", "hcd_priya_example_download", "example_download.json")
+emu_heldout, data, reference = example.open_download(str(example_root))
+print(f"the mock: {data.n} bins at {len(data.z)} redshifts, from z = {min(data.z):.1f} to {max(data.z):.1f}")
+print("what the mock is, in its own words:")
+print("  ", data.provenance["what"])
+print("what the stored reference is, in its own words:")
+print("  ", reference.provenance["what"])
+print("how its chains were run:", reference.provenance["chains"])
+print("its limits:", reference.provenance["limits"])
 """,
 )
 
 code(
-    "mock",
+    "which-model",
     r"""
-# The mock. Its bins, its covariance and its factor on the model are those of the public example data set of the
-# release; its data vector is made here by the published model at TRUTH, with the model's own class fractions.
-import dataclasses
-import tarfile
-
-EXAMPLE_MOCK_SHA256 = "b7db66e81a20c25de571f39fad1a362d7c844a855487a46b31208354ce5efc34"  # of mock.p1d.json
-
-
-def example_member(name, sha256):
-    # one file of the example download, taken out of its archive into the cache folder and checked by sha256
-    target = tutorial_cache() / "hcd_priya_example_download" / name
-    if not (target.is_file() and sha256_of(target) == sha256):
-        with tarfile.open(tutorial_file("hcd_priya_example_download.tar.gz")) as archive:
-            content = archive.extractfile("hcd_priya_example_download/" + name).read()
-        if hashlib.sha256(content).hexdigest() != sha256:
-            raise RuntimeError(f"{name} in the example download does not have the sha256 {sha256}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        handle, partial = tempfile.mkstemp(dir=target.parent, prefix=name + ".", suffix=".part")
-        with os.fdopen(handle, "wb") as out:
-            out.write(content)
-        os.replace(partial, target)
-    return target
-
-
-example = hl.read_p1d_data(example_member("mock.p1d.json", EXAMPLE_MOCK_SHA256), expected_sha256=EXAMPLE_MOCK_SHA256)
-print(f"the example data set: {example.n} bins at {len(example.z)} redshifts")
-for z, k_row in zip(example.z, example.k):
-    print(f"  z = {z:.1f}: {k_row.size} bins, k from {k_row[0]:.2e} to {k_row[-1]:.2e} s/km")
-print("its factor on the model vector:", "none" if example.model_factor is None
-      else f"from {example.model_factor.min():.4f} to {example.model_factor.max():.4f}")
-
-mock_vector = hl.GaussianP1DLikelihood(emu, example).model_vector(TRUTH)
-MOCK = dataclasses.replace(
-    example,
-    p1d=mock_vector,
-    truth=dict(TRUTH, r_LLS=REL_TRUTH["LLS"]),
-    provenance={
-        "what": "a mock made by the published model itself at a stated point; no noise is added",
-        "model_release_sha256": emu.provenance["release"]["release_sha256"],
-        "bins_covariance_and_factor_from": "mock.p1d.json of the example download, sha256 " + EXAMPLE_MOCK_SHA256,
-    },
-)
-LIKE = hl.GaussianP1DLikelihood(emu, MOCK)
-
-at_truth = LIKE.prediction(TRUTH)
+# Which model is which.
+production = emu.provenance["release"]
+print("Parts I and II: the published production model, from hp.load_published()")
+print("  release", production["release_version"], "| sha256 of its release.json:", production["release_sha256"])
+print("  kind:", emu.provenance.get("model_kind", "a released model"), "| manifest:", emu.manifest_sha256)
 print()
-print("the truth of the mock:", ", ".join(f"{name} = {value:g}" for name, value in TRUTH.items()))
-print("class amplitudes: the model's own fractions (relative amplitudes", REL_TRUTH, ")")
-print("flags of the prediction at the truth:", sorted(name for name, value in at_truth.flags.items() if np.any(value == True)))  # noqa: E712
-chi2_truth = LIKE.chi2(TRUTH)
-assert chi2_truth == 0.0, chi2_truth
-print("chi-square at the truth:", chi2_truth, "(the data vector is the model vector there)")
+print("Part III: the held-out model of the example download, from the example's open_download()")
+print("  kind:", emu_heldout.provenance["model_kind"], "| manifest:", emu_heldout.manifest_sha256)
+print("  its stated purpose:", emu_heldout.load_purpose)
+print("  simulations held out of its training:", len(emu_heldout.provenance["research"]["split"]["held_out_sims"]),
+      "(the simulation the mock was made from)")
+print("  (the next cell prints the flags of its prediction at the truth: research_model is among them)")
 """,
 )
 
 text(
-    "provenance-box",
+    "which-model-note",
     r"""
-> **What this mock is. PROVISIONAL (PI to refine).**
->
-> - The data vector is made by the same published model that is fitted to it, at the stated point. The truth of
->   every parameter is known by construction.
-> - No noise is added to the data vector. The covariance is that of the public example data set.
-> - It tests the machinery and shows degeneracies. It is a self-consistency demonstration: **not an independent
->   validation of the model, and not a result from data.**
+**PROVISIONAL (PI to refine).** Parts I and II use the published production model. Part III uses the held-out
+model of the example download, because the mock-recovery example of the paper does: the mock comes from a
+simulation, and the held-out model was trained without that simulation.
 """,
 )
 
 code(
-    "posterior",
+    "likelihood-at-truth",
     r"""
-# The four free parameters and their prior. The other seven PRIYA parameters, dtau0 and the subDLA and DLA
-# amplitudes are fixed at the truth.
-PRIOR = flat_prior(emu)
-print("the prior of the four free parameters: uniform within the stated ranges, restricted to physically allowed")
-print("class fractions. The stated ranges:")
-for name in FREE:
-    truth = REL_TRUTH["LLS"] if name == "r_LLS" else TRUTH[name]
-    print(f"  {name:9s} from {PRIOR[name][0]:.6g} to {PRIOR[name][1]:.6g}   (truth {truth:g})")
-print("  ns and Ap: the ranges the model was trained on (hp.PARAM_LIMITS); tau0_amp: the range of the mean-flux")
-print("  amplitude recorded with the model's training data (emu.provenance); r_LLS: the LLS amplitude relative")
-print("  to the model's own fraction, from 0 to 3")
-print("The restriction: the class fractions (r_LLS times the model's own LLS fraction, plus its subDLA and DLA")
-print("  fractions) sum to at most one at every redshift of the data. A point where they do not is refused by the")
-print("  model: log_posterior returns minus infinity there and counts it in REFUSALS.")
-w_truth = np.asarray(LIKE.prediction(TRUTH).w_c)  # one row per redshift of the data: LLS, subDLA, DLA
-i_lls, i_sub, i_dla = (hp.HCD_CLASSES.index(name) for name in ("LLS", "subDLA", "DLA"))
-r_one = (1.0 - w_truth[:, i_sub] - w_truth[:, i_dla]) / w_truth[:, i_lls]
-print(f"  At the truth the fractions sum to one at r_LLS = {r_one.min():.3f} (at z = {MOCK.z[int(np.argmin(r_one))]:.1f}), "
-      f"inside the stated range: there the restriction, not the range, is the upper end of r_LLS.")
-print("fixed at the truth:", ", ".join(name for name in TRUTH if name not in FREE), "and the subDLA and DLA amplitudes")
+# COMPUTED HERE: the likelihood at the point the mock was made at, by the example's own part_one. Warnings are
+# caught and printed below, not silenced.
+like = hl.GaussianP1DLikelihood(emu_heldout, data, gaussian_terms=example.GAUSSIAN_TERMS)
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    truth = example.part_one(like)
 
-X_TRUTH = np.array([TRUTH["ns"], TRUTH["Ap"], TRUTH["tau0_amp"], REL_TRUTH["LLS"]])
 print()
-print(f"log posterior at the truth: {log_posterior(X_TRUTH):.6f}   the public likelihood there: {LIKE.loglike(TRUTH):.6f}")
-
-# The assembly above against the public likelihood at fixed HCD amplitudes: four LLS amplitudes, three points.
-POINTS = (TRUTH, dict(TRUTH, ns=0.87, Ap=2.3e-9), dict(TRUTH, tau0_amp=1.12, ns=0.96))
-worst_vector = worst_loglike = 0.0
-for r_lls in (0.0, 0.5, 1.0, 2.0):
-    rel = dict(REL_TRUTH, LLS=r_lls)
-    public = hl.GaussianP1DLikelihood(emu, MOCK, hcd_relative_to_priya=rel)
-    for theta in POINTS:
-        ours, theirs = model_vector_free_hcd(LIKE, theta, rel), public.model_vector(theta)
-        worst_vector = max(worst_vector, float(np.max(np.abs(ours / theirs - 1.0))))
-        worst_loglike = max(worst_loglike, abs(log_likelihood_free_hcd(LIKE, theta, rel) / public.loglike(theta) - 1.0))
-print(f"against the public likelihood at 12 points: largest relative difference of the model vector {worst_vector:.1e}, "
-      f"of the log likelihood {worst_loglike:.1e}")
-assert worst_vector < 1e-12 and worst_loglike < 1e-10
-""",
-)
-
-code(
-    "helpers-sampler",
-    r"""
-import numpy as np
-
-
-def metropolis(logp, x0, cov, n_steps, rng):
-    # A random-walk Metropolis sampler. Each step proposes x + a normal draw with covariance cov (fixed for the whole
-    # run) and accepts it with probability min(1, exp(logp(proposal) - logp(x))); a proposal where logp is minus
-    # infinity, or not a number, is never accepted. Returns the chain, shape (n_steps, d), the log posterior of each
-    # state, and the fraction of steps that moved.
-    x = np.array(x0, dtype=float)
-    step = np.linalg.cholesky(np.asarray(cov, dtype=float))
-    current = float(logp(x))
-    if not np.isfinite(current):
-        raise ValueError("the chain must start where the log posterior is finite")
-    chain = np.empty((n_steps, x.size))
-    logps = np.empty(n_steps)
-    accepted = 0
-    for i in range(n_steps):
-        proposal = x + step @ rng.standard_normal(x.size)
-        value = float(logp(proposal))
-        if np.log(rng.uniform()) < value - current:  # false when value is minus infinity or not a number
-            x, current = proposal, value
-            accepted += 1
-        chain[i] = x
-        logps[i] = current
-    return chain, logps, accepted / n_steps
-""",
-)
-
-code(
-    "helpers-diagnostics",
-    r"""
-# Convergence diagnostics after Vehtari, Gelman, Simpson, Carpenter and Buerkner (2021): the rank-normalised split
-# R-hat and the bulk and tail effective sample sizes.
-import numpy as np
-from scipy.special import ndtri
-from scipy.stats import rankdata
-
-
-def rank_normalise(x):
-    # the draws of all chains ranked together, and the ranks turned into normal scores
-    ranks = rankdata(x, method="average").reshape(x.shape)
-    return ndtri((ranks - 0.375) / (x.size + 0.25))
-
-
-def rhat_of(x):
-    # the potential scale reduction of the chains x, shape (chains, draws): sqrt(pooled variance / within variance)
-    n = x.shape[1]
-    within = x.var(axis=1, ddof=1).mean()
-    between = n * x.mean(axis=1).var(ddof=1)
-    return float(np.sqrt(((n - 1.0) / n * within + between / n) / within))
-
-
-def ess_of(x):
-    # the effective sample size of the chains x, shape (chains, draws): the number of draws over the integrated
-    # autocorrelation time, with the autocorrelations combined over the chains and summed in pairs while the pairs
-    # stay positive and do not increase (Geyer's initial monotone sequence)
-    m, n = x.shape
-    centred = x - x.mean(axis=1, keepdims=True)
-    size = 1 << int(np.ceil(np.log2(2 * n)))
-    spectrum = np.fft.rfft(centred, n=size, axis=1)
-    acov = np.fft.irfft(spectrum * np.conj(spectrum), n=size, axis=1)[:, :n] / n
-    mean_var = acov[:, 0].mean() * n / (n - 1.0)
-    var_plus = mean_var * (n - 1.0) / n
-    if m > 1:
-        var_plus += x.mean(axis=1).var(ddof=1)
-    if not var_plus > 0.0:
-        return float("nan")
-    rho = np.zeros(n)
-    rho_even, rho_odd = 1.0, 1.0 - (mean_var - acov[:, 1].mean()) / var_plus
-    rho[0], rho[1] = rho_even, rho_odd
-    t = 1
-    while t < n - 3 and rho_even + rho_odd > 0.0:
-        rho_even = 1.0 - (mean_var - acov[:, t + 1].mean()) / var_plus
-        rho_odd = 1.0 - (mean_var - acov[:, t + 2].mean()) / var_plus
-        if rho_even + rho_odd >= 0.0:
-            rho[t + 1], rho[t + 2] = rho_even, rho_odd
-        t += 2
-    last = t - 2
-    if rho_even > 0.0:
-        rho[last + 1] = rho_even
-    t = 1
-    while t <= last - 2:
-        if rho[t + 1] + rho[t + 2] > rho[t - 1] + rho[t]:
-            rho[t + 1] = (rho[t - 1] + rho[t]) / 2.0
-            rho[t + 2] = rho[t + 1]
-        t += 2
-    total = m * n
-    tau = -1.0 + 2.0 * rho[: last + 1].sum() + rho[last + 1 : last + 2].sum()
-    return float(total / max(tau, 1.0 / np.log10(total)))
-
-
-def split_rhat_and_ess(chains):
-    # For chains of shape (chains, steps, parameters), per parameter:
-    #   rhat      the rank-normalised split R-hat: each chain is cut in two halves; the larger of the R-hat of the
-    #             normal scores of the draws and of their absolute distances from the median (which sees chains
-    #             that agree in location and differ in width);
-    #   ess_bulk  the effective sample size of the normal scores, over the split chains;
-    #   ess_tail  the smaller of the effective sample sizes of the indicators "the draw lies below the 5 per cent
-    #             quantile" and "below the 95 per cent quantile".
-    chains = np.asarray(chains, dtype=float)
-    if chains.ndim != 3:
-        raise ValueError("chains must have the shape (chains, steps, parameters)")
-    half = chains.shape[1] // 2
-    split = np.concatenate([chains[:, :half], chains[:, half : 2 * half]], axis=0)
-    out = {"rhat": [], "ess_bulk": [], "ess_tail": []}
-    for j in range(chains.shape[2]):
-        x = split[:, :, j]
-        bulk = rank_normalise(x)
-        folded = rank_normalise(np.abs(x - np.median(x)))
-        out["rhat"].append(max(rhat_of(bulk), rhat_of(folded)))
-        out["ess_bulk"].append(ess_of(bulk))
-        low, high = np.quantile(x, [0.05, 0.95])
-        out["ess_tail"].append(min(ess_of((x <= low).astype(float)), ess_of((x <= high).astype(float))))
-    return {name: np.array(values) for name, values in out.items()}
-""",
-)
-
-code(
-    "helpers-chain-files",
-    r"""
-# Chains as text files in the layout that Cobaya writes and GetDist reads: PREFIX.1.txt, PREFIX.2.txt, ... with the
-# columns "weight minuslogpost" and one column per parameter, PREFIX.paramnames and PREFIX.ranges. A state the
-# chain stays in for several steps is one row, with the number of steps as its weight.
-import pathlib
-
-import numpy as np
-
-
-def write_chains(prefix, chains, logps, names, ranges):
-    # chains: (chains, steps, parameters); logps: (chains, steps); names: the parameter names; ranges: {name: (low,
-    # high)}. Existing files are never overwritten.
-    prefix = pathlib.Path(prefix)
-    chains, logps = np.asarray(chains, dtype=float), np.asarray(logps, dtype=float)
-    with open(f"{prefix}.paramnames", "x", encoding="utf-8") as out:
-        out.write("".join(f"{name}\n" for name in names))
-    with open(f"{prefix}.ranges", "x", encoding="utf-8") as out:
-        out.write("".join(f"{name} {float(ranges[name][0])!r} {float(ranges[name][1])!r}\n" for name in names))
-    n_steps = chains.shape[1]
-    for c in range(chains.shape[0]):
-        with open(f"{prefix}.{c + 1}.txt", "x", encoding="utf-8") as out:
-            out.write("# weight minuslogpost " + " ".join(names) + "\n")
-            start = 0
-            for t in range(1, n_steps + 1):
-                if t == n_steps or np.any(chains[c, t] != chains[c, start]):
-                    values = " ".join(f"{value:.12e}" for value in chains[c, start])
-                    out.write(f"{t - start:d} {-logps[c, start]:.12e} {values}\n")
-                    start = t
-
-
-def read_chains(prefix):
-    # the rows of PREFIX.1.txt, PREFIX.2.txt, ... in order: the samples (rows, parameters), the weight of each row
-    # and the number of the chain it belongs to (from 1)
-    prefix = pathlib.Path(prefix)
-    samples, weights, index = [], [], []
-    number = 1
-    while pathlib.Path(f"{prefix}.{number}.txt").is_file():
-        table = np.loadtxt(f"{prefix}.{number}.txt", ndmin=2)
-        samples.append(table[:, 2:])
-        weights.append(np.rint(table[:, 0]).astype(int))
-        index.append(np.full(table.shape[0], number))
-        number += 1
-    if not samples:
-        raise FileNotFoundError(f"no chain file {prefix}.1.txt")
-    return np.concatenate(samples), np.concatenate(weights), np.concatenate(index)
-
-
-def expand_chains(samples, weights, index):
-    # the chains step by step again, shape (chains, steps, parameters): each row repeated by its weight
-    chains = [np.repeat(samples[index == number], weights[index == number], axis=0) for number in np.unique(index)]
-    if len({chain.shape[0] for chain in chains}) != 1:
-        raise ValueError("the chains do not have the same number of steps")
-    return np.stack(chains)
-""",
-)
-
-code(
-    "helpers-contours",
-    r"""
-import numpy as np
-
-
-def levels_68_95(h2d):
-    # the two heights of a two-dimensional histogram above which 68 and 95 per cent of its total lie
-    values = np.sort(np.asarray(h2d, dtype=float).ravel())[::-1]
-    cumulative = np.cumsum(values) / values.sum()
-    return tuple(float(values[np.searchsorted(cumulative, fraction)]) for fraction in (0.68, 0.95))
+print(f"warnings raised while this ran: {len(caught)}")
+for warning in caught:
+    print(f"  {warning.category.__name__}: {warning.message}")
 """,
 )
 
 text(
-    "sampler",
+    "heldout-warning",
     r"""
-### Sampling
-
-**PROVISIONAL (PI to refine).** The cells above define a random-walk Metropolis sampler (`metropolis`), the
-convergence diagnostics (`split_rhat_and_ess`: the rank-normalised split R-hat and the bulk and tail effective
-sample sizes, after Vehtari et al. 2021), and the reading and writing of chains as text files in the layout that
-Cobaya writes and GetDist reads. The next cell runs the sampler for 300 steps, to show that it runs.
+**PROVISIONAL (PI to refine).** The warning printed above comes from the held-out model. It concerns the dN/dX
+and the column density distribution of that model, which carry no held-out error. The likelihood uses neither.
 """,
 )
 
 code(
-    "live-chain",
+    "three-chi-squares",
     r"""
-# A short chain, run here: 300 steps from the truth. INSTRUCTIONAL ONLY, NOT EVIDENCE OF CONVERGENCE: it shows that
-# the sampler runs and what it returns. Nothing is concluded from it.
-LIVE_STEPS = 300
-live_widths = np.array([0.02 * (PRIOR[name][1] - PRIOR[name][0]) for name in FREE])  # 2 per cent of each range
-REFUSALS.clear()
-live_chain, live_logp, live_acceptance = metropolis(
-    log_posterior, X_TRUTH, np.diag(live_widths**2), LIVE_STEPS, np.random.default_rng(20261121)
+# COMPUTED HERE: how the HCD content enters the likelihood. The public option hcd_relative_to_priya sets the
+# amplitude of a class in the mixture relative to the model's own sightline fraction.
+print("three evaluations of the public likelihood at the mock's truth; nothing is fitted and these are not constraints")
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    for r_lls in (0.0, 1.0, 2.0):
+        scaled = hl.GaussianP1DLikelihood(
+            emu_heldout, data, gaussian_terms=example.GAUSSIAN_TERMS,
+            hcd_relative_to_priya={"LLS": r_lls, "subDLA": 1.0, "DLA": 1.0},
+        )
+        print(f"  LLS amplitude at {r_lls:g} times the model's own fraction (subDLA and DLA at 1): chi-square = {scaled.chi2(truth):.4f}")
+print(f"warnings raised while this ran: {len(caught)}, of the kind", sorted({w.category.__name__ for w in caught}) or "none")
+""",
 )
-print(f"{LIVE_STEPS} steps (instructional only, not evidence of convergence); acceptance {live_acceptance:.2f}")
-print(f"{'parameter':10s} {'truth':>11s} {'smallest':>11s} {'largest':>11s}   visited in these steps")
-for j, name in enumerate(FREE):
-    print(f"{name:10s} {X_TRUTH[j]:11.4g} {live_chain[:, j].min():11.4g} {live_chain[:, j].max():11.4g}")
-print("points refused by the model (class fractions above one, counted by log_posterior):",
-      {kind: entry[0] for kind, entry in REFUSALS.items()} or "none")
-live = split_rhat_and_ess(live_chain[None, :, :])
-print("the diagnostics run on it, one chain cut in two halves (they are far from any threshold, as they must be after 300 steps):")
-print("  split R-hat:", ", ".join(f"{name} {value:.2f}" for name, value in zip(FREE, live["rhat"])))
-print("  bulk ESS:   ", ", ".join(f"{name} {value:.0f}" for name, value in zip(FREE, live["ess_bulk"])))
-print("  tail ESS:   ", ", ".join(f"{name} {value:.0f}" for name, value in zip(FREE, live["ess_tail"])))
+
+code(
+    "fig9-fig10-reference",
+    r"""
+# REDRAWN HERE from the stored reference of the release (a summary of converged chains made before the release);
+# NOT RECOMPUTED. The example's own draw_reference draws both figures from the stored reference and the mock alone.
+intervals_png, per_redshift_png = example.draw_reference(reference, data, str(OUT))
+plt.close("all")
+print("Fig. 9:", intervals_png)
+display(Image(filename=intervals_png, width=900))
+print("Fig. 10:", per_redshift_png)
+display(Image(filename=per_redshift_png, width=900))
 """,
 )
 
 text(
-    "stored-chain",
+    "fig9-fig10-caption",
     r"""
-### The stored chains
+**Fig. 9 (the paper's Figure 4). PROVISIONAL (PI to refine).** For each of the eleven parameters, the mean and the
+central 68 and 95 per cent intervals of the stored reference, with the truth of the mock. Redrawn here from the
+stored reference of the release (a summary of converged chains made before the release); not recomputed.
 
-**PENDING: the stored chains have not been run. They are run once, after the project lead's approval of the
-preflight; this cell is filled then.**
-
-It will read four independently started chains from text files in this repository, each checked by its sha256,
-with a provenance file that states the code, the model, the mock, the truth, the prior, the seeds and the
-diagnostics. The code that makes them is `run_mock_chain.py` beside this notebook; it runs the cells of this
-notebook.
+**Fig. 10. PROVISIONAL (PI to refine).** The mock and the stored bands of the posterior predictive of the
+reference, one panel per redshift. Redrawn here from the stored reference of the release (a summary of converged
+chains made before the release); not recomputed.
 """,
 )
 
 text(
-    "stored-diagnostics",
+    "what-is-reproduced",
     r"""
-### Convergence of the stored chains
+### What can and cannot be reproduced
 
-**PENDING: the stored chains have not been run. They are run once, after the project lead's approval of the
-preflight; this cell is filled then.**
+**PROVISIONAL (PI to refine).**
 
-It will print, for each of the four parameters, the rank-normalised split R-hat and the bulk and the tail
-effective sample size of the stored chains, recomputed from the files, the acceptance of each chain, and two
-further diagnostics of their own: the share of proposals refused because the class fractions would sum to more
-than one, and the share of samples at the edge of the multi-fidelity tables in the mean flux. No contour is
-shown unless every convergence criterion is met.
-""",
-)
-
-text(
-    "contours",
-    r"""
-### The posterior of the four parameters
-
-**PENDING: the stored chains have not been run. They are run once, after the project lead's approval of the
-preflight; this cell is filled then.**
-
-**Fig. 9** will show the 68 and 95 per cent contours of each pair of the four parameters and their marginals,
-with the truth marked, and print the correlations. The contours are conditional on the fixed parameters; the
-mock is made by the model itself. They are not marginalised constraints.
-""",
-)
-
-text(
-    "posterior-predictive",
-    r"""
-### The prediction of the posterior, and the posterior predictive
-
-**PENDING: the stored chains have not been run. They are run once, after the project lead's approval of the
-preflight; this cell is filled then.**
-
-**Fig. 10** will show two bands at each redshift, drawn apart: the posterior uncertainty of the model
-prediction (the range of the model vector over draws of the posterior), and the posterior predictive of the
-data (the same with a draw of the data covariance added). It is a self-consistency demonstration on a mock made
-by the model itself: not an independent validation, not a result from data.
+| Result | From the published release? |
+|---|---|
+| Every figure of Parts I and II; the likelihood at the truth of the mock; the three chi-square values | computed when the notebook runs |
+| The reference posterior of the mock (the paper's Figure 4; Fig. 9 and 10 here) | read from the stored reference of the release, a summary of converged chains made before the release; not recomputed |
+| A chain of one's own on the mock | outside this notebook: `python examples/mock_recovery.py --download DIR --full`, which needs Cobaya; not run here |
+| The contours of the paper's Figure 3 and its comparison with the Gaussian-process emulator | cannot be fully reproduced from the public files, because the chains are not public |
 """,
 )
 
@@ -1497,15 +1127,15 @@ text(
 
 **PROVISIONAL (PI to refine).**
 
-- Part III fits a mock made by the same model. It shows how the pieces fit together and which parameters trade
-  off. It does not validate the model, and it is not a constraint from data.
+- Part III evaluates the public likelihood at the truth of a mock and redraws a stored result. Nothing in this
+  notebook is fitted, and nothing here is a constraint from data.
 - The likelihood uses the covariance of the data alone. The held-out prediction residual of Part II is an
   empirical validation diagnostic, not a calibrated predictive uncertainty, and it does not enter the likelihood.
 - The class spectra are PRIYA-filtered, and the mixture leaves out what the filter removed.
 
 Where to go next, in the repository: `docs/likelihood.md` (the likelihood, its options and what it refuses);
-`examples/mock_recovery.py` (a mock from a simulation, fitted with a model made without that simulation);
-`docs/model_figures.md` (the model against published measurements); `docs/p1d_definition.md` (the conventions).
+`examples/mock_recovery.py` (the example used above, with its chain modes); `docs/model_figures.md` (the model
+against published measurements); `docs/p1d_definition.md` (the conventions).
 """,
 )
 

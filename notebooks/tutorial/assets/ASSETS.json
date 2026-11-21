@@ -1,6 +1,6 @@
 {
   "format": "hcd_priya.tutorial_assets/1",
-  "about": "Every stored file the tutorial notebook reads: its path (in this repository, or the file name of a release file), its sha256 and size, the immutable URL it is fetched from outside a clone, what it is and where it came from. The notebook's cell helpers-assets holds the same paths, digests and URLs.",
+  "about": "Every stored file the tutorial notebook reads, and every released script it runs: its path (in this repository, or the file name of a release file), its sha256 and size, the immutable URL it is fetched from outside a clone, what it is and where it came from. The notebook's cell helpers-assets holds the same paths, digests and URLs.",
   "files": [
     {
       "path": "docs/figures/data/ho21/cddf_z225.txt",
@@ -89,6 +89,62 @@
       "url": "https://raw.githubusercontent.com/jibanCat/hcd_priya/7caaeb52c9ecffd9c6472a8231533389c990cc86/notebooks/tutorial/assets/figures/joss_architecture.png",
       "what": "the schematic of the emulator (Figure 1 of the manuscript on hcd_priya)",
       "source": "added for this tutorial in the commit its URL names; notebooks/tutorial/assets/figures/PROVENANCE.md says how it was made and who approved it"
+    },
+    {
+      "path": "examples/mock_recovery.py",
+      "sha256": "6bd6f300caf6d2d82edd5bb5bb745523c6c9ec8f08612902aa23a812ab47093a",
+      "bytes": 34442,
+      "url": "https://raw.githubusercontent.com/jibanCat/hcd_priya/v1.0.0/examples/mock_recovery.py",
+      "what": "the mock-recovery example of the repository: the notebook loads it and calls its functions",
+      "source": "this repository at the tag v1.0.0"
+    },
+    {
+      "path": "scripts/figures/figures_common.py",
+      "sha256": "aa1f2bc4320c3fb78ea820a355193b832b1f3454bdae51428cec8ad867a2200e",
+      "bytes": 14043,
+      "url": "https://raw.githubusercontent.com/jibanCat/hcd_priya/v1.0.0/scripts/figures/figures_common.py",
+      "what": "what the released figure scripts share: the parameter point, the cosmology of the absorption distance, the style",
+      "source": "this repository at the tag v1.0.0"
+    },
+    {
+      "path": "scripts/figures/fig_dndx_vs_ho21.py",
+      "sha256": "66301416141d6340cb20b45e58a83f089e84e2e6dd7a14c87511396eb59001e0",
+      "bytes": 26557,
+      "url": "https://raw.githubusercontent.com/jibanCat/hcd_priya/v1.0.0/scripts/figures/fig_dndx_vs_ho21.py",
+      "what": "the released script that draws the incidence dN/dX against published measurements (Fig. 7)",
+      "source": "this repository at the tag v1.0.0"
+    },
+    {
+      "path": "scripts/figures/fig_cddf_vs_ho21.py",
+      "sha256": "4884bfe4cf55155882516b625f319c65d6aac46f2a09b7df02a47fc376777e65",
+      "bytes": 12977,
+      "url": "https://raw.githubusercontent.com/jibanCat/hcd_priya/v1.0.0/scripts/figures/fig_cddf_vs_ho21.py",
+      "what": "the released script that draws the column density distribution against published measurements (Fig. 7b)",
+      "source": "this repository at the tag v1.0.0"
+    },
+    {
+      "path": "scripts/figures/fig_class_ratio_vs_rogers18.py",
+      "sha256": "5825e6935ff46561190b070deb72a11a39b439ee127616648aa63148ade7c3f6",
+      "bytes": 7980,
+      "url": "https://raw.githubusercontent.com/jibanCat/hcd_priya/v1.0.0/scripts/figures/fig_class_ratio_vs_rogers18.py",
+      "what": "the released script that draws the class ratios of the training simulations against Rogers et al. (2018) (Fig. 8, left)",
+      "source": "this repository at the tag v1.0.0"
+    },
+    {
+      "path": "docs/figures/data/priya_lf_design_60.csv",
+      "sha256": "a47f23bfce73b3d765206cef5b116cf42b3705c9a0df85a5e665cda185255d42",
+      "bytes": 7444,
+      "url": "https://raw.githubusercontent.com/jibanCat/hcd_priya/v1.0.0/docs/figures/data/priya_lf_design_60.csv",
+      "what": "the 60 design points of the PRIYA low-resolution suite, read by the figure scripts for their bands",
+      "source": "this repository at the tag v1.0.0"
+    },
+    {
+      "path": "docs/figures/data/SHA256SUMS",
+      "sha256": "2afe737238bbc832b1da5606cc05b8095fe236a9b5164a33add1556e43330d84",
+      "bytes": 929,
+      "url": "https://raw.githubusercontent.com/jibanCat/hcd_priya/v1.0.0/docs/figures/data/SHA256SUMS",
+      "what": "the digests of the tables under docs/figures/data",
+      "source": "this repository at the tag v1.0.0"
     }
   ]
 }

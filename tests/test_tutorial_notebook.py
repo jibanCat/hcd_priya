@@ -104,7 +104,7 @@ def test_every_code_cell_parses():
 
 def test_no_private_attribute_no_private_path_no_em_dash():
     texts = {f"cell {cell_id}": source for _, cell_id, source in _builder().CELLS}
-    for path in (BUILDER, MANIFEST, TUTORIAL / "README.md", TUTORIAL / "run_mock_chain.py"):
+    for path in (BUILDER, MANIFEST, TUTORIAL / "README.md"):
         texts[path.name] = path.read_text(encoding="utf-8")
     for name, text in texts.items():
         assert "—" not in text, f"{name} holds an em-dash"
@@ -268,67 +268,6 @@ def test_tutorial_file_names_the_file_the_url_and_the_cache_when_the_download_fa
     assert _files_under(cache) == []
 
 
-# ------------------------------------------------------------------------------------------ the incidence helper
-def _figure_script(name):
-    scripts = ROOT / "scripts" / "figures"
-    sys.path.insert(0, str(scripts))
-    try:
-        spec = importlib.util.spec_from_file_location(name, scripts / (name + ".py"))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    finally:
-        sys.path.remove(str(scripts))
-    return module
-
-
-def test_cumulative_incidence_equals_the_figure_script():
-    np = pytest.importorskip("numpy")
-    ns = _namespace("helpers-incidence")
-    script = _figure_script("fig_dndx_vs_ho21")
-    log_nhi = 17.1 + 0.2 * np.arange(30)  # thirty bin centres, as a prediction has
-    rng = np.random.default_rng(7)
-    cddf = 10.0 ** (-17.0 - 1.5 * (log_nhi - 17.0)) * rng.uniform(
-        0.5, 2.0, size=(4, 30)
-    )  # synthetic, four rows
-    cddf[1, 25:] = np.nan  # bins without a value are left out
-    cddf[2, :] = np.nan  # a row with no value at all
-    for threshold in (17.5, 17.2, 19.0, 20.37):
-        ours = ns["cumulative_incidence"](cddf, log_nhi, threshold)
-        assert ours.shape == (4,)
-        assert np.array_equal(
-            ours, script.cumulative_dndx(cddf, log_nhi, threshold), equal_nan=True
-        )
-    assert np.isnan(ns["cumulative_incidence"](cddf, log_nhi)[2])
-    assert np.array_equal(
-        ns["cumulative_incidence"](cddf, log_nhi),
-        script.cumulative_dndx(cddf, log_nhi),
-        equal_nan=True,
-    )
-    # the threshold inside a bin counts that bin from the threshold to its upper edge
-    one = np.zeros(30)
-    one[2] = 1.0  # the bin centred on 17.5, from 17.4 to 17.6
-    assert ns["cumulative_incidence"](one, log_nhi, 17.5) == pytest.approx(
-        10.0**17.6 - 10.0**17.5, rel=1e-12
-    )
-    with pytest.raises(ValueError):
-        ns["cumulative_incidence"](cddf, log_nhi**1.01)
-
-
-def test_absorption_distance_equals_the_figure_scripts():
-    np = pytest.importorskip("numpy")
-    ns = _namespace("helpers-incidence")
-    sys.path.insert(0, str(ROOT / "scripts" / "figures"))
-    try:
-        common = _figure_script("figures_common")
-    finally:
-        sys.path.remove(str(ROOT / "scripts" / "figures"))
-    for z1, z2, omega_m in ((2.0, 2.5, 0.3), (3.0, 4.0, 0.279), (1.5, 5.4, 0.25)):
-        assert ns["absorption_distance"](z1, z2, omega_m) == pytest.approx(
-            common.absorption_distance(z1, z2, omega_m), rel=1e-6
-        )
-    assert np.isclose(ns["absorption_distance"](2.0, 2.0, 0.3), 0.0)
-
-
 # ------------------------------------------------------------------------------------------ the committed notebook
 def test_the_committed_notebook_is_executed_in_order_without_an_error_or_a_private_path():
     raw = NOTEBOOK.read_text(encoding="utf-8")
@@ -345,606 +284,6 @@ def test_the_committed_notebook_is_executed_in_order_without_an_error_or_a_priva
             assert (
                 output.get("name") != "stderr"
             ), f"cell {c['id']} wrote to stderr: {''.join(output['text'])[:200]}"
-
-
-# ------------------------------------------------------------------------------------------ the posterior helper
-ZS = (2.6, 3.0)  # two snapshot redshifts that the synthetic model serves under LF+MF
-
-
-@pytest.fixture(scope="module")
-def stand_in(tmp_path_factory):
-    """A synthetic model with untrained networks: a stand-in for the code paths, never for a number."""
-    pytest.importorskip("numpy")
-    import hcd_analysis.predictor as hp
-    from tests.synthetic_release import make_release
-
-    info = make_release(tmp_path_factory.mktemp("tutorial") / "release", incidence=True)
-    return hp.load_release(str(info["root"]), info["sha"])
-
-
-def _made_up_data(emu, theta, *, p1d=None):
-    """A data set at ZS: bins between the model's modes, a covariance that differs from its transpose by rounding
-    (as a summed or inverted matrix does), and a factor on the model vector that is not one."""
-    import numpy as np
-    from hcd_analysis import likelihood as L
-
-    nine = {name: value for name, value in theta.items() if name not in L.MEAN_FLUX_NAMES}
-    pred = emu.predict_many(nine, z=list(ZS), tau0_amp=1.0, dtau0=0.0)
-    rows, blocks = [], []
-    for i, m in enumerate((4, 6)):
-        k = np.asarray(pred.k[i])
-        rows.append(np.linspace(k[len(k) // 4], k[len(k) // 2], m + 2)[1:-1])
-        j = np.arange(m)
-        blocks.append((0.04 + 0.05 * i) * 0.3 ** np.abs(j[:, None] - j[None, :]))
-    blocks[0][0, 1] *= 1.0 + 4e-14  # the transpose keeps the other value
-    n = sum(r.size for r in rows)
-    return L.P1DData.from_blocks(
-        z=ZS,
-        k=rows,
-        p1d=[np.linspace(3.0, 2.0, r.size) for r in rows] if p1d is None else p1d,
-        cov_blocks=blocks,
-        model_factor=np.split(np.linspace(0.9, 1.15, n), np.cumsum([r.size for r in rows])[:-1]),
-    )
-
-
-def _points(ns):
-    truth = dict(ns["TRUTH"])
-    return (
-        truth,
-        dict(truth, ns=0.87, Ap=2.3e-9),
-        dict(truth, tau0_amp=1.12, ns=0.96),
-    )
-
-
-def test_manual_model_vector_equals_the_public_likelihood(stand_in):
-    import numpy as np
-    from hcd_analysis import likelihood as L
-
-    ns = _namespace("helpers-posterior")
-    data = _made_up_data(stand_in, ns["TRUTH"])
-    assert data.cov[0, 1] != data.cov[1, 0] and not np.allclose(data.model_factor, 1.0)
-    base = L.GaussianP1DLikelihood(stand_in, data)
-    compared = 0
-    for r_lls in (0.0, 0.5, 1.0, 2.0):
-        for rel in (
-            {"LLS": r_lls, "subDLA": 1.0, "DLA": 1.0},
-            {"LLS": r_lls, "subDLA": 0.4, "DLA": 1.7},
-        ):
-            public = L.GaussianP1DLikelihood(stand_in, data, hcd_relative_to_priya=rel)
-            for theta in _points(ns):
-                manual = ns["model_vector_free_hcd"](base, theta, rel)
-                want = public.model_vector(theta)
-                assert manual.shape == want.shape == (data.n,)
-                assert np.allclose(manual, want, rtol=1e-12, atol=0), (rel, theta)
-                compared += 1
-    assert compared == 24
-    # the amplitude matters: the vectors at two LLS amplitudes differ (the equality above is not that of two constants)
-    a = ns["model_vector_free_hcd"](base, ns["TRUTH"], {"LLS": 0.0, "subDLA": 1.0, "DLA": 1.0})
-    b = ns["model_vector_free_hcd"](base, ns["TRUTH"], {"LLS": 2.0, "subDLA": 1.0, "DLA": 1.0})
-    assert not np.allclose(a, b, rtol=1e-6, atol=0)
-
-
-def test_manual_loglike_equals_the_public_likelihood(stand_in):
-    import numpy as np
-    from hcd_analysis import likelihood as L
-
-    ns = _namespace("helpers-posterior")
-    data = _made_up_data(stand_in, ns["TRUTH"])
-    base = L.GaussianP1DLikelihood(stand_in, data)
-    values = []
-    for r_lls in (0.0, 0.5, 1.0, 2.0):
-        rel = {"LLS": r_lls, "subDLA": 1.0, "DLA": 1.0}
-        public = L.GaussianP1DLikelihood(stand_in, data, hcd_relative_to_priya=rel)
-        for theta in _points(ns):
-            manual = ns["log_likelihood_free_hcd"](base, theta, rel)
-            want = public.loglike(theta)
-            assert np.isfinite(want) and np.isclose(manual, want, rtol=1e-10, atol=0), (rel, theta)
-            values.append(want)
-    assert len(set(np.round(values, 6))) > 6  # the twelve values are not one constant
-    # a mock made by the public likelihood at a point has chi-square zero there under the manual assembly
-    rel = {"LLS": 1.0, "subDLA": 1.0, "DLA": 1.0}
-    mock = _made_up_data(stand_in, ns["TRUTH"], p1d=None)
-    vector = L.GaussianP1DLikelihood(stand_in, mock).model_vector(ns["TRUTH"])
-    mock = _made_up_data(stand_in, ns["TRUTH"], p1d=[vector[s] for s in mock.slices()])
-    like = L.GaussianP1DLikelihood(stand_in, mock)
-    assert ns["chi_square_free_hcd"](like, ns["TRUTH"], rel) == pytest.approx(0.0, abs=1e-18)
-    # and not elsewhere: without the LLS sightlines, and at another mean flux
-    for theta, other in ((ns["TRUTH"], dict(rel, LLS=0.0)), (dict(ns["TRUTH"], tau0_amp=1.1), rel)):
-        elsewhere = ns["chi_square_free_hcd"](like, theta, other)
-        assert elsewhere > 1e-6, (elsewhere, theta, other)
-        assert elsewhere == pytest.approx(
-            L.GaussianP1DLikelihood(stand_in, mock, hcd_relative_to_priya=other).chi2(theta),
-            rel=1e-9,
-        )
-
-
-def test_log_posterior_is_minus_infinity_outside_the_prior_and_on_a_refusal(stand_in):
-    import math
-
-    import numpy as np
-    from hcd_analysis import likelihood as L
-
-    ns = _namespace("helpers-posterior")
-    truth = ns["TRUTH"]
-    assert ns["FREE"] == ("ns", "Ap", "tau0_amp", "r_LLS") and ns["REL_TRUTH"] == {
-        "LLS": 1.0,
-        "subDLA": 1.0,
-        "DLA": 1.0,
-    }
-    like = L.GaussianP1DLikelihood(stand_in, _made_up_data(stand_in, truth))
-    ns["LIKE"] = like
-    ns["PRIOR"] = {
-        "ns": (0.8, 1.05),
-        "Ap": (1.2e-9, 2.6e-9),
-        "tau0_amp": (0.7, 1.3),
-        "r_LLS": (0.0, 60.0),
-    }
-    x0 = np.array([truth["ns"], truth["Ap"], truth["tau0_amp"], 1.0])
-    inside = ns["log_posterior"](x0)
-    assert math.isfinite(inside)
-    assert inside == pytest.approx(
-        ns["log_likelihood_free_hcd"](like, truth, ns["REL_TRUTH"]), rel=1e-13
-    )
-    assert inside == pytest.approx(
-        like.loglike(truth), rel=1e-10
-    )  # all amplitudes at 1: the public default
-    assert ns["REFUSALS"] == {}
-    for i, name in enumerate(ns["FREE"]):
-        low, high = ns["PRIOR"][name]
-        for value in (low - 0.01 * (high - low), high + 0.01 * (high - low), math.nan):
-            x = x0.copy()
-            x[i] = value
-            assert ns["log_posterior"](x) == -math.inf, (name, value)
-        for value in (low, high):  # the edges belong to the box
-            x = x0.copy()
-            x[i] = value
-            if name != "r_LLS":
-                assert math.isfinite(ns["log_posterior"](x)), (name, value)
-    assert ns["REFUSALS"] == {}, "a point outside the prior is not a refusal of the model"
-    # inside the prior, a point the predictor refuses: so many LLS sightlines that the fractions sum to more than one
-    x = x0.copy()
-    x[3] = 55.0
-    assert ns["log_posterior"](x) == -math.inf
-    assert (
-        list(ns["REFUSALS"]) == ["PredictorInputError"]
-        and ns["REFUSALS"]["PredictorInputError"][0] == 1
-    )
-    assert ns["log_posterior"](x) == -math.inf and ns["REFUSALS"]["PredictorInputError"][0] == 2
-    assert math.isfinite(ns["log_posterior"](x0))  # and the sampler goes on
-
-
-def test_the_flat_prior_is_the_trained_box_and_the_recorded_mean_flux_range():
-    import types
-
-    import hcd_analysis.predictor as hp
-
-    ns = _namespace("helpers-posterior")
-    fake = types.SimpleNamespace(
-        provenance={"lineage": {"cache": {"settings": {"alpha_range": [0.61, 1.37]}}}}
-    )
-    prior = ns["flat_prior"](fake)
-    assert list(prior) == list(ns["FREE"])
-    limits = dict(zip(hp.PARAM_NAMES, (tuple(float(v) for v in row) for row in hp.PARAM_LIMITS)))
-    assert prior["ns"] == limits["ns"] and prior["Ap"] == limits["Ap"]
-    assert prior["tau0_amp"] == (0.61, 1.37) and prior["r_LLS"] == (0.0, 3.0)
-
-
-# ------------------------------------------------------------------------------------------ the sampler and its files
-def test_metropolis_recovers_a_two_dimensional_gaussian():
-    import numpy as np
-
-    ns = _namespace("helpers-sampler")
-    mean = np.array([1.0, -2.0])
-    cov = np.array([[1.0, 0.6], [0.6, 2.0]])
-    inverse = np.linalg.inv(cov)
-
-    def logp(x):
-        r = x - mean
-        return -0.5 * float(r @ inverse @ r)
-
-    proposal = (2.38**2 / 2.0) * cov
-    chain, logps, acceptance = ns["metropolis"](
-        logp, mean + 1.0, proposal, 40000, np.random.default_rng(11)
-    )
-    assert chain.shape == (40000, 2) and logps.shape == (40000,) and 0.2 < acceptance < 0.5
-    assert np.array_equal(
-        logps, [logp(x) for x in chain]
-    )  # the stored value is that of the stored state
-    kept = chain[2000:]
-    assert np.allclose(kept.mean(axis=0), mean, atol=0.12)
-    assert np.allclose(np.cov(kept.T), cov, rtol=0.2, atol=0.1)
-    moves = np.any(np.diff(chain, axis=0) != 0.0, axis=1)
-    assert moves.mean() == pytest.approx(
-        acceptance, abs=2e-4
-    )  # the acceptance is the fraction of steps that moved
-    # the same seed gives the same chain; another seed another one
-    again, _, _ = ns["metropolis"](logp, mean + 1.0, proposal, 500, np.random.default_rng(11))
-    other, _, _ = ns["metropolis"](logp, mean + 1.0, proposal, 500, np.random.default_rng(12))
-    assert np.array_equal(again, chain[:500]) and not np.array_equal(other, chain[:500])
-
-    # where the log posterior is minus infinity (or not a number) the chain never goes, and it does not stop
-    def walled(x):
-        if x[0] < 0.5:
-            return -np.inf
-        return np.nan if x[1] > 0.0 else logp(x)
-
-    chain, logps, acceptance = ns["metropolis"](
-        walled, np.array([1.0, -2.0]), proposal, 3000, np.random.default_rng(3)
-    )
-    assert (
-        chain[:, 0].min() >= 0.5
-        and chain[:, 1].max() <= 0.0
-        and np.all(np.isfinite(logps))
-        and acceptance > 0.05
-    )
-    with pytest.raises(ValueError):
-        ns["metropolis"](walled, np.array([0.0, -2.0]), proposal, 10, np.random.default_rng(3))
-
-
-def test_rhat_is_near_one_for_independent_draws_and_large_for_shifted_chains():
-    import numpy as np
-
-    ns = _namespace("helpers-diagnostics")
-    rng = np.random.default_rng(5)
-    draws = rng.standard_normal((4, 2000, 3)) * [1.0, 10.0, 0.01] + [0.0, 5.0, -1.0]
-    out = ns["split_rhat_and_ess"](draws)
-    assert set(out) == {"rhat", "ess_bulk", "ess_tail"}
-    assert out["rhat"].shape == out["ess_bulk"].shape == out["ess_tail"].shape == (3,)
-    assert np.all(out["rhat"] < 1.01) and np.all(out["rhat"] > 0.999)
-    assert np.all(out["ess_bulk"] > 0.85 * 8000) and np.all(out["ess_bulk"] < 1.15 * 8000)
-    # the tail: independent draws keep about all of them (the estimate is noisier than the bulk's)
-    assert np.all(out["ess_tail"] > 0.75 * 8000) and np.all(out["ess_tail"] < 1.25 * 8000)
-    # the statistics do not depend on the scale or the location of a parameter
-    same = ns["split_rhat_and_ess"](draws[:, :, :1] * 8.0 - 3.0)
-    for key in out:
-        assert same[key][0] == pytest.approx(out[key][0], rel=1e-6), key
-    # one chain somewhere else: its mean off by two standard deviations
-    shifted = draws.copy()
-    shifted[0, :, 0] += 2.0
-    out = ns["split_rhat_and_ess"](shifted)
-    assert out["rhat"][0] > 1.1 and np.all(out["rhat"][1:] < 1.01)
-    assert out["ess_bulk"][0] < 100
-    # one chain three times as wide, the same mean: the folded half of the statistic sees it
-    wide = draws.copy()
-    wide[1, :, 2] = -1.0 + 3.0 * (wide[1, :, 2] + 1.0)
-    assert ns["split_rhat_and_ess"](wide)["rhat"][2] > 1.05
-    # a chain that drifts: its two halves differ, which the split sees with one chain alone
-    drift = rng.standard_normal((1, 2000, 1)) + np.linspace(0.0, 3.0, 2000)[None, :, None]
-    assert ns["split_rhat_and_ess"](drift)["rhat"][0] > 1.1
-    # correlated draws: an autoregressive chain with coefficient 0.9 keeps about (1 - 0.9) / (1 + 0.9) of its draws
-    ar = np.empty((4, 20000))
-    ar[:, 0] = rng.standard_normal(4)
-    noise = rng.standard_normal((4, 20000)) * np.sqrt(1.0 - 0.9**2)
-    for t in range(1, 20000):
-        ar[:, t] = 0.9 * ar[:, t - 1] + noise[:, t]
-    out = ns["split_rhat_and_ess"](ar[:, :, None])
-    expected = 80000 * (1.0 - 0.9) / (1.0 + 0.9)
-    assert 0.75 * expected < out["ess_bulk"][0] < 1.3 * expected and out["rhat"][0] < 1.01
-    # the tail of strongly correlated draws: far below the number of draws, and it is its own number
-    assert 100 < out["ess_tail"][0] < 0.25 * 80000 and out["ess_tail"][0] != out["ess_bulk"][0]
-    # draws whose width changes slowly (wide for 250 steps, narrow for 250, and so on) and whose sign is random: the
-    # levels are uncorrelated, so the bulk keeps its draws, but the tails are visited in bursts
-    width = np.where((np.arange(8000) // 250) % 2 == 0, 3.0, 1.0)
-    bursts = rng.standard_normal((4, 8000, 1)) * width[None, :, None]
-    out_bursts = ns["split_rhat_and_ess"](bursts)
-    assert (
-        out_bursts["ess_bulk"][0] > 0.6 * 32000
-        and out_bursts["ess_tail"][0] < 0.25 * out_bursts["ess_bulk"][0]
-    )
-    with pytest.raises(ValueError):
-        ns["split_rhat_and_ess"](draws[0])  # two dimensions: the chains axis is missing
-
-
-def test_chain_files_round_trip_and_weights_sum_to_the_steps(tmp_path):
-    import numpy as np
-
-    ns = _namespace("helpers-chain-files")
-    rng = np.random.default_rng(9)
-    n_chains, n_steps, d = 3, 400, 4
-    chains = np.empty((n_chains, n_steps, d))
-    for c in range(
-        n_chains
-    ):  # a walk that stays where it is on two steps in three, as a sampler does
-        x = rng.standard_normal(d) * [1.0, 1e-9, 1.0, 1.0]
-        for t in range(n_steps):
-            if rng.uniform() < 1.0 / 3.0:
-                x = x + rng.standard_normal(d) * [0.1, 1e-10, 0.1, 0.1]
-            chains[c, t] = x
-    logps = -0.5 * np.sum(chains**2, axis=2)
-    names = ("a", "b", "c", "r_x")
-    ranges = {"a": (-5.0, 5.0), "b": (-1e-8, 1e-8), "c": (-5.0, 5.0), "r_x": (0.0, 3.0)}
-    prefix = tmp_path / "out" / "synthetic_chain"
-    prefix.parent.mkdir()
-    ns["write_chains"](prefix, chains, logps, names, ranges)
-    written = sorted(p.name for p in prefix.parent.iterdir())
-    assert written == [f"synthetic_chain.{i}.txt" for i in (1, 2, 3)] + [
-        "synthetic_chain.paramnames",
-        "synthetic_chain.ranges",
-    ]
-    assert (prefix.parent / "synthetic_chain.paramnames").read_text().split() == list(names)
-    assert [
-        line.split() for line in (prefix.parent / "synthetic_chain.ranges").read_text().splitlines()
-    ] == [[name, repr(float(low)), repr(float(high))] for name, (low, high) in ranges.items()]
-    first = (prefix.parent / "synthetic_chain.1.txt").read_text().splitlines()
-    assert (
-        first[0].split() == ["#", "weight", "minuslogpost", *names]
-        and len(first[1].split()) == 2 + d
-    )
-
-    # the second column is minus the log posterior of the row's state
-    assert float(first[1].split()[1]) == pytest.approx(-logps[0, 0], rel=1e-11)
-    assert int(first[1].split()[0]) >= 1
-
-    samples, weights, index = ns["read_chains"](prefix)
-    assert samples.shape[1] == d and weights.shape == index.shape == (samples.shape[0],)
-    assert sorted(set(index)) == [1, 2, 3]
-    assert [int(weights[index == i].sum()) for i in (1, 2, 3)] == [
-        n_steps
-    ] * 3  # the weights sum to the steps
-    assert samples.shape[0] < n_chains * n_steps  # repeats are stored once, as a weight
-    back = ns["expand_chains"](samples, weights, index)
-    assert back.shape == chains.shape and np.allclose(back, chains, rtol=1e-12, atol=0)
-    # and what is read is what a second writing gives, exactly: the files are the record
-    again = tmp_path / "again" / "synthetic_chain"
-    again.parent.mkdir()
-    ns["write_chains"](again, back, logps, names, ranges)
-    assert all((again.parent / n).read_bytes() == (prefix.parent / n).read_bytes() for n in written)
-    # existing files are never overwritten
-    with pytest.raises(FileExistsError):
-        ns["write_chains"](prefix, chains, logps, names, ranges)
-    # chains of unequal length cannot be stacked
-    with pytest.raises(ValueError):
-        ns["expand_chains"](samples[:-1], weights[:-1], index[:-1])
-
-
-def test_levels_enclose_68_and_95_per_cent_of_a_gaussian():
-    import numpy as np
-
-    ns = _namespace("helpers-contours")
-    rng = np.random.default_rng(21)
-    draws = rng.multivariate_normal([0.0, 0.0], [[1.0, 0.7], [0.7, 2.0]], size=400000)
-    h, _, _ = np.histogram2d(draws[:, 0], draws[:, 1], bins=70)
-    l68, l95 = ns["levels_68_95"](h)
-    assert l68 > l95 > 0
-    assert h[h >= l68].sum() / h.sum() == pytest.approx(0.68, abs=0.01)
-    assert h[h >= l95].sum() / h.sum() == pytest.approx(0.95, abs=0.01)
-    weighted = np.histogram2d(draws[:, 0], draws[:, 1], bins=70, weights=np.full(len(draws), 2.5))[
-        0
-    ]
-    assert np.allclose(
-        ns["levels_68_95"](weighted), (2.5 * l68, 2.5 * l95)
-    )  # the levels scale with the histogram
-
-
-# ------------------------------------------------------------------------------------------ the chain script
-def _chain_script():
-    spec = importlib.util.spec_from_file_location("run_mock_chain", TUTORIAL / "run_mock_chain.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _synthetic_posterior_namespace():
-    """The notebook's sampler, diagnostics and chain-file cells with a made-up log posterior of four parameters: a
-    Gaussian inside a box, a wall where it 'refuses' as the predictor does, and a strip where it warns as the
-    predictor does at the edge of the multi-fidelity tables."""
-    import warnings
-
-    import numpy as np
-
-    import hcd_analysis.predictor as hp
-
-    ns = _namespace(
-        "helpers-posterior", "helpers-sampler", "helpers-diagnostics", "helpers-chain-files"
-    )
-    centre = np.array([0.0, 1.0, 5.0, 1.0])
-    width = np.array([1.0, 0.5, 2.0, 0.6])
-    ns["PRIOR"] = {
-        "ns": (-6.0, 6.0),
-        "Ap": (-2.0, 4.0),
-        "tau0_amp": (-7.0, 17.0),
-        "r_LLS": (0.0, 3.0),
-    }
-    ns["X_TRUTH"] = centre.copy()
-
-    def log_posterior(x):
-        x = np.asarray(x, dtype=float)
-        for value, name in zip(x, ns["FREE"]):
-            low, high = ns["PRIOR"][name]
-            if not (low <= value <= high):
-                return -np.inf
-        if x[3] > 2.2:  # the wall
-            entry = ns["REFUSALS"].setdefault(
-                "PredictorInputError", [0, "the fractions sum to more than one"]
-            )
-            entry[0] += 1
-            return -np.inf
-        if x[2] > 8.0:  # the strip
-            warnings.warn(hp.MeanFluxRangeWarning("outside the tables"))
-        return -0.5 * float(np.sum(((x - centre) / width) ** 2))
-
-    ns["log_posterior"] = log_posterior
-    return ns, np.diag(width**2)
-
-
-def test_the_chain_script_has_no_option_that_changes_a_setting(capsys):
-    script = _chain_script()
-    assert (script.N_CHAINS, script.BURN_IN, script.MAX_STEPS, script.MIN_STEPS) == (
-        4,
-        1000,
-        10000,
-        5000,
-    )
-    assert (script.START_SEED, script.SAMPLER_SEED, script.START_SCALE) == (20261120, 20261130, 9.0)
-    assert (script.RHAT_MAX, script.ESS_BULK_MIN, script.ESS_TAIL_MIN, script.ACCEPTANCE_RANGE) == (
-        1.01,
-        1000.0,
-        1000.0,
-        (0.15, 0.50),
-    )
-    assert (
-        script.PRIOR_WORDS
-        == "uniform within the stated ranges, restricted to physically allowed class fractions"
-    )
-    with pytest.raises(SystemExit):
-        script.main(["--help"])
-    options = set(re.findall(r"(?<![\w-])--[a-z][a-z-]*", capsys.readouterr().out))
-    assert options == {"--help", "--preflight", "--run", "--from-preflight"}
-    for bad in (
-        ["--run", "x"],
-        ["--preflight", "a", "--run", "b"],
-        ["--run", "x", "--from-preflight", "p", "--steps", "9"],
-        [],
-    ):
-        with pytest.raises(SystemExit):
-            script.main(bad)
-        capsys.readouterr()
-
-
-def test_the_verdict_holds_every_criterion_and_names_what_fails():
-    script = _chain_script()
-    names = ("ns", "Ap", "tau0_amp", "r_LLS")
-    good = {
-        "rhat": dict.fromkeys(names, 1.01),
-        "ess_bulk": dict.fromkeys(names, 1000.0),
-        "ess_tail": dict.fromkeys(names, 1000.0),
-    }
-    assert script.verdict_of(good, [0.15, 0.3, 0.3, 0.50]) == ("PASSED", [])
-    for key, value, word in (
-        ("rhat", 1.0101, "split R-hat of Ap"),
-        ("ess_bulk", 999.0, "ess_bulk of Ap"),
-        ("ess_tail", 999.0, "ess_tail of Ap"),
-        ("rhat", float("nan"), "split R-hat of Ap"),
-    ):
-        bad = {k: dict(v) for k, v in good.items()}
-        bad[key]["Ap"] = value
-        verdict, failed = script.verdict_of(bad, [0.3] * 4)
-        assert verdict == "FAILED" and len(failed) == 1 and word in failed[0], (key, value)
-    for acceptance in (0.149, 0.501, float("nan")):
-        verdict, failed = script.verdict_of(good, [0.3, acceptance, 0.3, 0.3])
-        assert verdict == "FAILED" and "chain 2" in failed[0]
-    verdict, failed = script.verdict_of(
-        {k: dict.fromkeys(names, 0.0 if k != "rhat" else 2.0) for k in good}, [0.0] * 4
-    )
-    assert (
-        verdict == "FAILED" and len(failed) == 16
-    )  # four parameters times three statistics, and four chains
-
-
-def test_the_registered_run_writes_its_files_once_and_records_the_two_edges(tmp_path):
-    import numpy as np
-
-    script = _chain_script()
-    ns, sigma = _synthetic_posterior_namespace()
-    n_steps = 1400
-    chains, logps, records, proposal, edges = script.sample(ns, sigma, n_steps, say=lambda *a: None)
-    assert (
-        chains.shape == (4, n_steps, 4)
-        and logps.shape == (4, n_steps)
-        and edges.shape == (4, n_steps)
-    )
-    assert np.allclose(proposal, (2.38**2 / 4) * sigma)
-    assert [r["start_seed"] for r in records] == [20261120 + i for i in range(4)]
-    assert [r["sampler_seed"] for r in records] == [20261130 + i for i in range(4)]
-    # each chain has its own two generators, the registered ones: its start is the first draw of
-    # default_rng(20261120 + i) around the truth with covariance 9 SIGMA that lies inside the prior, and its steps
-    # are those of the notebook's sampler with default_rng(20261130 + i)
-    lower = np.linalg.cholesky(9.0 * sigma)
-    for i, r in enumerate(records):
-        rng = np.random.default_rng(20261120 + i)
-        for _ in range(r["start_redraws"] + 1):
-            start = ns["X_TRUTH"] + lower @ rng.standard_normal(4)
-        assert np.array_equal(r["start"], start) and np.isfinite(ns["log_posterior"](start))
-        direct, _, _ = ns["metropolis"](
-            ns["log_posterior"], start, proposal, 60, np.random.default_rng(20261130 + i)
-        )
-        assert np.array_equal(direct, chains[i, :60])
-    assert len({tuple(r["start"]) for r in records}) == 4
-    again = script.sample(ns, sigma, 50, say=lambda *a: None)
-    assert np.array_equal(again[0], chains[:, :50])  # the seeds fix the run
-    for i, r in enumerate(records):
-        assert r["proposals"] == n_steps and r["steps"] == n_steps
-        assert np.all(chains[i, :, 3] <= 2.2) and r["largest_r_LLS"] == chains[i, :, 3].max()
-        assert (
-            r["proposals_refused_class_fractions_above_one"] > 0
-        )  # the wall was met, and never crossed
-        assert r["proposals_at_the_mean_flux_edge"] > 0
-        assert (
-            r["steps_at_the_mean_flux_edge"]
-            == int(np.sum(chains[i, :, 2] > 8.0))
-            == int(edges[i].sum())
-        )
-        assert 0.0 < r["acceptance"] < 1.0
-
-    out = script.new_folder(tmp_path / "run")
-    extra = {
-        "edge_steps": edges,
-        "smallest_r_max_at_the_truth": 2.2,
-        "identities": {"truth": {"x": 1.0}},
-    }
-    doc = script.finish_run(ns, out, chains, logps, records, proposal, sigma, n_steps, extra)
-    names = sorted(p.name for p in out.iterdir())
-    assert names == [f"mock_chain_4p.{i}.txt" for i in (1, 2, 3, 4)] + [
-        "mock_chain_4p.paramnames",
-        "mock_chain_4p.provenance.json",
-        "mock_chain_4p.ranges",
-    ]
-    stored = json.loads((out / "mock_chain_4p.provenance.json").read_text())
-    assert stored == json.loads(json.dumps(doc)) and stored["truth"] == {"x": 1.0}
-    assert stored["files_sha256"] == {
-        n: _sha256((out / n).read_bytes()) for n in names if "provenance" not in n
-    }
-    assert stored["steps_per_chain"] == n_steps and stored["kept_steps_per_chain"] == n_steps - 1000
-    # the diagnostics are those of the files as read back, after the burn-in; the verdict follows from them alone
-    back = ns["expand_chains"](*ns["read_chains"](out / "mock_chain_4p"))[:, 1000:]
-    diag = script.diagnostics(ns, back)
-    assert stored["diagnostics_after_burn_in"] == json.loads(json.dumps(diag))
-    assert (stored["verdict"], stored["criteria_not_met"]) == tuple(
-        script.verdict_of(diag, stored["acceptance"])
-    )
-    assert (
-        stored["verdict"] == "FAILED" and stored["criteria_not_met"]
-    )  # 400 kept steps cannot reach an ESS of 1000
-    # the two edges, each a block of its own
-    boundary, edge = stored["class_fraction_boundary"], stored["mean_flux_edge"]
-    assert boundary["proposals"] == 4 * n_steps
-    assert boundary["proposals_refused"] == sum(
-        r["proposals_refused_class_fractions_above_one"] for r in records
-    )
-    assert boundary["largest_r_LLS_kept"] == pytest.approx(back[:, :, 3].max(), rel=1e-12)
-    assert edge["kept_steps_at_the_edge"] == int(edges[:, 1000:].sum()) > 0
-    kept = chains[:, 1000:].reshape(-1, 4)
-    without = kept[~edges[:, 1000:].reshape(-1)]
-    assert edge["summaries_with_all_kept_steps"]["tau0_amp"]["mean"] == pytest.approx(
-        kept[:, 2].mean(), rel=1e-9
-    )
-    assert edge["summaries_without_the_steps_at_the_edge"]["tau0_amp"]["mean"] == pytest.approx(
-        without[:, 2].mean(), rel=1e-9
-    )
-    assert edge["largest_shift_of_a_mean_in_units_of_its_sd"] > 0
-    # an output folder is never reused, and the files in it are never written twice
-    before = {n: (out / n).read_bytes() for n in names}
-    with pytest.raises(SystemExit):
-        script.new_folder(out)
-    with pytest.raises(FileExistsError):
-        script.finish_run(ns, out, chains, logps, records, proposal, sigma, n_steps, extra)
-    assert {n: (out / n).read_bytes() for n in names} == before
-
-
-def test_the_registered_run_refuses_a_preflight_that_did_not_pass_or_is_too_short(tmp_path):
-    script = _chain_script()
-    for verdict, n_steps, word in (
-        ("PREFLIGHT FAILED: the equality or the mock", 9000, "did not pass"),
-        ("PREFLIGHT DONE: no chain was run", 4999, "below 5000"),
-    ):
-        folder = tmp_path / word.replace(" ", "_")
-        folder.mkdir()
-        (folder / "preflight.json").write_text(
-            json.dumps({"verdict": verdict, "timing": {"n_steps": n_steps}})
-        )
-        with pytest.raises(SystemExit, match=word):
-            script.run(tmp_path / "never", folder)
-        assert not (tmp_path / "never").exists()
 
 
 # ------------------------------------------------------------------------------------------ the older notebooks
@@ -974,3 +313,188 @@ def test_the_five_legacy_notebooks_and_their_readme_carry_the_banner():
     exec(builder_text[start : builder_text.index(")\n", start) + 2], scope)
     assert scope["LEGACY_BANNER"] == LEGACY_BANNER
     assert (TUTORIAL / "hcd_priya_tutorial.ipynb").is_file()  # what the banner points to exists
+
+
+# ------------------------------------------------------------------------------------------ released code, run as it is
+FORBIDDEN_IN_A_NAME = ("sampl", "chain", "metropolis", "posterior", "mcmc")
+FORBIDDEN_IMPORTS = (
+    "cobaya",
+    "emcee",
+    "getdist",
+    "numpyro",
+    "blackjax",
+    "dynesty",
+    "pymc",
+    "scipy.optimize",
+)
+
+
+def test_the_notebook_defines_no_inference_code_of_its_own():
+    """The notebook is a tutorial of the published package: it calls the package, the released figure scripts and
+    the released example. It defines no sampler, no posterior and no chain code, and imports no sampler or
+    optimiser; the removed first draft must not come back."""
+    for kind, cell_id, source in _builder().CELLS:
+        if kind != "code":
+            continue
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bad = [word for word in FORBIDDEN_IN_A_NAME if word in node.name.lower()]
+                assert not bad, f"cell {cell_id} defines {node.name}"
+            modules = []
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""] + [
+                    f"{node.module}.{alias.name}" for alias in node.names
+                ]
+            for module in modules:
+                assert not any(
+                    module == bad or module.startswith(bad + ".") for bad in FORBIDDEN_IMPORTS
+                ), f"cell {cell_id} imports {module}"
+    assert sorted(p.name for p in TUTORIAL.glob("*.py")) == [
+        "_build_tutorial.py"
+    ], "a second script beside the builder"
+
+
+@pytest.fixture
+def released(cells, monkeypatch, tmp_path):
+    """The asset cell and the cell that runs released code, in a working folder of their own."""
+    ns, clone, cache = cells
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)  # the cell makes its output folder in the working folder
+    exec(
+        compile(_builder().helper_source("helpers-released"), "<cell helpers-released>", "exec"), ns
+    )
+    assert (work / "tutorial_output").is_dir()
+    return ns, clone, cache, work
+
+
+def _pin(ns, clone, relpath, data):
+    """A synthetic file of the clone, pinned in the table as the tag's files are."""
+    path = clone / relpath
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    ns["ASSETS"][relpath] = {"sha256": _sha256(data), "url": "http://127.0.0.1:9/" + relpath}
+
+
+def test_a_released_script_runs_unchanged_from_one_folder_with_its_pinned_files(released):
+    ns, clone, cache, work = released
+    script = (
+        b"import pathlib, sys\n"
+        b"root = pathlib.Path(__file__).resolve().parents[2]\n"  # as the figure scripts find their data
+        b"print('table:', (root / 'docs' / 'data' / 'table.txt').read_text().strip())\n"
+        b"print('   a detail line')\n"
+        b"print('arguments:', sys.argv[1:])\n"
+        b"pathlib.Path(sys.argv[2]).write_text('drawn')\n"
+    )
+    _pin(ns, clone, "scripts/figures/draw.py", script)
+    _pin(ns, clone, "docs/data/table.txt", b"seven synthetic numbers\n")
+    printed = ns["run_released_script"](
+        "scripts/figures/draw.py",
+        ["--out", "tutorial_output/synthetic.png"],
+        needs=("docs/data/table.txt",),
+    )
+    assert printed.splitlines() == [
+        "table: seven synthetic numbers",
+        "   a detail line",
+        "arguments: ['--out', 'tutorial_output/synthetic.png']",
+    ]
+    assert (
+        work / "tutorial_output" / "synthetic.png"
+    ).read_text() == "drawn"  # relative to the working folder
+    # the script ran from the cache folder, where it and its data stand at their repository paths, as pinned
+    assert (cache / "scripts" / "figures" / "draw.py").read_bytes() == script
+    assert (cache / "docs" / "data" / "table.txt").read_bytes() == b"seven synthetic numbers\n"
+    # a changed copy in the clone is not what runs: the pinned bytes in the cache are
+    (clone / "docs" / "data" / "table.txt").write_bytes(b"changed in the clone\n")
+    (cache / "docs" / "data" / "table.txt").write_bytes(b"changed in the cache\n")
+    with pytest.raises(
+        RuntimeError, match="docs/data/table.txt"
+    ):  # neither copy is the pinned one, and no server
+        ns["run_released_script"](
+            "scripts/figures/draw.py", ["--out", "x"], needs=("docs/data/table.txt",)
+        )
+    # a script that fails stops the notebook with what it wrote
+    _pin(
+        ns,
+        clone,
+        "scripts/figures/fails.py",
+        b"import sys\nsys.stderr.write('no such table\\n')\nsys.exit(3)\n",
+    )
+    with pytest.raises(RuntimeError, match="ended with code 3") as err:
+        ns["run_released_script"]("scripts/figures/fails.py", [], needs=())
+    assert "no such table" in str(err.value)
+
+
+def test_the_output_of_a_script_is_shown_without_its_detail_lines(released, capsys):
+    ns = released[0]
+    capsys.readouterr()
+    ns["show_script_output"](
+        "first line\n   design point 3: a flag\n   design point 4: a flag\n\nwrote the figure: x.png\n"
+    )
+    assert capsys.readouterr().out.splitlines() == [
+        "the script printed: first line",
+        "the script printed: wrote the figure: x.png",
+        "(2 indented detail lines of the script are not shown here)",
+    ]
+
+
+def _archive(path, entries):
+    """A tar.gz of synthetic entries: (name, bytes) for a file, (name, None) for a folder, (name, 'link') for a link."""
+    import io
+    import tarfile
+
+    with tarfile.open(path, "w:gz") as tar:
+        for name, content in entries:
+            info = tarfile.TarInfo(name)
+            if content is None:
+                info.type, info.mode = tarfile.DIRTYPE, 0o755
+                tar.addfile(info)
+            elif content == "link":
+                info.type, info.linkname = tarfile.SYMTYPE, "/etc/hostname"
+                tar.addfile(info)
+            else:
+                info.size = len(content)
+                tar.addfile(info, io.BytesIO(content))
+    return path.read_bytes()
+
+
+def test_an_archive_is_unpacked_once_and_only_if_every_entry_is_a_plain_file_under_its_folder(
+    released, tmp_path
+):
+    ns, clone, cache, work = released
+    good = [
+        ("example", None),
+        ("example/manifest.json", b"{}"),
+        ("example/sub", None),
+        ("example/sub/data.txt", b"numbers\n"),
+    ]
+    _pin(ns, clone, "example.tar.gz", _archive(tmp_path / "good.tar.gz", good))
+    root = ns["unpack_archive"]("example.tar.gz", "example", "manifest.json")
+    assert root == cache / "example" and (root / "sub" / "data.txt").read_bytes() == b"numbers\n"
+    assert sorted(p.name for p in cache.iterdir()) == [
+        "example"
+    ], "a scratch folder was left in the cache"
+    # a second call unpacks nothing: the folder is there, with its marker
+    (root / "sub" / "data.txt").write_bytes(b"kept as it is\n")
+    assert ns["unpack_archive"]("example.tar.gz", "example", "manifest.json") == root
+    assert (root / "sub" / "data.txt").read_bytes() == b"kept as it is\n"
+    # an unfinished earlier copy (no marker) is replaced by the archive's content
+    (root / "manifest.json").unlink()
+    ns["unpack_archive"]("example.tar.gz", "example", "manifest.json")
+    assert (root / "sub" / "data.txt").read_bytes() == b"numbers\n"
+    # entries that are not plain files under the one folder: refused, and nothing is unpacked
+    for name, entries in (
+        ("climbs.tar.gz", [("other", None), ("other/../../escaped.txt", b"x")]),
+        ("elsewhere.tar.gz", [("other", None), ("other/ok.txt", b"x"), ("second/file.txt", b"x")]),
+        ("link.tar.gz", [("other", None), ("other/link", "link")]),
+        ("absolute.tar.gz", [("/other/file.txt", b"x")]),
+    ):
+        _pin(ns, clone, name, _archive(tmp_path / name, entries))
+        with pytest.raises(RuntimeError, match="not a plain file under other"):
+            ns["unpack_archive"](name, "other", "ok.txt")
+        assert sorted(p.name for p in cache.iterdir()) == ["example"], name
+        assert (
+            not (tmp_path / "escaped.txt").exists() and not (cache.parent / "escaped.txt").exists()
+        )

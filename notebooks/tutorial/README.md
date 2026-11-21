@@ -1,7 +1,9 @@
 # The public tutorial
 
-`hcd_priya_tutorial.ipynb` is one notebook in three parts: the scientific motivation, the emulator, and a mock
-inference. It runs from an installed package and needs no file of the PRIYA simulations.
+`hcd_priya_tutorial.ipynb` is one notebook in three parts: the scientific motivation, the emulator, and the public
+likelihood with the repository's mock-recovery example. It runs from an installed package and needs no file of the
+PRIYA simulations. It adds no method of its own: it calls the package, the released figure scripts and the
+released example.
 
 **PROVISIONAL (PI to refine).**
 
@@ -26,17 +28,15 @@ file is used only when its sha256 is the one written in the notebook.
 | `_build_tutorial.py` | the builder: every cell as source; `python _build_tutorial.py` writes the notebook without outputs |
 | `assets/ASSETS.json` | every stored file the notebook reads: path, sha256, size, URL, what it is, where it came from |
 | `assets/figures/` | the schematic of the emulator shown in Part II, with `PROVENANCE.md` |
-| `run_mock_chain.py` | the preflight and the one registered run of the stored mock chains of Part III; it runs the notebook's own cells |
 
 ## What is pending
 
-The stored chains of Part III have not been run. They are run once, after the project lead's approval of the
-preflight. Until then the cells that read them, the contours and the posterior predictive are text cells marked
-PENDING, and no chain file is in this folder. The image of Fig. 1 is a placeholder.
+The image of Fig. 1 is a placeholder. Every text cell is provisional.
 
 ## Where the stored files come from
 
 Every URL in `assets/ASSETS.json` is immutable: the tag `v1.0.0` of this repository (the literature tables under
-`docs/figures/data/`, each folder with its own `PROVENANCE.md`), a file of the GitHub release `v1.0.0` (the
-example data set), or one commit of this repository (files added for the tutorial). No file is fetched from a
-branch.
+`docs/figures/data/`, each folder with its own `PROVENANCE.md`; the figure scripts under `scripts/figures/`; the
+example `examples/mock_recovery.py`), a file of the GitHub release `v1.0.0` (the example data set), or one commit
+of this repository (the schematic of the emulator). No file is fetched from a branch. The figures that the
+released code writes while the notebook runs go into `tutorial_output/` beside the notebook, which git ignores.
