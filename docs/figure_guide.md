@@ -8,8 +8,8 @@ figures/analysis/
 ├── 01_catalog_obs/        — CDDF, dN/dX, Ω_HI vs observations
 ├── 02_param_sensitivity/  — 9-parameter sensitivity grids + partial correlation
 ├── 03_templates_and_p1d/  — Rogers per-class templates + P1D HR/LF convergence
-├── 04_hcd_mf/             — HCD multi-fidelity development (14 figures)
-└── data/                  — summary HDF5s + CSVs
+├── 04_hcd_mf/             — HCD multi-fidelity development (12 figures)
+└── data/                  — summary HDF5s + CSVs (not in this repository)
 ```
 
 Science narrative is in [`analysis.md`](analysis.md) (§1–6) and

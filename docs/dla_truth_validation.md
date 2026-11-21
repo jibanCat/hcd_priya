@@ -227,7 +227,7 @@ noise-driven false positives.
 
 ### NHI scatter figure
 
-![τ-peak finder NHI vs particle truth, all 3 sims](../figures/analysis/05_truth_validation/dla_truth_recovery.png)
+Figure: τ-peak finder NHI vs particle truth, all 3 sims (`figures/analysis/05_truth_validation/dla_truth_recovery.png`, not in this repository).
 
 Three panels (one per HiRes sim with rand_spectra). Points coloured by
 redshift, identity line at slope 1. The handful of off-diagonal points
@@ -253,7 +253,7 @@ The HiRes-only validation tells us:
    smaller than the (0.62 dex post-bug-#7-fix) statistical uncertainty
    and consistent with the slight under-prediction the production
    pipeline reports vs PW09 / Noterdaeme+2012 / Ho+2021 — see
-   `docs/analysis.md` §3.
+   `docs/analysis.md` §2.
 4. **No rerun was judged warranted at the time (2026-04-27, before the bug-8 fix).** The four hypotheses passed cleanly; any
    anomaly that would justify a full reprocess would have to show up as
    either (a) a > 0.05 dex bias, (b) > 0.15 dex scatter, (c) < 80 %

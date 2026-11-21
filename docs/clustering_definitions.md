@@ -317,8 +317,8 @@ This document gates the implementation. After user approval:
 1. `hcd_analysis/clustering.py` — coordinate conversion (DONE), ξ_× / ξ_DD / ξ_FF pair counters, bias fitter.
 2. `hcd_analysis/lya_bias.py` — `b_Lyα` calibrator from the all-HCD-masked P1D (constructed on the fly from τ + catalog, since `p1d.npz` only saves `all` and `no_DLA_priya`).
 3. `tests/test_clustering.py` — tests 1–11 (test 10 + 11 part B are in `tests/validate_*.py`).
-4. `scripts/run_clustering_one_snap.py` — one-snap driver.
-5. `scripts/plot_clustering_validation.py` — produces `figures/analysis/04_clustering/{xi_cross_2d.png, xi_auto_2d.png, xi_ff_2d.png, bias_recovery.png, fr2012_sanity.png}`.
+4. `scripts/run_clustering_one_snap.py` (not in this repository) — one-snap driver.
+5. `scripts/plot_clustering_validation.py` (not in this repository) — produces `figures/analysis/04_clustering/{xi_cross_2d.png, xi_auto_2d.png, xi_ff_2d.png, bias_recovery.png, fr2012_sanity.png}`.
 
 **Validation order (no skipping):**
 

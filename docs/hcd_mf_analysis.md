@@ -9,7 +9,7 @@ and per-class P1D templates — and the development of a multi-fidelity
 All figures here are inline and live under
 [`figures/analysis/04_hcd_mf/`](../figures/analysis/04_hcd_mf/).
 Summary HDF5s and CSVs are under
-[`figures/analysis/data/`](../figures/analysis/data/).
+`figures/analysis/data/` (not in this repository).
 
 > **April 2026 study of an HCD-statistics MF, 3 matched pairs; not the release P1D MF.**
 >
@@ -59,7 +59,7 @@ The answer requires:
   counterpart — used for out-of-sample validation in §6.
 
 Per-(sim, z) aggregates stored in
-[`figures/analysis/data/hcd_summary_{lf,hr}.h5`](../figures/analysis/data/).
+`figures/analysis/data/hcd_summary_{lf,hr}.h5` (not in this repository).
 
 ---
 
@@ -71,7 +71,7 @@ Per-(sim, z) aggregates stored in
 to PW09 / Noterdaeme+12 / Ho+21 by factor ~1.5–2×.  Two bootstrap
 tests were run to check this:
 
-**Test v1 — across-sim bootstrap** (`scripts/hypothesis_dndx_and_ap.py`):
+**Test v1 — across-sim bootstrap** (`scripts/hypothesis_dndx_and_ap.py`, not in this repository):
 Resample 60 LF sims with replacement, compute ensemble-weighted
 dN/dX(DLA) at z ≈ 3.  Zero of 5000 bootstrap samples reached any of
 the 5 observational comparison points (PW09 in two z-bins, N12,
@@ -80,7 +80,7 @@ averages out cosmic variance — it captures parameter-space spread,
 not the true error bar.
 
 **Test v2 — per-sim cosmic-variance bootstrap + fiducial slice**
-(`scripts/bootstrap_dndx_per_sim.py`):
+(`scripts/bootstrap_dndx_per_sim.py`, not in this repository):
 
 For each LF sim, resample sightlines (using `catalog.skewer_idx`)
 with replacement.  The analytical CLT form
@@ -249,7 +249,7 @@ For each (quantity, z), compute σ(R)/R̄ across the 3 matched sims.
 
 ![HR/LF scalar ratios vs z per sim](../figures/analysis/04_hcd_mf/hf_lf_ratio_scalars.png)
 
-Key findings (`scripts/mf_deviation_from_flat.py`):
+Key findings (`scripts/mf_deviation_from_flat.py`, not in this repository):
 
 | Quantity | median σ/R̄ (full z) | max σ/R̄ (full z) | max σ/R̄ (in window [2.6, 4.6]) |
 |---|---:|---:|---:|
@@ -264,7 +264,7 @@ The flat assumption holds to 1–2 % inside z ∈ [2.6, 4.6] for most
 quantities, but Ω_HI(DLA) reaches 3.5 % in-window and 9 % at
 z = 2.2.  Separate treatment of z-extremes is needed.
 
-Poisson-vs-parameter-dependent diagnosis (`mf_z2_hypothesis_test.py`):
+Poisson-vs-parameter-dependent diagnosis (`mf_z2_hypothesis_test.py`, not in this repository):
 
 ![σ_observed vs σ_Poisson per quantity](../figures/analysis/04_hcd_mf/mf_z2_hypothesis_test.png)
 
@@ -314,7 +314,7 @@ G2:  R(A_p, z) = a(z) + [b₀ + b₁·(z − z_ref)] · (A_p − ⟨A_p⟩)  [sl
 captures A_p-dependence.  Plus a **"bad-fit flag"** per z-bin:
 `flag_z = 1` if `max|R − R_pred|/R̄_z > 2 %`.
 
-Results (`scripts/mf_global_fit.py`):
+Results (`scripts/mf_global_fit.py`, not in this repository):
 
 | Quantity | G1 b₀ | G2 b₁ | G1 resid | G2 resid | G2 improvement |
 |---|---:|---:|---:|---:|---:|
@@ -336,16 +336,16 @@ Visual at 3 representative z:
 ![Global fit G1 vs G2 at z = 2.8, 3.4, 4.2](../figures/analysis/04_hcd_mf/mf_global_fit_visual.png)
 
 Full per-quantity coefficient tables in
-[`figures/analysis/data/mf_global_fit_coefficients.csv`](../figures/analysis/data/mf_global_fit_coefficients.csv)
+`figures/analysis/data/mf_global_fit_coefficients.csv` (not in this repository)
 and
-[`figures/analysis/data/mf_global_fit_predictions.csv`](../figures/analysis/data/mf_global_fit_predictions.csv).
+`figures/analysis/data/mf_global_fit_predictions.csv` (not in this repository).
 
 ### 5.4 z-extreme treatment (z = 2.0–2.4 and z = 4.8–5.4)
 
 Inside the flat-MF-safe window [2.6, 4.6], residuals are ≤ 1.4 %.
 Outside, residuals blow up to 5–9 %.  Strategy comparison at the
 z-extremes using Ω_HI(DLA) as test case
-(`scripts/mf_low_z_breakdown.py`):
+(`scripts/mf_low_z_breakdown.py`, not in this repository):
 
 ![Step-by-step MF strategies at z-extremes](../figures/analysis/04_hcd_mf/mf_low_z_breakdown.png)
 
@@ -389,7 +389,7 @@ Testable once a 4th matched HR sim exists with different `heref` or
 
 ## 6. Held-out validation on the 4th HR sim (`ns0.914`)
 
-Protocol (`scripts/mf_fourth_sim_test.py`):
+Protocol (`scripts/mf_fourth_sim_test.py`, not in this repository):
 
 1. Fit the global MF on the 3 training pairs.
 2. For each HR record at ns0.914 (A_p=1.32e-9, n_s=0.914):
@@ -477,17 +477,17 @@ for a proper (A_p × z)-coupled emulator rather than a scalar correction.
 | Hypothesis tests (across-sim bootstrap + partial ρ) | `scripts/hypothesis_dndx_and_ap.py` | `02_param_sensitivity/hypothesis_partial_corr.png` |
 | Per-sim cosmic-variance bootstrap | `scripts/bootstrap_dndx_per_sim.py` | `04_hcd_mf/bootstrap_dndx_per_sim.png` |
 | HR vs LF dN/dX, Ω_HI vs obs | `scripts/plot_hcd_vs_obs_with_hr.py` | `01_catalog_obs/dndx_hr_vs_lf_vs_obs_per_class.png`, `01_catalog_obs/omega_hi_hr_vs_lf_vs_obs.png` |
-| Matched-pair HR vs LF scalars | `scripts/matched_pair_hr_vs_lf.py` | `04_hcd_mf/matched_pair_*_hr_vs_lf.png` |
-| HR/LF ratio of scalars vs z | `scripts/hf_lf_scalar_convergence.py` | `04_hcd_mf/hf_lf_ratio_scalars.png` |
-| HR/LF ratio of per-class templates | `scripts/hf_lf_template_convergence.py` | `04_hcd_mf/hf_lf_template_*.png` |
+| Matched-pair HR vs LF scalars | `scripts/matched_pair_hr_vs_lf.py` (not in this repository) | `04_hcd_mf/matched_pair_*_hr_vs_lf.png` |
+| HR/LF ratio of scalars vs z | `scripts/hf_lf_scalar_convergence.py` (not in this repository) | `04_hcd_mf/hf_lf_ratio_scalars.png` |
+| HR/LF ratio of per-class templates | `scripts/hf_lf_template_convergence.py` (not in this repository) | `04_hcd_mf/hf_lf_template_*.png` |
 | Flat-MF deviation table | `scripts/mf_deviation_from_flat.py` | — |
 | Poisson-floor test | `scripts/mf_z2_hypothesis_test.py` | `04_hcd_mf/mf_z2_hypothesis_test.png` |
-| Per-z linear fit + slope stability | `scripts/mf_fit_and_residuals.py` | `04_hcd_mf/mf_fit_vs_residuals_z3.png`, `04_hcd_mf/mf_slope_stability.png` |
+| Per-z linear fit + slope stability | `scripts/mf_fit_and_residuals.py` (not in this repository) | `04_hcd_mf/mf_fit_vs_residuals_z3.png`, `04_hcd_mf/mf_slope_stability.png` |
 | Z-extreme strategy comparison | `scripts/mf_low_z_breakdown.py` | `04_hcd_mf/mf_low_z_breakdown.png` |
 | Global (across-z) MF fit | `scripts/mf_global_fit.py` | `04_hcd_mf/mf_global_fit_visual.png` |
 | Held-out 4th HR sim test | `scripts/mf_fourth_sim_test.py` | `04_hcd_mf/mf_fourth_sim_test.png` |
-| First-pass flat-vs-linear at (z, k) | `scripts/mf_analytical_fit.py` | (superseded by `mf_global_fit_visual.png`) |
+| First-pass flat-vs-linear at (z, k) | `scripts/mf_analytical_fit.py` (not in this repository) | (superseded by `mf_global_fit_visual.png`) |
 
 All summary HDF5s + CSVs live under
-[`figures/analysis/data/`](../figures/analysis/data/) — reading schema
+`figures/analysis/data/` (not in this repository) — reading schema
 documented in `scripts/build_hcd_summary.py`.

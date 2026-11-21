@@ -23,7 +23,7 @@ is unbiased (PR #6's H1 / H2 still pass).
 
 ## 1. Failure-mode breakdown
 
-`scripts/diagnose_dla_truth_unmatched.py` re-runs the validation on all 10
+`scripts/diagnose_dla_truth_unmatched.py` (not in this repository) re-runs the validation on all 10
 (sim, snap) pairs, classifying every unmatched case.
 
 ### Unmatched truth (loose match, 1136 / 8340 = 13.6 %)
@@ -50,7 +50,7 @@ sub-percent.
 
 ## 2. T2 geometry: the real-space vs redshift-space mismatch
 
-`scripts/diagnose_t2_geometry.py` reports for each T2 case:
+`scripts/diagnose_t2_geometry.py` (not in this repository) reports for each T2 case:
 
 * truth-peak to nearest-R-edge distance: median **154 px** (~ 154 km/s at
   HiRes 1 km/s/pixel), p25 = 118, p75 = 217, max = 14 450
@@ -149,7 +149,7 @@ unlikely to introduce spurious cross-matches.
 
 ### Tolerance sweep results
 
-`scripts/test_relaxed_tolerance.py` sweeps tol from 10 to 1500 km/s on
+`scripts/test_relaxed_tolerance.py` (not in this repository) sweeps tol from 10 to 1500 km/s on
 all 10 (sim, snap) pairs:
 
 | tol_kms | completeness (loose) | completeness (strict) | purity (strict) | mean Δlog NHI | σ Δlog NHI |
@@ -222,7 +222,7 @@ correctly attributing real DLAs to the τ-finder's recoveries.
 
 1. Update `match_dla_lists` to expose tolerance in km/s (clearer than
    pixels, since dv_pix differs per snap).
-2. Update `scripts/validate_dla_truth.py` and
+2. Update `scripts/validate_dla_truth.py` (not in this repository) and
    `tests/validate_dla_truth_hypothesis.py` to use 300 km/s.
 3. Re-run the validation; replace the H3/H4 numbers in
    `docs/dla_truth_validation.md` with the new values + the rationale.

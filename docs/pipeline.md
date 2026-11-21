@@ -75,7 +75,7 @@ the τ₀ training cache described in Stage 1.
 > **A historical record, not a validation of a released model.** The stages, figures and numbers below describe the
 > analysis campaign carried out with the historical emulator, which was trained on absorber catalogues made before the
 > box-edge duplicate fix ([`docs/bugs_found.md`](bugs_found.md), bug 8). They are kept as a record of that work.
-> A released model will come with its own validation.
+> The released model comes with its own validation ([`docs/model_figures.md`](model_figures.md)).
 
 The pipeline has four stages, described in order. Each stage notes the product it
 yields, shows the figure it produces, and gives the command that generated or
@@ -139,8 +139,8 @@ This stage yields a fast, autodifferentiable forward model
 bias: the emulator residual projected onto the directions the data actually
 constrain (the Fisher-information eigendirections) and read off as a cosmology
 shift in units of σ along those directions; this is the cosmology-relevant bias
-rather than a raw spectral error. The results are reported with the release
-validation, which is not public yet.
+rather than a raw spectral error. These results are not public; the README
+("Where to go next") lists the validation summaries that are.
 
 Train it (the 8-fold LOSO sweep; `--smoke` for a fast shape check):
 
