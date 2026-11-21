@@ -1160,16 +1160,25 @@ text(
 code(
     "posterior",
     r"""
-# The four free parameters and their flat prior. The other seven PRIYA parameters, dtau0 and the subDLA and DLA
+# The four free parameters and their prior. The other seven PRIYA parameters, dtau0 and the subDLA and DLA
 # amplitudes are fixed at the truth.
 PRIOR = flat_prior(emu)
-print("free parameters and their flat prior:")
+print("the prior of the four free parameters: uniform within the stated ranges, restricted to physically allowed")
+print("class fractions. The stated ranges:")
 for name in FREE:
     truth = REL_TRUTH["LLS"] if name == "r_LLS" else TRUTH[name]
     print(f"  {name:9s} from {PRIOR[name][0]:.6g} to {PRIOR[name][1]:.6g}   (truth {truth:g})")
 print("  ns and Ap: the ranges the model was trained on (hp.PARAM_LIMITS); tau0_amp: the range of the mean-flux")
 print("  amplitude recorded with the model's training data (emu.provenance); r_LLS: the LLS amplitude relative")
 print("  to the model's own fraction, from 0 to 3")
+print("The restriction: the class fractions (r_LLS times the model's own LLS fraction, plus its subDLA and DLA")
+print("  fractions) sum to at most one at every redshift of the data. A point where they do not is refused by the")
+print("  model: log_posterior returns minus infinity there and counts it in REFUSALS.")
+w_truth = np.asarray(LIKE.prediction(TRUTH).w_c)  # one row per redshift of the data: LLS, subDLA, DLA
+i_lls, i_sub, i_dla = (hp.HCD_CLASSES.index(name) for name in ("LLS", "subDLA", "DLA"))
+r_one = (1.0 - w_truth[:, i_sub] - w_truth[:, i_dla]) / w_truth[:, i_lls]
+print(f"  At the truth the fractions sum to one at r_LLS = {r_one.min():.3f} (at z = {MOCK.z[int(np.argmin(r_one))]:.1f}), "
+      f"inside the stated range: there the restriction, not the range, is the upper end of r_LLS.")
 print("fixed at the truth:", ", ".join(name for name in TRUTH if name not in FREE), "and the subDLA and DLA amplitudes")
 
 X_TRUTH = np.array([TRUTH["ns"], TRUTH["Ap"], TRUTH["tau0_amp"], REL_TRUTH["LLS"]])
@@ -1381,6 +1390,122 @@ def levels_68_95(h2d):
     values = np.sort(np.asarray(h2d, dtype=float).ravel())[::-1]
     cumulative = np.cumsum(values) / values.sum()
     return tuple(float(values[np.searchsorted(cumulative, fraction)]) for fraction in (0.68, 0.95))
+""",
+)
+
+text(
+    "sampler",
+    r"""
+### Sampling
+
+**PROVISIONAL (PI to refine).** The cells above define a random-walk Metropolis sampler (`metropolis`), the
+convergence diagnostics (`split_rhat_and_ess`: the rank-normalised split R-hat and the bulk and tail effective
+sample sizes, after Vehtari et al. 2021), and the reading and writing of chains as text files in the layout that
+Cobaya writes and GetDist reads. The next cell runs the sampler for 300 steps, to show that it runs.
+""",
+)
+
+code(
+    "live-chain",
+    r"""
+# A short chain, run here: 300 steps from the truth. INSTRUCTIONAL ONLY, NOT EVIDENCE OF CONVERGENCE: it shows that
+# the sampler runs and what it returns. Nothing is concluded from it.
+LIVE_STEPS = 300
+live_widths = np.array([0.02 * (PRIOR[name][1] - PRIOR[name][0]) for name in FREE])  # 2 per cent of each range
+REFUSALS.clear()
+live_chain, live_logp, live_acceptance = metropolis(
+    log_posterior, X_TRUTH, np.diag(live_widths**2), LIVE_STEPS, np.random.default_rng(20261121)
+)
+print(f"{LIVE_STEPS} steps (instructional only, not evidence of convergence); acceptance {live_acceptance:.2f}")
+print(f"{'parameter':10s} {'truth':>11s} {'smallest':>11s} {'largest':>11s}   visited in these steps")
+for j, name in enumerate(FREE):
+    print(f"{name:10s} {X_TRUTH[j]:11.4g} {live_chain[:, j].min():11.4g} {live_chain[:, j].max():11.4g}")
+print("points refused by the model (class fractions above one, counted by log_posterior):",
+      {kind: entry[0] for kind, entry in REFUSALS.items()} or "none")
+live = split_rhat_and_ess(live_chain[None, :, :])
+print("the diagnostics run on it, one chain cut in two halves (they are far from any threshold, as they must be after 300 steps):")
+print("  split R-hat:", ", ".join(f"{name} {value:.2f}" for name, value in zip(FREE, live["rhat"])))
+print("  bulk ESS:   ", ", ".join(f"{name} {value:.0f}" for name, value in zip(FREE, live["ess_bulk"])))
+print("  tail ESS:   ", ", ".join(f"{name} {value:.0f}" for name, value in zip(FREE, live["ess_tail"])))
+""",
+)
+
+text(
+    "stored-chain",
+    r"""
+### The stored chains
+
+**PENDING: the stored chains have not been run. They are run once, after the project lead's approval of the
+preflight; this cell is filled then.**
+
+It will read four independently started chains from text files in this repository, each checked by its sha256,
+with a provenance file that states the code, the model, the mock, the truth, the prior, the seeds and the
+diagnostics. The code that makes them is `run_mock_chain.py` beside this notebook; it runs the cells of this
+notebook.
+""",
+)
+
+text(
+    "stored-diagnostics",
+    r"""
+### Convergence of the stored chains
+
+**PENDING: the stored chains have not been run. They are run once, after the project lead's approval of the
+preflight; this cell is filled then.**
+
+It will print, for each of the four parameters, the rank-normalised split R-hat and the bulk and the tail
+effective sample size of the stored chains, recomputed from the files, the acceptance of each chain, and two
+further diagnostics of their own: the share of proposals refused because the class fractions would sum to more
+than one, and the share of samples at the edge of the multi-fidelity tables in the mean flux. No contour is
+shown unless every convergence criterion is met.
+""",
+)
+
+text(
+    "contours",
+    r"""
+### The posterior of the four parameters
+
+**PENDING: the stored chains have not been run. They are run once, after the project lead's approval of the
+preflight; this cell is filled then.**
+
+**Fig. 9** will show the 68 and 95 per cent contours of each pair of the four parameters and their marginals,
+with the truth marked, and print the correlations. The contours are conditional on the fixed parameters; the
+mock is made by the model itself. They are not marginalised constraints.
+""",
+)
+
+text(
+    "posterior-predictive",
+    r"""
+### The prediction of the posterior, and the posterior predictive
+
+**PENDING: the stored chains have not been run. They are run once, after the project lead's approval of the
+preflight; this cell is filled then.**
+
+**Fig. 10** will show two bands at each redshift, drawn apart: the posterior uncertainty of the model
+prediction (the range of the model vector over draws of the posterior), and the posterior predictive of the
+data (the same with a draw of the data covariance added). It is a self-consistency demonstration on a mock made
+by the model itself: not an independent validation, not a result from data.
+""",
+)
+
+text(
+    "limits",
+    r"""
+## Limits, and where to go next
+
+**PROVISIONAL (PI to refine).**
+
+- Part III fits a mock made by the same model. It shows how the pieces fit together and which parameters trade
+  off. It does not validate the model, and it is not a constraint from data.
+- The likelihood uses the covariance of the data alone. The held-out prediction residual of Part II is an
+  empirical validation diagnostic, not a calibrated predictive uncertainty, and it does not enter the likelihood.
+- The class spectra are PRIYA-filtered, and the mixture leaves out what the filter removed.
+
+Where to go next, in the repository: `docs/likelihood.md` (the likelihood, its options and what it refuses);
+`examples/mock_recovery.py` (a mock from a simulation, fitted with a model made without that simulation);
+`docs/model_figures.md` (the model against published measurements); `docs/p1d_definition.md` (the conventions).
 """,
 )
 

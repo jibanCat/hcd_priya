@@ -25,6 +25,14 @@ file is used only when its sha256 is the one written in the notebook.
 | `hcd_priya_tutorial.ipynb` | the notebook, committed with its outputs |
 | `_build_tutorial.py` | the builder: every cell as source; `python _build_tutorial.py` writes the notebook without outputs |
 | `assets/ASSETS.json` | every stored file the notebook reads: path, sha256, size, URL, what it is, where it came from |
+| `assets/figures/` | the schematic of the emulator shown in Part II, with `PROVENANCE.md` |
+| `run_mock_chain.py` | the preflight and the one registered run of the stored mock chains of Part III; it runs the notebook's own cells |
+
+## What is pending
+
+The stored chains of Part III have not been run. They are run once, after the project lead's approval of the
+preflight. Until then the cells that read them, the contours and the posterior predictive are text cells marked
+PENDING, and no chain file is in this folder. The image of Fig. 1 is a placeholder.
 
 ## Where the stored files come from
 
