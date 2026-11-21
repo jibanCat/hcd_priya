@@ -151,7 +151,8 @@ import hcd_analysis
 import hcd_analysis.predictor as hp
 from hcd_analysis import likelihood
 
-os.makedirs("tutorial_output", exist_ok=True)  # the figures that the released scripts write go here
+# the figures that the released scripts write go into this folder
+os.makedirs("tutorial_output", exist_ok=True)
 print("hcd_analysis", hcd_analysis.__version__)
 """,
 )
@@ -235,7 +236,8 @@ density distribution. The next cell loads it and prints what identifies it.
 code(
     "load-model",
     r"""
-emu = hp.load_published()  # the trained LF+MF model, from the installed package hcd-priya-models
+# the trained LF+MF model, from the installed package hcd-priya-models
+emu = hp.load_published()
 print("model release:", emu.provenance["release"]["release_version"])
 """,
 )
@@ -280,7 +282,8 @@ display(Image(filename="assets/figures/joss_architecture.png", width=900))
 code(
     "one-prediction",
     r"""
-# z is a PRIYA snapshot redshift; tau0_amp = 1 and dtau0 = 0 give the mean flux of Kim et al. (2007).
+# z is a PRIYA snapshot redshift; tau0_amp = 1 and dtau0 = 0 give the mean flux
+# of Kim et al. (2007).
 pred = emu.predict(PARAMS, z=3.0, tau0_amp=1.0, dtau0=0.0)
 
 print("classes, in the order of P_class:", hp.CLASSES)
@@ -307,7 +310,7 @@ text(
   (`pred.labels["omissions"]` names it).
 
 A class spectrum is therefore a conditional spectrum under one normalisation. It is not the spectrum of isolated
-absorbers. The definitions are in `docs/p1d_definition.md` of the repository.
+absorbers.
 """,
 )
 
@@ -317,12 +320,10 @@ code(
 fig, (top, bottom) = plt.subplots(2, 1, figsize=(7, 8), sharex=True)
 for i, name in enumerate(hp.CLASSES):
     top.loglog(pred.k, pred.k * pred.P_class[i] / np.pi, color=f"C{i}", label=name)
-    if (
-        name != "clean"
-    ):  # each HCD class over the clean forest, the quantity a template of HCD absorbers models
-        bottom.semilogx(
-            pred.k, pred.P_class[i] / pred.P_class[0], color=f"C{i}", label=f"{name} / clean"
-        )
+    # each HCD class over the clean forest: the ratio that a template of HCD absorbers models
+    if name != "clean":
+        ratio = pred.P_class[i] / pred.P_class[0]
+        bottom.semilogx(pred.k, ratio, color=f"C{i}", label=f"{name} / clean")
 bottom.axhline(1.0, color="grey", lw=0.8)
 top.set_ylabel(r"$k\,P(k)/\pi$")
 bottom.set_ylabel("class spectrum / clean spectrum")
@@ -365,10 +366,9 @@ code(
 fig, axes = plt.subplots(1, 3, figsize=(15, 4.5), sharey=True)
 for c, (ax, name) in enumerate(zip(axes, hp.HCD_CLASSES)):
     for factor in (0.0, 1.0, 2.0):
+        # one class at a time; the other two stay at the model's own fractions
         amplitudes = pred.w_c.copy()
-        amplitudes[
-            c
-        ] *= factor  # one class at a time; the other two stay at the model's own fractions
+        amplitudes[c] *= factor
         mixture = hp.add_hcd(pred, amplitudes)
         ax.semilogx(pred.k, mixture / pred.P_class[0], label=f"{name} amplitude x {factor:g}")
     ax.axhline(1.0, color="grey", lw=0.8)
@@ -394,23 +394,20 @@ code(
     "incidence-values",
     r"""
 for c, name in enumerate(hp.HCD_CLASSES):
-    low, high = pred.dndx_lower[c], pred.dndx_upper[c]
-    print(
-        f"dN/dX of the {name} class at z = 3: {pred.dndx[c]:.4f}, held-out range {low:.4f} to {high:.4f}"
-    )
+    value, low, high = pred.dndx[c], pred.dndx_lower[c], pred.dndx_upper[c]
+    print(f"dN/dX of {name} at z = 3: {value:.4f}, held-out range {low:.4f} to {high:.4f}")
 """,
 )
 
 code(
     "fig-dndx",
     r"""
-# The released figure script of the clone draws the figure; this notebook only runs it and shows the image.
-# The script's own printed report is not shown; an error of the script still is.
+# The released figure script of the clone draws the figure; this notebook only runs it and
+# shows the image. The script's own printed report is not shown; an error of the script still is.
 script = "../../scripts/figures/fig_dndx_vs_ho21.py"
 image = "tutorial_output/dndx_vs_ho21.png"
-subprocess.run(
-    [sys.executable, script, "--published", "--out", image], check=True, stdout=subprocess.DEVNULL
-)
+command = [sys.executable, script, "--published", "--out", image]
+subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
 display(Image(filename=image, width=900))
 """,
 )
@@ -429,9 +426,8 @@ code(
     r"""
 script = "../../scripts/figures/fig_cddf_vs_ho21.py"
 image = "tutorial_output/cddf_vs_ho21.png"
-subprocess.run(
-    [sys.executable, script, "--published", "--out", image], check=True, stdout=subprocess.DEVNULL
-)
+command = [sys.executable, script, "--published", "--out", image]
+subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
 display(Image(filename=image, width=900))
 """,
 )
@@ -458,16 +454,18 @@ four parameters at a time crosses the range it was trained on.
 code(
     "fig-parameter-dependence",
     r"""
-LLS = hp.HCD_CLASSES.index("LLS")  # the place of the LLS class in pred.dndx and pred.w_c
+# the place of the LLS class in pred.dndx and pred.w_c
+LLS = hp.HCD_CLASSES.index("LLS")
 fig, axes = plt.subplots(1, 4, figsize=(16, 3.8), sharey=True)
 for ax, name in zip(axes, ("Ap", "ns", "heref", "bhfeedback")):
     low, high = hp.PARAM_LIMITS[hp.PARAM_NAMES.index(name)]
     values = np.linspace(low, high, 5)
     # one parameter crosses its trained range; the other eight and the mean flux stay as in PARAMS
-    moved = [
-        emu.predict({**PARAMS, name: value}, z=3.0, tau0_amp=1.0, dtau0=0.0) for value in values
-    ]
-    ax.plot(values, [p.dndx[LLS] / pred.dndx[LLS] for p in moved], "o-")
+    ratios = []
+    for value in values:
+        moved = emu.predict({**PARAMS, name: value}, z=3.0, tau0_amp=1.0, dtau0=0.0)
+        ratios.append(moved.dndx[LLS] / pred.dndx[LLS])
+    ax.plot(values, ratios, "o-")
     ax.axhline(1.0, color="grey", lw=0.8)
     ax.set_xlabel(name)
 axes[0].set_ylabel("dN/dX of the LLS class / its value at PARAMS")
@@ -496,10 +494,10 @@ The next cell does each once and prints what changes and what stays the same.
 code(
     "two-operations-numbers",
     r"""
-# (A) The LLS amplitude doubled by hand. No new prediction is made, so the incidence does not change.
+# (A) The LLS amplitude doubled by hand. No new prediction is made: the incidence does not change.
 doubled = pred.w_c.copy()
 doubled[LLS] *= 2.0
-# (B) One parameter moved. This is a new prediction, with its own incidence and sightline fractions.
+# (B) One parameter moved. This is a new prediction, with its own incidence and fractions.
 pred_b = emu.predict({**PARAMS, "Ap": 2.6e-9}, z=3.0, tau0_amp=1.0, dtau0=0.0)
 
 print("                      dN/dX of LLS   LLS amplitude in the mixture")
@@ -528,22 +526,20 @@ below it, and between snapshot redshifts, it is refused.
 code(
     "validation-numbers",
     r"""
-# e is the rms of ln(prediction / truth) over simulations the model was made without, one value per wavenumber.
+# e is the rms of ln(prediction / truth) over simulations the model was made without,
+# one value per wavenumber. As a range on the spectrum it is times exp(-e) to times exp(+e).
 e = pred.P_mix_validation_rms_log
-median, largest = np.nanmedian(e), np.nanmax(e)
-print(
-    f"median e = {median:.3f}: the mixture times {np.exp(-median):.3f} to times {np.exp(median):.3f}"
-)
-print(
-    f"largest e = {largest:.3f}: the mixture times {np.exp(-largest):.3f} to times {np.exp(largest):.3f}"
-)
+for label, value in (("median", np.nanmedian(e)), ("largest", np.nanmax(e))):
+    low, high = np.exp(-value), np.exp(value)
+    print(f"{label} e = {value:.3f}: the mixture times {low:.3f} to times {high:.3f}")
 """,
 )
 
 code(
     "flags-and-refusals",
     r"""
-# Above the validated range a prediction is returned with flags; between snapshot redshifts it is refused.
+# Above z = 4.6 a prediction is returned with flags (the first is mf_z_above_validated);
+# between snapshot redshifts it is refused.
 high = emu.predict(PARAMS, z=4.8, tau0_amp=1.0, dtau0=0.0)
 set_at_3 = {name for name, value in pred.flags.items() if value is True}
 set_at_48 = {name for name, value in high.flags.items() if value is True}
@@ -572,10 +568,12 @@ are emulated across nine parameters and the mean flux; they are PRIYA-filtered; 
 code(
     "fig-rogers",
     r"""
-# This script needs no model: it draws the training simulations' class ratios from a table of the clone.
+# This script needs no model: it draws the class ratios of the training simulations
+# from a table of the clone.
 script = "../../scripts/figures/fig_class_ratio_vs_rogers18.py"
 image = "tutorial_output/class_ratio_vs_rogers18.png"
-subprocess.run([sys.executable, script, "--out", image], check=True, stdout=subprocess.DEVNULL)
+command = [sys.executable, script, "--out", image]
+subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
 display(Image(filename=image, width=900))
 """,
 )
@@ -614,17 +612,15 @@ its options and its approximations.
 code(
     "example-files",
     r"""
-sys.path.insert(
-    0, "../../examples"
-)  # the released example is a script of the clone, two folders up
+# the released example is a script of the clone, two folders up
+sys.path.insert(0, "../../examples")
 import mock_recovery as example
 
 # open_download reads the held-out model, the mock and the stored reference of the example,
 # and checks each file as the released script does.
 emu_heldout, data, reference = example.open_download("hcd_priya_example_download")
-print(
-    f"the mock: {data.n} bins at {len(data.z)} redshifts, from z = {min(data.z):.1f} to {max(data.z):.1f}"
-)
+z_low, z_high = min(data.z), max(data.z)
+print(f"the mock: {data.n} bins at {len(data.z)} redshifts, from z = {z_low:.1f} to {z_high:.1f}")
 """,
 )
 
@@ -641,8 +637,8 @@ code(
     "likelihood-at-truth",
     r"""
 like = likelihood.GaussianP1DLikelihood(emu_heldout, data, gaussian_terms=example.GAUSSIAN_TERMS)
-# The held-out model warns about its dN/dX and CDDF. A warning shown by Jupyter would also print where
-# the package is installed on this machine, so it is caught here and its message is printed instead.
+# The held-out model warns about its dN/dX and CDDF. A warning shown by Jupyter would also print
+# where the package is installed on this machine, so it is caught and its message is printed.
 with warnings.catch_warnings(record=True) as caught:
     warnings.simplefilter("always")
     truth = example.part_one(like)
@@ -665,21 +661,21 @@ code(
 print("three evaluations of the public likelihood at the mock's truth;")
 print("nothing is fitted and these are not constraints")
 for r_lls in (0.0, 1.0, 2.0):
-    # hcd_relative_to_priya sets the amplitude of a class relative to the model's own sightline fraction
+    # hcd_relative_to_priya sets the amplitude of a class relative to the model's own fraction
     relative = {"LLS": r_lls, "subDLA": 1.0, "DLA": 1.0}
     scaled = likelihood.GaussianP1DLikelihood(
         emu_heldout, data, gaussian_terms=example.GAUSSIAN_TERMS, hcd_relative_to_priya=relative
     )
-    print(
-        f"LLS amplitude at {r_lls:g} times the model's own fraction: chi-square = {scaled.chi2(truth):.4f}"
-    )
+    chi2 = scaled.chi2(truth)
+    print(f"LLS amplitude at {r_lls:g} times the model's own fraction: chi-square = {chi2:.4f}")
 """,
 )
 
 code(
     "fig-reference",
     r"""
-# The example draws both figures from the stored reference and the mock alone, and saves them as files.
+# The example draws both figures from the stored reference and the mock alone,
+# and saves them as files.
 intervals_png, per_redshift_png = example.draw_reference(reference, data, "tutorial_output")
 plt.close("all")
 display(Image(filename=intervals_png, width=800))
@@ -731,7 +727,7 @@ text(
 
 Where to go next, in the repository: `docs/likelihood.md` (the likelihood, its options and what it refuses);
 `examples/mock_recovery.py` (the example used above, with its chain modes); `docs/model_figures.md` (the model
-against published measurements); `docs/p1d_definition.md` (the conventions).
+against published measurements).
 """,
 )
 
