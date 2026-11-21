@@ -1192,6 +1192,198 @@ assert worst_vector < 1e-12 and worst_loglike < 1e-10
 """,
 )
 
+code(
+    "helpers-sampler",
+    r"""
+import numpy as np
+
+
+def metropolis(logp, x0, cov, n_steps, rng):
+    # A random-walk Metropolis sampler. Each step proposes x + a normal draw with covariance cov (fixed for the whole
+    # run) and accepts it with probability min(1, exp(logp(proposal) - logp(x))); a proposal where logp is minus
+    # infinity, or not a number, is never accepted. Returns the chain, shape (n_steps, d), the log posterior of each
+    # state, and the fraction of steps that moved.
+    x = np.array(x0, dtype=float)
+    step = np.linalg.cholesky(np.asarray(cov, dtype=float))
+    current = float(logp(x))
+    if not np.isfinite(current):
+        raise ValueError("the chain must start where the log posterior is finite")
+    chain = np.empty((n_steps, x.size))
+    logps = np.empty(n_steps)
+    accepted = 0
+    for i in range(n_steps):
+        proposal = x + step @ rng.standard_normal(x.size)
+        value = float(logp(proposal))
+        if np.log(rng.uniform()) < value - current:  # false when value is minus infinity or not a number
+            x, current = proposal, value
+            accepted += 1
+        chain[i] = x
+        logps[i] = current
+    return chain, logps, accepted / n_steps
+""",
+)
+
+code(
+    "helpers-diagnostics",
+    r"""
+# Convergence diagnostics after Vehtari, Gelman, Simpson, Carpenter and Buerkner (2021): the rank-normalised split
+# R-hat and the bulk and tail effective sample sizes.
+import numpy as np
+from scipy.special import ndtri
+from scipy.stats import rankdata
+
+
+def rank_normalise(x):
+    # the draws of all chains ranked together, and the ranks turned into normal scores
+    ranks = rankdata(x, method="average").reshape(x.shape)
+    return ndtri((ranks - 0.375) / (x.size + 0.25))
+
+
+def rhat_of(x):
+    # the potential scale reduction of the chains x, shape (chains, draws): sqrt(pooled variance / within variance)
+    n = x.shape[1]
+    within = x.var(axis=1, ddof=1).mean()
+    between = n * x.mean(axis=1).var(ddof=1)
+    return float(np.sqrt(((n - 1.0) / n * within + between / n) / within))
+
+
+def ess_of(x):
+    # the effective sample size of the chains x, shape (chains, draws): the number of draws over the integrated
+    # autocorrelation time, with the autocorrelations combined over the chains and summed in pairs while the pairs
+    # stay positive and do not increase (Geyer's initial monotone sequence)
+    m, n = x.shape
+    centred = x - x.mean(axis=1, keepdims=True)
+    size = 1 << int(np.ceil(np.log2(2 * n)))
+    spectrum = np.fft.rfft(centred, n=size, axis=1)
+    acov = np.fft.irfft(spectrum * np.conj(spectrum), n=size, axis=1)[:, :n] / n
+    mean_var = acov[:, 0].mean() * n / (n - 1.0)
+    var_plus = mean_var * (n - 1.0) / n
+    if m > 1:
+        var_plus += x.mean(axis=1).var(ddof=1)
+    if not var_plus > 0.0:
+        return float("nan")
+    rho = np.zeros(n)
+    rho_even, rho_odd = 1.0, 1.0 - (mean_var - acov[:, 1].mean()) / var_plus
+    rho[0], rho[1] = rho_even, rho_odd
+    t = 1
+    while t < n - 3 and rho_even + rho_odd > 0.0:
+        rho_even = 1.0 - (mean_var - acov[:, t + 1].mean()) / var_plus
+        rho_odd = 1.0 - (mean_var - acov[:, t + 2].mean()) / var_plus
+        if rho_even + rho_odd >= 0.0:
+            rho[t + 1], rho[t + 2] = rho_even, rho_odd
+        t += 2
+    last = t - 2
+    if rho_even > 0.0:
+        rho[last + 1] = rho_even
+    t = 1
+    while t <= last - 2:
+        if rho[t + 1] + rho[t + 2] > rho[t - 1] + rho[t]:
+            rho[t + 1] = (rho[t - 1] + rho[t]) / 2.0
+            rho[t + 2] = rho[t + 1]
+        t += 2
+    total = m * n
+    tau = -1.0 + 2.0 * rho[: last + 1].sum() + rho[last + 1 : last + 2].sum()
+    return float(total / max(tau, 1.0 / np.log10(total)))
+
+
+def split_rhat_and_ess(chains):
+    # For chains of shape (chains, steps, parameters), per parameter:
+    #   rhat      the rank-normalised split R-hat: each chain is cut in two halves; the larger of the R-hat of the
+    #             normal scores of the draws and of their absolute distances from the median (which sees chains
+    #             that agree in location and differ in width);
+    #   ess_bulk  the effective sample size of the normal scores, over the split chains;
+    #   ess_tail  the smaller of the effective sample sizes of the indicators "the draw lies below the 5 per cent
+    #             quantile" and "below the 95 per cent quantile".
+    chains = np.asarray(chains, dtype=float)
+    if chains.ndim != 3:
+        raise ValueError("chains must have the shape (chains, steps, parameters)")
+    half = chains.shape[1] // 2
+    split = np.concatenate([chains[:, :half], chains[:, half : 2 * half]], axis=0)
+    out = {"rhat": [], "ess_bulk": [], "ess_tail": []}
+    for j in range(chains.shape[2]):
+        x = split[:, :, j]
+        bulk = rank_normalise(x)
+        folded = rank_normalise(np.abs(x - np.median(x)))
+        out["rhat"].append(max(rhat_of(bulk), rhat_of(folded)))
+        out["ess_bulk"].append(ess_of(bulk))
+        low, high = np.quantile(x, [0.05, 0.95])
+        out["ess_tail"].append(min(ess_of((x <= low).astype(float)), ess_of((x <= high).astype(float))))
+    return {name: np.array(values) for name, values in out.items()}
+""",
+)
+
+code(
+    "helpers-chain-files",
+    r"""
+# Chains as text files in the layout that Cobaya writes and GetDist reads: PREFIX.1.txt, PREFIX.2.txt, ... with the
+# columns "weight minuslogpost" and one column per parameter, PREFIX.paramnames and PREFIX.ranges. A state the
+# chain stays in for several steps is one row, with the number of steps as its weight.
+import pathlib
+
+import numpy as np
+
+
+def write_chains(prefix, chains, logps, names, ranges):
+    # chains: (chains, steps, parameters); logps: (chains, steps); names: the parameter names; ranges: {name: (low,
+    # high)}. Existing files are never overwritten.
+    prefix = pathlib.Path(prefix)
+    chains, logps = np.asarray(chains, dtype=float), np.asarray(logps, dtype=float)
+    with open(f"{prefix}.paramnames", "x", encoding="utf-8") as out:
+        out.write("".join(f"{name}\n" for name in names))
+    with open(f"{prefix}.ranges", "x", encoding="utf-8") as out:
+        out.write("".join(f"{name} {float(ranges[name][0])!r} {float(ranges[name][1])!r}\n" for name in names))
+    n_steps = chains.shape[1]
+    for c in range(chains.shape[0]):
+        with open(f"{prefix}.{c + 1}.txt", "x", encoding="utf-8") as out:
+            out.write("# weight minuslogpost " + " ".join(names) + "\n")
+            start = 0
+            for t in range(1, n_steps + 1):
+                if t == n_steps or np.any(chains[c, t] != chains[c, start]):
+                    values = " ".join(f"{value:.12e}" for value in chains[c, start])
+                    out.write(f"{t - start:d} {-logps[c, start]:.12e} {values}\n")
+                    start = t
+
+
+def read_chains(prefix):
+    # the rows of PREFIX.1.txt, PREFIX.2.txt, ... in order: the samples (rows, parameters), the weight of each row
+    # and the number of the chain it belongs to (from 1)
+    prefix = pathlib.Path(prefix)
+    samples, weights, index = [], [], []
+    number = 1
+    while pathlib.Path(f"{prefix}.{number}.txt").is_file():
+        table = np.loadtxt(f"{prefix}.{number}.txt", ndmin=2)
+        samples.append(table[:, 2:])
+        weights.append(np.rint(table[:, 0]).astype(int))
+        index.append(np.full(table.shape[0], number))
+        number += 1
+    if not samples:
+        raise FileNotFoundError(f"no chain file {prefix}.1.txt")
+    return np.concatenate(samples), np.concatenate(weights), np.concatenate(index)
+
+
+def expand_chains(samples, weights, index):
+    # the chains step by step again, shape (chains, steps, parameters): each row repeated by its weight
+    chains = [np.repeat(samples[index == number], weights[index == number], axis=0) for number in np.unique(index)]
+    if len({chain.shape[0] for chain in chains}) != 1:
+        raise ValueError("the chains do not have the same number of steps")
+    return np.stack(chains)
+""",
+)
+
+code(
+    "helpers-contours",
+    r"""
+import numpy as np
+
+
+def levels_68_95(h2d):
+    # the two heights of a two-dimensional histogram above which 68 and 95 per cent of its total lie
+    values = np.sort(np.asarray(h2d, dtype=float).ravel())[::-1]
+    cumulative = np.cumsum(values) / values.sum()
+    return tuple(float(values[np.searchsorted(cumulative, fraction)]) for fraction in (0.68, 0.95))
+""",
+)
+
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv

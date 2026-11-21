@@ -527,3 +527,190 @@ def test_the_flat_prior_is_the_trained_box_and_the_recorded_mean_flux_range():
     limits = dict(zip(hp.PARAM_NAMES, (tuple(float(v) for v in row) for row in hp.PARAM_LIMITS)))
     assert prior["ns"] == limits["ns"] and prior["Ap"] == limits["Ap"]
     assert prior["tau0_amp"] == (0.61, 1.37) and prior["r_LLS"] == (0.0, 3.0)
+
+
+# ------------------------------------------------------------------------------------------ the sampler and its files
+def test_metropolis_recovers_a_two_dimensional_gaussian():
+    import numpy as np
+
+    ns = _namespace("helpers-sampler")
+    mean = np.array([1.0, -2.0])
+    cov = np.array([[1.0, 0.6], [0.6, 2.0]])
+    inverse = np.linalg.inv(cov)
+
+    def logp(x):
+        r = x - mean
+        return -0.5 * float(r @ inverse @ r)
+
+    proposal = (2.38**2 / 2.0) * cov
+    chain, logps, acceptance = ns["metropolis"](
+        logp, mean + 1.0, proposal, 40000, np.random.default_rng(11)
+    )
+    assert chain.shape == (40000, 2) and logps.shape == (40000,) and 0.2 < acceptance < 0.5
+    assert np.array_equal(
+        logps, [logp(x) for x in chain]
+    )  # the stored value is that of the stored state
+    kept = chain[2000:]
+    assert np.allclose(kept.mean(axis=0), mean, atol=0.12)
+    assert np.allclose(np.cov(kept.T), cov, rtol=0.2, atol=0.1)
+    moves = np.any(np.diff(chain, axis=0) != 0.0, axis=1)
+    assert moves.mean() == pytest.approx(
+        acceptance, abs=2e-4
+    )  # the acceptance is the fraction of steps that moved
+    # the same seed gives the same chain; another seed another one
+    again, _, _ = ns["metropolis"](logp, mean + 1.0, proposal, 500, np.random.default_rng(11))
+    other, _, _ = ns["metropolis"](logp, mean + 1.0, proposal, 500, np.random.default_rng(12))
+    assert np.array_equal(again, chain[:500]) and not np.array_equal(other, chain[:500])
+
+    # where the log posterior is minus infinity (or not a number) the chain never goes, and it does not stop
+    def walled(x):
+        if x[0] < 0.5:
+            return -np.inf
+        return np.nan if x[1] > 0.0 else logp(x)
+
+    chain, logps, acceptance = ns["metropolis"](
+        walled, np.array([1.0, -2.0]), proposal, 3000, np.random.default_rng(3)
+    )
+    assert (
+        chain[:, 0].min() >= 0.5
+        and chain[:, 1].max() <= 0.0
+        and np.all(np.isfinite(logps))
+        and acceptance > 0.05
+    )
+    with pytest.raises(ValueError):
+        ns["metropolis"](walled, np.array([0.0, -2.0]), proposal, 10, np.random.default_rng(3))
+
+
+def test_rhat_is_near_one_for_independent_draws_and_large_for_shifted_chains():
+    import numpy as np
+
+    ns = _namespace("helpers-diagnostics")
+    rng = np.random.default_rng(5)
+    draws = rng.standard_normal((4, 2000, 3)) * [1.0, 10.0, 0.01] + [0.0, 5.0, -1.0]
+    out = ns["split_rhat_and_ess"](draws)
+    assert set(out) == {"rhat", "ess_bulk", "ess_tail"}
+    assert out["rhat"].shape == out["ess_bulk"].shape == out["ess_tail"].shape == (3,)
+    assert np.all(out["rhat"] < 1.01) and np.all(out["rhat"] > 0.999)
+    assert np.all(out["ess_bulk"] > 0.85 * 8000) and np.all(out["ess_bulk"] < 1.15 * 8000)
+    # the tail: independent draws keep about all of them (the estimate is noisier than the bulk's)
+    assert np.all(out["ess_tail"] > 0.75 * 8000) and np.all(out["ess_tail"] < 1.25 * 8000)
+    # the statistics do not depend on the scale or the location of a parameter
+    same = ns["split_rhat_and_ess"](draws[:, :, :1] * 8.0 - 3.0)
+    for key in out:
+        assert same[key][0] == pytest.approx(out[key][0], rel=1e-6), key
+    # one chain somewhere else: its mean off by two standard deviations
+    shifted = draws.copy()
+    shifted[0, :, 0] += 2.0
+    out = ns["split_rhat_and_ess"](shifted)
+    assert out["rhat"][0] > 1.1 and np.all(out["rhat"][1:] < 1.01)
+    assert out["ess_bulk"][0] < 100
+    # one chain three times as wide, the same mean: the folded half of the statistic sees it
+    wide = draws.copy()
+    wide[1, :, 2] = -1.0 + 3.0 * (wide[1, :, 2] + 1.0)
+    assert ns["split_rhat_and_ess"](wide)["rhat"][2] > 1.05
+    # a chain that drifts: its two halves differ, which the split sees with one chain alone
+    drift = rng.standard_normal((1, 2000, 1)) + np.linspace(0.0, 3.0, 2000)[None, :, None]
+    assert ns["split_rhat_and_ess"](drift)["rhat"][0] > 1.1
+    # correlated draws: an autoregressive chain with coefficient 0.9 keeps about (1 - 0.9) / (1 + 0.9) of its draws
+    ar = np.empty((4, 20000))
+    ar[:, 0] = rng.standard_normal(4)
+    noise = rng.standard_normal((4, 20000)) * np.sqrt(1.0 - 0.9**2)
+    for t in range(1, 20000):
+        ar[:, t] = 0.9 * ar[:, t - 1] + noise[:, t]
+    out = ns["split_rhat_and_ess"](ar[:, :, None])
+    expected = 80000 * (1.0 - 0.9) / (1.0 + 0.9)
+    assert 0.75 * expected < out["ess_bulk"][0] < 1.3 * expected and out["rhat"][0] < 1.01
+    # the tail of strongly correlated draws: far below the number of draws, and it is its own number
+    assert 100 < out["ess_tail"][0] < 0.25 * 80000 and out["ess_tail"][0] != out["ess_bulk"][0]
+    # draws whose width changes slowly (wide for 250 steps, narrow for 250, and so on) and whose sign is random: the
+    # levels are uncorrelated, so the bulk keeps its draws, but the tails are visited in bursts
+    width = np.where((np.arange(8000) // 250) % 2 == 0, 3.0, 1.0)
+    bursts = rng.standard_normal((4, 8000, 1)) * width[None, :, None]
+    out_bursts = ns["split_rhat_and_ess"](bursts)
+    assert (
+        out_bursts["ess_bulk"][0] > 0.6 * 32000
+        and out_bursts["ess_tail"][0] < 0.25 * out_bursts["ess_bulk"][0]
+    )
+    with pytest.raises(ValueError):
+        ns["split_rhat_and_ess"](draws[0])  # two dimensions: the chains axis is missing
+
+
+def test_chain_files_round_trip_and_weights_sum_to_the_steps(tmp_path):
+    import numpy as np
+
+    ns = _namespace("helpers-chain-files")
+    rng = np.random.default_rng(9)
+    n_chains, n_steps, d = 3, 400, 4
+    chains = np.empty((n_chains, n_steps, d))
+    for c in range(
+        n_chains
+    ):  # a walk that stays where it is on two steps in three, as a sampler does
+        x = rng.standard_normal(d) * [1.0, 1e-9, 1.0, 1.0]
+        for t in range(n_steps):
+            if rng.uniform() < 1.0 / 3.0:
+                x = x + rng.standard_normal(d) * [0.1, 1e-10, 0.1, 0.1]
+            chains[c, t] = x
+    logps = -0.5 * np.sum(chains**2, axis=2)
+    names = ("a", "b", "c", "r_x")
+    ranges = {"a": (-5.0, 5.0), "b": (-1e-8, 1e-8), "c": (-5.0, 5.0), "r_x": (0.0, 3.0)}
+    prefix = tmp_path / "out" / "synthetic_chain"
+    prefix.parent.mkdir()
+    ns["write_chains"](prefix, chains, logps, names, ranges)
+    written = sorted(p.name for p in prefix.parent.iterdir())
+    assert written == [f"synthetic_chain.{i}.txt" for i in (1, 2, 3)] + [
+        "synthetic_chain.paramnames",
+        "synthetic_chain.ranges",
+    ]
+    assert (prefix.parent / "synthetic_chain.paramnames").read_text().split() == list(names)
+    assert [
+        line.split() for line in (prefix.parent / "synthetic_chain.ranges").read_text().splitlines()
+    ] == [[name, repr(float(low)), repr(float(high))] for name, (low, high) in ranges.items()]
+    first = (prefix.parent / "synthetic_chain.1.txt").read_text().splitlines()
+    assert (
+        first[0].split() == ["#", "weight", "minuslogpost", *names]
+        and len(first[1].split()) == 2 + d
+    )
+
+    # the second column is minus the log posterior of the row's state
+    assert float(first[1].split()[1]) == pytest.approx(-logps[0, 0], rel=1e-11)
+    assert int(first[1].split()[0]) >= 1
+
+    samples, weights, index = ns["read_chains"](prefix)
+    assert samples.shape[1] == d and weights.shape == index.shape == (samples.shape[0],)
+    assert sorted(set(index)) == [1, 2, 3]
+    assert [int(weights[index == i].sum()) for i in (1, 2, 3)] == [
+        n_steps
+    ] * 3  # the weights sum to the steps
+    assert samples.shape[0] < n_chains * n_steps  # repeats are stored once, as a weight
+    back = ns["expand_chains"](samples, weights, index)
+    assert back.shape == chains.shape and np.allclose(back, chains, rtol=1e-12, atol=0)
+    # and what is read is what a second writing gives, exactly: the files are the record
+    again = tmp_path / "again" / "synthetic_chain"
+    again.parent.mkdir()
+    ns["write_chains"](again, back, logps, names, ranges)
+    assert all((again.parent / n).read_bytes() == (prefix.parent / n).read_bytes() for n in written)
+    # existing files are never overwritten
+    with pytest.raises(FileExistsError):
+        ns["write_chains"](prefix, chains, logps, names, ranges)
+    # chains of unequal length cannot be stacked
+    with pytest.raises(ValueError):
+        ns["expand_chains"](samples[:-1], weights[:-1], index[:-1])
+
+
+def test_levels_enclose_68_and_95_per_cent_of_a_gaussian():
+    import numpy as np
+
+    ns = _namespace("helpers-contours")
+    rng = np.random.default_rng(21)
+    draws = rng.multivariate_normal([0.0, 0.0], [[1.0, 0.7], [0.7, 2.0]], size=400000)
+    h, _, _ = np.histogram2d(draws[:, 0], draws[:, 1], bins=70)
+    l68, l95 = ns["levels_68_95"](h)
+    assert l68 > l95 > 0
+    assert h[h >= l68].sum() / h.sum() == pytest.approx(0.68, abs=0.01)
+    assert h[h >= l95].sum() / h.sum() == pytest.approx(0.95, abs=0.01)
+    weighted = np.histogram2d(draws[:, 0], draws[:, 1], bins=70, weights=np.full(len(draws), 2.5))[
+        0
+    ]
+    assert np.allclose(
+        ns["levels_68_95"](weighted), (2.5 * l68, 2.5 * l95)
+    )  # the levels scale with the histogram
