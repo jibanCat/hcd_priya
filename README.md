@@ -401,6 +401,10 @@ the research code reads.
   [`docs/api.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/api.md); a step-by-step guide to production and research bundles with executable examples
   is [`docs/tutorials/production_and_research_bundles.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/tutorials/production_and_research_bundles.md).
 - The research pipeline (catalogue construction) is described in [`docs/pipeline.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/pipeline.md).
+- Five short notebooks introduce the per-(sim, snap) HCD data products of the catalogue pipeline from the ground
+  up, for readers who hold the simulation outputs. They need the raw spectra and the pipeline's outputs, which
+  are not distributed, and they do not use the emulator:
+  [`notebooks/tutorials/README.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/notebooks/tutorials/README.md).
 - The record of bugs found on the catalog/P1D side
   is in [`docs/bugs_found.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/bugs_found.md) and
   [`docs/data_layout.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/data_layout.md).
@@ -458,6 +462,7 @@ model_package/                the companion package hcd-priya-models (the traine
 config/default.yaml           default pipeline config
 scripts/                      install, SLURM batch, cache build, LOSO sweep, plotting (research; tests/DEFERRED.md
                               lists the ones that do not run as they stand)
+notebooks/tutorials/          five starter notebooks for new students
 tests/                        the test suite; tests/ci_tiers.toml says when CI runs each file
 tools/ci/                     the CI tools: the test-tier runner, the distribution checks and content scan
 docs/                         the documentation (index.md; likelihood.md, models_and_data.md, release_checklist.md, ...)

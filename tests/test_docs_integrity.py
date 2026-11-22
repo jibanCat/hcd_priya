@@ -16,7 +16,19 @@ from hcd_analysis.emulator import mf_release as MR
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 THIS_FILE = "tests/test_docs_integrity.py"
-TEXT_SUFFIXES = (".md", ".py", ".toml", ".yaml", ".yml", ".txt", ".cfg", ".in", ".cff", ".sh")
+TEXT_SUFFIXES = (
+    ".md",
+    ".py",
+    ".ipynb",
+    ".toml",
+    ".yaml",
+    ".yml",
+    ".txt",
+    ".cfg",
+    ".in",
+    ".cff",
+    ".sh",
+)
 # a generator of a record, not documentation; its text is not read here
 NOT_READ = ("scripts/gen_analysis_lock.py",)
 
@@ -32,14 +44,15 @@ REMOVED = (
     "docs/release_format.md",
     "hcd_analysis/emulator/README.md",
     "06_performance_walkthrough/README.md",
-    "STUDENT_PROJECTS.md",
-    "_build_notebooks.py",
 )
-LEGACY_NOTEBOOKS = "notebooks/tutorials"
 
 # Files that still name a removed document, with the reason. The list is exact: a file that stops naming one, or a
 # new file that names one, fails the test, so the list empties as the remaining pointers are settled.
 DOCSTRING_WAITS = "a docstring or comment of package code; package files are not changed by a documentation change"
+NOTEBOOK_WAITS = (
+    "a research-group teaching notebook under the project lead's cell-by-cell review; "
+    "its pointers are corrected with that review"
+)
 PENDING = {
     "hcd_analysis/clustering.py": (("clustering_definitions.md",), DOCSTRING_WAITS),
     "hcd_analysis/dla_truth.py": (("dla_truth_unmatched_analysis.md",), DOCSTRING_WAITS),
@@ -47,6 +60,22 @@ PENDING = {
     "hcd_analysis/report.py": (
         ("p1d_definition.md",),
         "the catalogue pipeline's generator of that page; package code, reported to the project lead",
+    ),
+    "notebooks/tutorials/02_recomputing_cddf_and_dndx.ipynb": (
+        ("docs/analysis.md", "hcd_mf_analysis.md"),
+        NOTEBOOK_WAITS,
+    ),
+    "notebooks/tutorials/_build_notebooks.py": (
+        ("docs/analysis.md", "hcd_mf_analysis.md"),
+        NOTEBOOK_WAITS,
+    ),
+    "notebooks/tutorials/README.md": (
+        ("clustering_definitions.md", "multipole_jacobian_explained.md"),
+        NOTEBOOK_WAITS,
+    ),
+    "notebooks/tutorials/STUDENT_PROJECTS.md": (
+        ("dla_truth_unmatched_analysis.md", "multipole_jacobian_explained.md"),
+        NOTEBOOK_WAITS,
     ),
 }
 # A file that names a removed document for a reason that does not pass.
@@ -265,13 +294,6 @@ def test_no_page_names_a_deleted_document() -> None:
     assert (
         not settled
     ), f"these files no longer name a removed document; take them off the list: {settled}"
-
-
-def test_no_page_points_to_the_legacy_notebooks() -> None:
-    """The folder of the older notebooks is named nowhere, outside the changelog."""
-    found = _names_found(_text_files(), (LEGACY_NOTEBOOKS,))
-    assert not found, sorted(found)
-    assert not (ROOT / LEGACY_NOTEBOOKS).exists()
 
 
 # ------------------------------------------------------------------------------------------- corrected sentences
