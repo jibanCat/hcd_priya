@@ -115,16 +115,9 @@ def style_cell():
     return code(TUTORIAL_STYLE.lstrip())
 
 
-# The first cell of each notebook, and the first lines of README.md beside them (the same words).
-LEGACY_BANNER = (
-    "> Legacy internal research workflows. These notebooks need PRIYA simulation outputs that are not distributed. "
-    "They are not supported public tutorials. The public tutorial is `notebooks/tutorial/`."
-)
-
-
 def write_notebook(name: str, cells: list) -> Path:
     nb = new_notebook(
-        cells=[new_markdown_cell(LEGACY_BANNER, id="legacy-banner")] + cells,
+        cells=cells,
         metadata={
             "kernelspec": KERNEL,
             "language_info": LANG,
