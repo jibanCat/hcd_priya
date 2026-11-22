@@ -40,14 +40,7 @@ LEGACY_NOTEBOOKS = "notebooks/tutorials"
 # Files that still name a removed document, with the reason. The list is exact: a file that stops naming one, or a
 # new file that names one, fails the test, so the list empties as the remaining pointers are settled.
 DOCSTRING_WAITS = "a docstring or comment of package code; package files are not changed by a documentation change"
-PAGE_WAITS = "the page itself waits for the project lead's decision to keep, reduce or remove it"
 PENDING = {
-    "docs/bugs_found.md": (("p1d_definition.md",), PAGE_WAITS),
-    "docs/dla_truth_validation.md": (
-        ("dla_truth_unmatched_analysis.md", "docs/analysis.md"),
-        PAGE_WAITS,
-    ),
-    "docs/fast_mode_physics.md": (("docs/analysis.md",), PAGE_WAITS),
     "hcd_analysis/clustering.py": (("clustering_definitions.md",), DOCSTRING_WAITS),
     "hcd_analysis/dla_truth.py": (("dla_truth_unmatched_analysis.md",), DOCSTRING_WAITS),
     "hcd_analysis/emulator/safe_io.py": (("docs/release_format.md",), DOCSTRING_WAITS),

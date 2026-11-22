@@ -400,8 +400,7 @@ the research code reads.
 - The API reference of the predictor and the loaders is on the documentation site, built from
   [`docs/api.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/api.md); a step-by-step guide to production and research bundles with executable examples
   is [`docs/tutorials/production_and_research_bundles.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/tutorials/production_and_research_bundles.md).
-- The research pipeline (catalogue construction, and the four stages from the simulation P1D to inference, a
-  historical record) is described in [`docs/pipeline.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/pipeline.md).
+- The research pipeline (catalogue construction) is described in [`docs/pipeline.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/pipeline.md).
 - The record of bugs found on the catalog/P1D side
   is in [`docs/bugs_found.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/bugs_found.md) and
   [`docs/data_layout.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/data_layout.md).

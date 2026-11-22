@@ -182,6 +182,6 @@ For every `<sim>/snap_NNN/cddf.npz` (1146 files) and `<sim>/cddf_stacked.npz` (6
 The audit considered but found to be fine:
 
 - `io.py`, `snapshot_map.py` — HDF5 reading, folder discovery, Snapshots.txt parsing all work correctly; confirmed against directory listings.
-- `p1d.py:P1DAccumulator`, `compute_p1d_single` — the streaming two-pass mean-flux + rfft P1D computation is consistent with Palanque-Delabrouille 2013 / Chabanier 2019 convention and documented correctly in `docs/p1d_definition.md`.
+- `p1d.py:P1DAccumulator`, `compute_p1d_single` — the streaming two-pass mean-flux + rfft P1D computation is consistent with Palanque-Delabrouille 2013 / Chabanier 2019 convention.
 - `find_systems_in_skewer` (catalog.py) — threshold + merge + min-pixels detection is internally correct; wrap-around handling is right. **Corrected later: the wrap-around handling listed every box-edge system twice; see bug 8.**
 - The `_WING_PIXELS = 200` (±2000 km/s) expansion window in `measure_nhi_for_system` is the cause of the Voigt-fit over-counting observed post-fix (forest pixels in the window bias the single-Voigt fit upward); but this is a design issue, not a bug in the strict sense. The resolution is to default to `fast_mode=True`, which bypasses this window entirely.

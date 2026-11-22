@@ -131,7 +131,7 @@ tol_pixels = tol_pixels_for_300_kms(dv_pix_kms) = max(round(300 / dv_pix_kms), 5
 i.e. a fixed **300 km/s** tolerance converted to pixels per file. The
 choice of 300 km/s is set by the typical halo peculiar-velocity scale
 at z = 2–4 in cosmological simulations and is justified empirically by
-a tolerance sweep in `docs/dla_truth_unmatched_analysis.md`: bias and
+a tolerance sweep: bias and
 scatter are flat across all tolerances ≥ 30 km/s, completeness rises
 from 0.86 (at 100 km/s) to 0.97 (at 300 km/s), then saturates around
 0.98 by 500 km/s. The 5-pixel floor protects the case of unusually
@@ -176,7 +176,7 @@ Run on 10 (sim, snap) pairs across 3 HiRes sims, total 8340 truth DLAs.
 
 **Updated 2026-04-27:** the matcher tolerance was raised from
 `merge_dv_kms = 100 km/s` to **300 km/s** after a follow-up analysis
-(`docs/dla_truth_unmatched_analysis.md`) showed that ≈ 14 % of
+showed that ≈ 14 % of
 unmatched truths sit at 100–300 km/s LOS offsets — the typical
 peculiar-velocity offset between fake_spectra's real-space `colden`
 and redshift-space `tau`.  The relaxation has no effect on bias /
@@ -252,8 +252,7 @@ The HiRes-only validation tells us:
    undercounts truth by a factor 0.86 ± 0.04 in absolute terms. This is
    smaller than the (0.62 dex post-bug-#7-fix) statistical uncertainty
    and consistent with the slight under-prediction the production
-   pipeline reports vs PW09 / Noterdaeme+2012 / Ho+2021 — see
-   `docs/analysis.md` §2.
+   pipeline reports vs PW09 / Noterdaeme+2012 / Ho+2021.
 4. **No rerun was judged warranted at the time (2026-04-27, before the bug-8 fix).** The four hypotheses passed cleanly; any
    anomaly that would justify a full reprocess would have to show up as
    either (a) a > 0.05 dex bias, (b) > 0.15 dex scatter, (c) < 80 %

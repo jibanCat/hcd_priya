@@ -132,7 +132,7 @@ Factor ~1.85 variation between extremes, scaling with `Ap` as expected (more ini
 
 ![param scan](../figures/diagnostics/cddf_param_scan_z3.png)
 
-Interpretation: the residual excess is universal across the PRIYA parameter extremes tested and is therefore not driven by any particular parameter choice and not by our analysis pipeline (which is identical across all sims). Whether it reflects (a) a real over-production by the simulation or (b) incompleteness in the observational samples we use for comparison is not settled by anything in this repository — see §Validation in `docs/analysis.md` for a more careful discussion.
+Interpretation: the residual excess is universal across the PRIYA parameter extremes tested and is therefore not driven by any particular parameter choice and not by our analysis pipeline (which is identical across all sims). Whether it reflects (a) a real over-production by the simulation or (b) incompleteness in the observational samples we use for comparison is not settled by anything in this repository.
 
 ## Implications for masking
 
