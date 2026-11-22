@@ -39,14 +39,9 @@ LEGACY_NOTEBOOKS = "notebooks/tutorials"
 
 # Files that still name a removed document, with the reason. The list is exact: a file that stops naming one, or a
 # new file that names one, fails the test, so the list empties as the remaining pointers are settled.
-README_WAITS = "the README waits for the project lead's own rewrite"
 DOCSTRING_WAITS = "a docstring or comment of package code; package files are not changed by a documentation change"
 PAGE_WAITS = "the page itself waits for the project lead's decision to keep, reduce or remove it"
 PENDING = {
-    "README.md": (
-        ("docs/analysis.md", "hcd_analysis/emulator/README.md", "p1d_definition.md"),
-        README_WAITS,
-    ),
     "docs/bugs_found.md": (("p1d_definition.md",), PAGE_WAITS),
     "docs/dla_truth_validation.md": (
         ("dla_truth_unmatched_analysis.md", "docs/analysis.md"),
@@ -68,7 +63,6 @@ STANDING = {
         "a file name inside a made-up wheel, to test the content gate; it names no document",
     ),
 }
-PENDING_LEGACY_NOTEBOOKS = {"README.md": README_WAITS}
 
 # Sentences that said the model or its package was not published, each with the page that held it.
 NOT_PUBLISHED = (
@@ -281,9 +275,9 @@ def test_no_page_names_a_deleted_document() -> None:
 
 
 def test_no_page_points_to_the_legacy_notebooks() -> None:
-    """The folder of the older notebooks is named nowhere, outside the changelog and the files that wait."""
+    """The folder of the older notebooks is named nowhere, outside the changelog."""
     found = _names_found(_text_files(), (LEGACY_NOTEBOOKS,))
-    assert sorted(found) == sorted(PENDING_LEGACY_NOTEBOOKS), sorted(found)
+    assert not found, sorted(found)
     assert not (ROOT / LEGACY_NOTEBOOKS).exists()
 
 
