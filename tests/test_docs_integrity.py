@@ -261,10 +261,8 @@ def test_no_internal_link_is_broken() -> None:
             if anchor and name in pages and anchor.lower() not in _anchors(pages[name]):
                 broken.append(f"{page}: {target} (no heading gives that anchor in {name})")
     assert not broken, "\n".join(broken)
-    assert relative >= 50 and absolute >= 50, (
-        relative,
-        absolute,
-    )  # the pattern does find the links
+    # the pattern does find the links
+    assert relative >= 50 and absolute >= 50, (relative, absolute)
 
 
 # ------------------------------------------------------------------------------------------- removed documents

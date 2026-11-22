@@ -43,20 +43,13 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # ------------------------------------------------------------------------------------------- independent constants
 L_BOX = 120.0  # Mpc/h, the PRIYA box (Bird et al. 2023)
-CLASS_EDGES = {
-    "LLS": 17.2,
-    "subDLA": 19.0,
-    "DLA": 20.3,
-}  # log10 of N_HI in cm^-2, the lower edge of each class
-VALIDATION_Z = (
-    2.2,
-    4.6,
-)  # the redshifts of the grouped validation of the multi-fidelity correction
+# log10 of N_HI in cm^-2, the lower edge of each class
+CLASS_EDGES = {"LLS": 17.2, "subDLA": 19.0, "DLA": 20.3}
+# the redshifts of the grouped validation of the multi-fidelity correction
+VALIDATION_Z = (2.2, 4.6)
 K_MIN_FULL_WEIGHT = 1e-3  # s/km; training gave less weight to wavenumbers below it
-SNAPSHOT_Z = (
-    2.0,
-    5.4,
-)  # the first and the last PRIYA snapshot redshift; the snapshots are 0.2 apart
+# the first and the last PRIYA snapshot redshift; the snapshots are 0.2 apart
+SNAPSHOT_Z = (2.0, 5.4)
 Z, HUB, OMEGAMH2 = 3.0, 0.70, 0.143  # one redshift and one cosmology inside the training box
 
 
@@ -113,9 +106,8 @@ def test_the_predictor_wavenumber_is_angular() -> None:
     k_com = 2.0 * np.pi * np.arange(1, 17) / L_BOX  # the comoving modes of the box, h/Mpc
     k = np.asarray(K.k_skm_from_kcom(k_com, Z, HUB, OMEGAMH2))
     assert k[mode - 1] * wavelength == pytest.approx(2.0 * np.pi, rel=1e-12)
-    cyclic = np.fft.rfftfreq(n_pix, d=width / n_pix)[
-        mode
-    ]  # the same mode counted in cycles per km/s
+    # the same mode counted in cycles per km/s
+    cyclic = np.fft.rfftfreq(n_pix, d=width / n_pix)[mode]
     assert cyclic * wavelength == pytest.approx(1.0, rel=1e-12)
     assert k[mode - 1] / cyclic == pytest.approx(2.0 * np.pi, rel=1e-12)
 
@@ -264,12 +256,9 @@ def test_the_mean_flux_convention_of_the_class_spectra_is_the_whole_sample(
 
     rng = np.random.default_rng(20261121)
     n_pix, width = 256, 5000.0
-    tau_weak = rng.gamma(
-        2.0, 0.15, size=(40, n_pix)
-    )  # sightlines of a class with little absorption
-    tau_strong = rng.gamma(
-        2.0, 0.60, size=(10, n_pix)
-    )  # sightlines of a class with much absorption
+    # the sightlines of a class with little absorption, and those of a class with much
+    tau_weak = rng.gamma(2.0, 0.15, size=(40, n_pix))
+    tau_strong = rng.gamma(2.0, 0.60, size=(10, n_pix))
     flux_all = float(np.mean(np.exp(-np.concatenate([tau_weak, tau_strong]))))
     flux_strong = float(np.mean(np.exp(-tau_strong)))
     assert flux_strong < 0.8 * flux_all  # the two normalisations differ clearly
