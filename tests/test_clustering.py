@@ -1,8 +1,8 @@
 """
 Validation tests for ``hcd_analysis/clustering.py``.
 
-Covers (per `docs/clustering_definitions.md` §8 numbering, plus
-local additions):
+Covers (the numbers are those of the estimators' original specification,
+plus local additions):
 
   1   Coordinate round-trip (skewer, pixel) ↔ xyz.
   2   Periodic minimum-image bounds + idempotence + edge cases.
