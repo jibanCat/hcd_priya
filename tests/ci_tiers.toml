@@ -886,7 +886,7 @@ level = "pr"
 skipped_by_design = [
     "test_every_code_cell_is_formatted_as_black_writes_it",
 ]
-reason = "the Black check of the notebook's code cells needs black, which is not in the pinned test environment (the Format job has it, and checks Python files only); it is run by hand when a cell changes"
+reason = "the Black check of the notebook's code cells needs black, which is not in the pinned test environment; the CI job Format runs the same check with the pinned black on every pull request (tools/ci/check_notebook_format.py)"
 
 [files."tests/test_wc_map.py"]
 tier = "source"

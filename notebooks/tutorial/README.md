@@ -1,8 +1,8 @@
 # The public tutorial
 
 `hcd_priya_tutorial.ipynb` is one notebook in three parts: the scientific motivation, the emulator, and the public
-likelihood with the repository's mock-recovery example. It teaches the public functions of the package. It adds no
-method of its own: it calls the package, three released figure scripts and the released example.
+likelihood with the repository's mock-recovery example. It teaches the public functions of the package in plain Python. It adds no
+method of its own, and it runs no script: every figure is drawn in the notebook from what the package returns.
 
 **UNAPPROVED (PI to review).**
 
@@ -19,20 +19,19 @@ tar -xzf hcd_priya_example_download.tar.gz
 jupyter notebook hcd_priya_tutorial.ipynb
 ```
 
-The trained model comes with the package. The notebook needs the clone: three of its figures are drawn by the
-scripts under `scripts/figures/`, and Part III uses `examples/mock_recovery.py` with the example data set of the
-release, unpacked beside the notebook as above. The example checks each file of that data set when it opens it.
+The trained model comes with the package. The notebook needs the clone: three of its figures read published
+measurements and a table of the training simulations from `docs/figures/data/`, and Part III reads the list of the
+example's files from `examples/mock_recovery.py` and the example data set of the release, unpacked beside the
+notebook as above. The package's loaders check each file of that data set when they read it.
 
 ## The files here
 
 | File | What it is |
 |---|---|
-| `hcd_priya_tutorial.ipynb` | the notebook, committed with its outputs |
-| `_build_tutorial.py` | the builder: every cell as source; `python _build_tutorial.py` writes the notebook without outputs |
+| `hcd_priya_tutorial.ipynb` | the notebook, committed with its outputs. It is the file to edit: after an edit, run it top to bottom and commit it with its outputs |
 | `assets/figures/` | the schematic of the emulator shown in Part II, with `PROVENANCE.md` |
 
-The figures that the released code writes while the notebook runs go into `tutorial_output/` beside the notebook.
-Git ignores that folder and the example data set.
+Git ignores the example data set unpacked beside the notebook.
 
 ## What is pending
 
