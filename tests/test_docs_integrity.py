@@ -82,20 +82,9 @@ STANDING = {
         ("hcd_analysis/emulator/README.md",),
         "a file name inside a made-up wheel, to test the content gate; it names no document",
     ),
-}
-# Two files whose state depends on a separate pull request, which removes the generator of p1d_definition.md and adds
-# a test of it. That pull request may be merged before this list or after it, so each entry holds in either state:
-# the file names exactly this page, or it does not name it (or does not exist yet). Nothing else is accepted for
-# them. To tidy once both are merged: hcd_analysis/report.py leaves this list, and tests/test_report_markdown.py
-# moves to STANDING.
-EITHER_STATE = {
-    "hcd_analysis/report.py": (
-        ("p1d_definition.md",),
-        "the catalogue pipeline's generator of that page: executable code, removed by a separate pull request",
-    ),
     "tests/test_report_markdown.py": (
         ("p1d_definition.md",),
-        "that pull request's test, which names the page to assert that the report does not write it again",
+        "the test that the report of the catalogue pipeline does not write the retired page again",
     ),
 }
 
@@ -297,15 +286,14 @@ def test_no_internal_link_is_broken() -> None:
 # ------------------------------------------------------------------------------------------- removed documents
 def test_no_page_names_a_deleted_document() -> None:
     """No tracked text file names a document that was removed, outside the changelog and an exact list of files
-    that wait, each with its reason. Two files that depend on a separate pull request may name their one page or
-    not name it; they may name nothing else."""
-    listed = {**PENDING, **STANDING, **EITHER_STATE}
-    assert len(listed) == len(PENDING) + len(STANDING) + len(EITHER_STATE)
+    that wait, each with its reason."""
+    listed = {**PENDING, **STANDING}
+    assert len(listed) == len(PENDING) + len(STANDING)
     assert all(reason for _, reason in listed.values())
     expected = {path: tuple(sorted(names)) for path, (names, _) in listed.items()}
     found = _names_found(_text_files(), REMOVED)
     new = {path: names for path, names in found.items() if expected.get(path) != names}
-    settled = sorted(path for path in expected if path not in found and path not in EITHER_STATE)
+    settled = sorted(path for path in expected if path not in found)
     assert not new, f"a removed document is named (or the list above is no longer exact): {new}"
     assert (
         not settled
