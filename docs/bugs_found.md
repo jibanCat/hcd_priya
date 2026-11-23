@@ -147,7 +147,7 @@ H0 = hubble * _H0_KMS_MPC                   # km/s/Mpc, dimensional
 return (1.0 + z)**2 * L_com_Mpc * H0 / _C_KMS
 ```
 
-The defensive copy in `scripts/plot_intermediate.py` (used as a fallback when imports fail) was also updated.
+The defensive copy in `scripts/plot_intermediate.py` (not in this repository) (used as a fallback when imports fail) was also updated.
 
 **Status**. Fixed. Six unit tests added (`tests/test_absorption_path.py`) so any future regression is caught immediately.
 
@@ -166,7 +166,7 @@ For every `<sim>/snap_NNN/cddf.npz` (1146 files) and `<sim>/cddf_stacked.npz` (6
 
 **Fix**. `hcd_analysis/catalog.py:find_systems_in_skewer` drops the first-copy runs that the wrapping run already covers; a skewer whose gaps are all merged is one system `(0, n - 1)`.
 
-**Guards** (so this class of error cannot be written silently again: before the pipeline writes a catalogue, two independent finders and the overlap and value checks must pass; before it reuses one, the overlap and value checks; and the class counts are reconciled against the CDDF. The two per-class P1D product writers, `scripts/build_emulator_cache_tau0.py` (the training cache, including its dN/dX columns) and `scripts/patch_per_class_p1d.py`, load catalogues through the same `load_validated_catalog` and refuse a catalogue built before the fix. Other code outside the pipeline reads `catalog.npz` directly, without these checks, and so does not refuse one: other scripts under `scripts/`, among them `build_hcd_summary.py` and `bootstrap_dndx_per_sim.py` (per-class counts and dN/dX), and the tutorial notebooks):
+**Guards** (so this class of error cannot be written silently again: before the pipeline writes a catalogue, two independent finders and the overlap and value checks must pass; before it reuses one, the overlap and value checks; and the class counts are reconciled against the CDDF. The two per-class P1D product writers, `scripts/build_emulator_cache_tau0.py` (the training cache, including its dN/dX columns) and `scripts/patch_per_class_p1d.py`, load catalogues through the same `load_validated_catalog` and refuse a catalogue built before the fix. Other code outside the pipeline reads `catalog.npz` directly, without these checks, and so does not refuse one: other scripts under `scripts/`, among them `build_hcd_summary.py` and `bootstrap_dndx_per_sim.py` (not in this repository) (per-class counts and dN/dX), and the tutorial notebooks):
 
 - `find_systems_in_skewer_reference`, an independent implementation (rotate the mask to start on a gap, find linear runs, merge the circular gap), must agree with the production finder on every skewer: `process_skewer_batch` raises `CatalogIntegrityError` otherwise (`verify_finder=True` by default).
 - `validate_catalog_entries` refuses any two entries of one skewer that share a pixel modulo n (and impossible spans); `build_catalog` runs it on every catalogue, and the pipeline runs it (`load_validated_catalog`) on every cached catalogue before reusing it, whether or not its snapshot is marked done, so a catalogue built before the fix is refused and never reused. For a snapshot marked done the refusal stops the run (`CatalogIntegrityError`; nothing is written for that snapshot and no `cddf_stacked.npz` for its simulation, while snapshots finished earlier in the run keep their outputs); for one not yet done that snapshot fails like any other failed snapshot (the refusal in its `error.txt`, an ERROR log line, no `meta.json` or done marker) and the rest of the simulation runs; `cddf_stacked.npz` is rewritten from the snapshots that succeed, and if none does it is not written and an existing one is left as it is. (A snapshot marked done whose cached outputs cannot be read at all is skipped with a WARNING, as before the fix, and left out of the stack.)
@@ -182,6 +182,6 @@ For every `<sim>/snap_NNN/cddf.npz` (1146 files) and `<sim>/cddf_stacked.npz` (6
 The audit considered but found to be fine:
 
 - `io.py`, `snapshot_map.py` — HDF5 reading, folder discovery, Snapshots.txt parsing all work correctly; confirmed against directory listings.
-- `p1d.py:P1DAccumulator`, `compute_p1d_single` — the streaming two-pass mean-flux + rfft P1D computation is consistent with Palanque-Delabrouille 2013 / Chabanier 2019 convention and documented correctly in `docs/p1d_definition.md`.
+- `p1d.py:P1DAccumulator`, `compute_p1d_single` — the streaming two-pass mean-flux + rfft P1D computation is consistent with Palanque-Delabrouille 2013 / Chabanier 2019 convention.
 - `find_systems_in_skewer` (catalog.py) — threshold + merge + min-pixels detection is internally correct; wrap-around handling is right. **Corrected later: the wrap-around handling listed every box-edge system twice; see bug 8.**
 - The `_WING_PIXELS = 200` (±2000 km/s) expansion window in `measure_nhi_for_system` is the cause of the Voigt-fit over-counting observed post-fix (forest pixels in the window bias the single-Voigt fit upward); but this is a design issue, not a bug in the strict sense. The resolution is to default to `fast_mode=True`, which bypasses this window entirely.

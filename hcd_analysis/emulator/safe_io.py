@@ -1,4 +1,4 @@
-"""Prototype pickle-free format for the emulator, ``hcd_priya.safe/1`` (contract: docs/release_format.md), kept as
+"""Prototype pickle-free format for the emulator, ``hcd_priya.safe/1``, kept as
 evidence; it is not the release format (HDF5 + JSON, ``hcd_priya.h5/2`` with a lineage block, safe_h5.py and
 docs/release_format_h5.md, is). A ``hcd_priya.safe/1`` bundle carries no lineage, so it loads only through the
 historical ``load_bundle_historical`` with a reason. The manifest and file helpers here are shared with safe_h5.

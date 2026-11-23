@@ -106,7 +106,7 @@ The low-fidelity (LF) emulator predicts the per-class P1D of the low-resolution 
 P_MF = P_LF exp(g(z, tau0, k)), where g does not depend on the cosmological parameters and is bound to exactly one LF
 backbone bundle. The release MF record is part of the model release; its grouped (K-fold) cross-validation results
 are not public. The validation summaries that are public, all on simulations or mocks, are listed in the README
-("Status"), and no result from real data is in the release. The
+("Where to go next"), and no result from real data is in the release. The
 calls below show the interface only; every path and digest in them is a placeholder.
 
 ```python

@@ -17,7 +17,7 @@ The θ-dependence enters ONLY through r̂ = HeadB's ``P_filt_resid`` (the baseli
 templates R_c are LIVE-emulated from P_filt each step (field-standard fixed-shape /
 free-amplitude form, cf. Rogers & Bird 2018 / PRIYA 2025); ∂P_obs/∂α_c = R_c = (P_c −
 P_clean), now ≠0 for LLS. ``predict_P_tier_p`` (the structural Σ_c w_c·P_filt) remains
-for the clean-path diagnostics but is NOT the HCD forward model. See README.md §Forward-model.
+for the clean-path diagnostics but is NOT the HCD forward model.
 """
 
 from __future__ import annotations
