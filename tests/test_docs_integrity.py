@@ -45,9 +45,6 @@ REMOVED = (
     "docs/analysis.md",
     "hcd_mf_analysis.md",
     "figure_guide.md",
-    "clustering_definitions.md",
-    "multipole_jacobian_explained.md",
-    "dla_truth_unmatched_analysis.md",
     "docs/release_format.md",
     "hcd_analysis/emulator/README.md",
     "06_performance_walkthrough/README.md",
@@ -55,13 +52,11 @@ REMOVED = (
 
 # Files that still name a removed document, with the reason. The list is exact: a file that stops naming one, or a
 # new file that names one, fails the test, so the list empties as the remaining pointers are settled.
-DOCSTRING_WAITS = "a docstring that cites the removed analysis as its evidence; it waits for the decision on that page"
 NOTEBOOK_WAITS = (
     "a research-group teaching notebook under the project lead's cell-by-cell review; "
     "its pointers are corrected with that review"
 )
 PENDING = {
-    "hcd_analysis/dla_truth.py": (("dla_truth_unmatched_analysis.md",), DOCSTRING_WAITS),
     "hcd_analysis/report.py": (
         ("p1d_definition.md",),
         "the catalogue pipeline's generator of that page: executable code, removed by a separate pull request",
@@ -72,14 +67,6 @@ PENDING = {
     ),
     "notebooks/tutorials/_build_notebooks.py": (
         ("docs/analysis.md", "hcd_mf_analysis.md"),
-        NOTEBOOK_WAITS,
-    ),
-    "notebooks/tutorials/README.md": (
-        ("clustering_definitions.md", "multipole_jacobian_explained.md"),
-        NOTEBOOK_WAITS,
-    ),
-    "notebooks/tutorials/STUDENT_PROJECTS.md": (
-        ("dla_truth_unmatched_analysis.md", "multipole_jacobian_explained.md"),
         NOTEBOOK_WAITS,
     ),
 }
