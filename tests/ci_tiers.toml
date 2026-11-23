@@ -168,6 +168,7 @@ release = "only with the real assets, before a release (the assets job); listed 
 "tests/test_publish_workflow.py" = { tier = "source", level = "pr" }
 "tests/test_rcinj_oos_spec.py" = { tier = "source", level = "nightly" }
 "tests/test_readme_first_example.py" = { tier = "source", level = "pr" }
+"tests/test_report_markdown.py" = { tier = "wheel", level = "pr" }
 "tests/test_real_fit_export.py" = { tier = "source", level = "nightly" }
 "tests/test_registry.py" = { tier = "wheel", level = "pr" }
 "tests/test_res_corr_injection_gate.py" = { tier = "source", level = "nightly" }
