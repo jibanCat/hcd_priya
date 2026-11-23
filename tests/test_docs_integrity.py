@@ -45,6 +45,8 @@ REMOVED = (
     "docs/analysis.md",
     "hcd_mf_analysis.md",
     "figure_guide.md",
+    "clustering_definitions.md",
+    "multipole_jacobian_explained.md",
     "docs/release_format.md",
     "hcd_analysis/emulator/README.md",
     "06_performance_walkthrough/README.md",
@@ -63,6 +65,14 @@ PENDING = {
     ),
     "notebooks/tutorials/_build_notebooks.py": (
         ("docs/analysis.md", "hcd_mf_analysis.md"),
+        NOTEBOOK_WAITS,
+    ),
+    "notebooks/tutorials/README.md": (
+        ("clustering_definitions.md", "multipole_jacobian_explained.md"),
+        NOTEBOOK_WAITS,
+    ),
+    "notebooks/tutorials/STUDENT_PROJECTS.md": (
+        ("multipole_jacobian_explained.md",),
         NOTEBOOK_WAITS,
     ),
 }

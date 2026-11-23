@@ -63,4 +63,5 @@ the τ₀ training cache.
 
 The P1D files of this catalogue pipeline (`p1d.npz`) use the cyclic wavenumber k_n = n / (N dv)
 (`hcd_analysis/p1d.py`), for N pixels of width dv. It is not the angular wavenumber of the predictor, which is
-larger by the factor 2π for the same mode.
+larger by the factor 2π for the same mode. The class spectra of the released model are not made by this module:
+`hcd_analysis/priya_p1d.py` computes them.
