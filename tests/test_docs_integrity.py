@@ -2,16 +2,23 @@
 
 This file establishes no scientific fact. It keeps corrected text from coming back: a broken link, a pointer to a
 document that was removed, an instruction that loads the published model in a superseded way, a sentence that says
-the model is not published. The scientific definitions are tested against the code in
-tests/test_science_definitions.py. Needs the repository: it reads the tracked text files. No network.
+the model is not published, a number beside a class name or a validation word that is not the code's. The
+scientific definitions themselves are tested against the code, with no page read, in
+tests/test_science_definitions.py. The rules here are loose on purpose: none fixes the wording of a sentence, and
+only one requires a statement to exist (the page on the catalogue pipeline must say that its wavenumber is cyclic).
+Needs the repository: it reads the tracked text files. No network.
 """
 
 from __future__ import annotations
 
+import math
 import pathlib
 import re
 import subprocess
 
+import hcd_analysis.predictor as hp
+from hcd_analysis import catalog
+from hcd_analysis.emulator import data as D
 from hcd_analysis.emulator import mf_release as MR
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -48,18 +55,16 @@ REMOVED = (
 
 # Files that still name a removed document, with the reason. The list is exact: a file that stops naming one, or a
 # new file that names one, fails the test, so the list empties as the remaining pointers are settled.
-DOCSTRING_WAITS = "a docstring or comment of package code; package files are not changed by a documentation change"
+DOCSTRING_WAITS = "a docstring that cites the removed analysis as its evidence; it waits for the decision on that page"
 NOTEBOOK_WAITS = (
     "a research-group teaching notebook under the project lead's cell-by-cell review; "
     "its pointers are corrected with that review"
 )
 PENDING = {
-    "hcd_analysis/clustering.py": (("clustering_definitions.md",), DOCSTRING_WAITS),
     "hcd_analysis/dla_truth.py": (("dla_truth_unmatched_analysis.md",), DOCSTRING_WAITS),
-    "hcd_analysis/emulator/safe_io.py": (("docs/release_format.md",), DOCSTRING_WAITS),
     "hcd_analysis/report.py": (
         ("p1d_definition.md",),
-        "the catalogue pipeline's generator of that page; package code, reported to the project lead",
+        "the catalogue pipeline's generator of that page: executable code, removed by a separate pull request",
     ),
     "notebooks/tutorials/02_recomputing_cddf_and_dndx.ipynb": (
         ("docs/analysis.md", "hcd_mf_analysis.md"),
@@ -342,3 +347,89 @@ def test_the_mean_flux_convention_cites_the_line_that_holds_it() -> None:
     path, line, expression = cited.group(1), int(cited.group(2)), cited.group(3)
     lines = (ROOT / path).read_text(encoding="utf-8").split("\n")
     assert expression in lines[line - 1], f"{path}:{line} is {lines[line - 1].strip()!r}"
+
+
+# ------------------------------------------------------------------------------------------- numbers the pages print
+NUMBER = r"([0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)"
+
+
+def _one_line(page: str) -> str:
+    """The text of a page with its line breaks and repeated spaces turned into single spaces.
+
+    Parameters
+    ----------
+    page : str
+        The page, relative to the root of the repository.
+
+    Returns
+    -------
+    str
+        The text on one line, so that a sentence broken over two lines can be matched.
+    """
+    return " ".join((ROOT / page).read_text(encoding="utf-8").split())
+
+
+def test_a_class_edge_printed_beside_a_class_name_is_the_codes() -> None:
+    """Where a page writes a power of ten right after the name of a class ("LLS at 10^...", "subDLA: 10^...",
+    "DLA N_HI >= 10^..."), it is the lower edge of that class in the catalogue code. No sentence has to exist.
+    """
+    edges = {
+        "LLS": catalog.LOG_NHI_LLS_MIN,
+        "subDLA": catalog.LOG_NHI_SUBDLA_MIN,
+        "DLA": catalog.LOG_NHI_DLA_MIN,
+    }
+    beside = r"\b(LLS|subDLA|DLA)\b:?\s+(?:at\s+)?(?:N_HI\s*(?:≥|>=)\s*)?10\^" + NUMBER
+    for page in (*PREDICTOR_PAGES, "docs/pipeline.md"):
+        for name, exponent in re.findall(beside, _one_line(page)):
+            assert float(exponent) == edges[name], f"{page}: {name} from 10^{exponent}"
+
+
+def test_a_parameter_point_printed_by_a_page_is_the_midpoint_of_the_box() -> None:
+    """Where a page of the supported interface prints a point of the nine parameters, as dictionary entries
+    ("ns": 0.925) or as a list of three or more in a row (ns = 0.925, Ap = 1.9e-09, ...), each value is the
+    midpoint of the predictor's range, the point the pages say their examples use. A single "name = value" in a
+    sentence is not checked, and no page has to print a point."""
+    middle = {
+        name: 0.5 * (float(low) + float(high))
+        for name, (low, high) in zip(hp.PARAM_NAMES, hp.PARAM_LIMITS)
+    }
+    names = "|".join(hp.PARAM_NAMES)
+    one = rf"\b(?:{names}) = {NUMBER}"
+    for page in PREDICTOR_PAGES:
+        text = _one_line(page)
+        printed = re.findall(rf'"({names})":\s*{NUMBER}', text)
+        for run in re.finditer(rf"(?:{one}(?:,| and)?\s+){{2,}}{one}", text):
+            printed += re.findall(rf"\b({names}) = {NUMBER}", run.group(0))
+        for name, value in printed:
+            assert math.isclose(
+                float(value), middle[name], rel_tol=1e-12
+            ), f"{page}: {name} = {value}"
+
+
+def test_a_number_beside_the_validation_words_is_the_codes() -> None:
+    """In the pages of the supported interface: a redshift range in a sentence on the grouped validation is the
+    code's; a wavenumber in s/km in a sentence on "less weight" is the code's bound; a list of the snapshots
+    written "z = a, b, ..., c" begins and ends where the code's redshifts do. No sentence has to exist.
+    """
+    validation = (D.DATA_RANGE["z_lo"], D.DATA_RANGE["z_hi"])
+    for page in PREDICTOR_PAGES:
+        text = _one_line(page)
+        for sentence in re.split(r"(?<=[.;:])\s", text):
+            if re.search(r"grouped[- ]validation", sentence):
+                for low, high in re.findall(r"(\d\.\d)(?: to |-)(\d\.\d)", sentence):
+                    assert (float(low), float(high)) == validation, f"{page}: {sentence!r}"
+            if "less weight" in sentence:
+                for value in re.findall(r"([0-9.]+e-?\d+) s/km", sentence):
+                    assert float(value) == D.DATA_RANGE["k_min"], f"{page}: {sentence!r}"
+        for first, last in re.findall(r"z = (\d\.\d), \d\.\d, \.\.\., (\d\.\d)", text):
+            assert (float(first), float(last)) == tuple(
+                D.Z_LIMITS
+            ), f"{page}: z = {first}, ..., {last}"
+
+
+def test_the_pipeline_page_says_that_its_wavenumber_is_cyclic() -> None:
+    """The page on the catalogue pipeline says that its P1D files use the cyclic wavenumber: the word, and the
+    formula n / (N dv) or 1 / lambda, anywhere on the page and in any sentence."""
+    text = _one_line("docs/pipeline.md")
+    assert "cyclic" in text.lower()
+    assert re.search(r"n\s*/\s*\(\s*N\s*[*×·]?\s*dv\s*\)|1\s*/\s*(?:lambda|λ)", text)
