@@ -138,7 +138,7 @@ above the original PRIYA design box (``NS_RIDGE``, where the design is sparse) i
   * ``P_class_unfiltered`` (4, K): the class spectra without the PRIYA filter, ``P_class`` plus the members' mean
     predicted difference between the unfiltered and the filtered spectrum of LLS, subDLA and DLA (the clean row is
     ``P_class[0]``), normalised as ``P_class`` and not renormalised to the mean flux of the unfiltered sample; under
-    LF+MF the added difference is the low-fidelity one (flag ``unfiltered_addback_is_lf``); a value that is not
+    LF+MF the added difference is the low-fidelity one (``labels["P_class_unfiltered"]`` says so); a value that is not
     positive is returned and flagged (``unfiltered_nonpositive``); no held-out range is carried for it in this
     release; ``template_unfiltered`` (3, K) = ``P_class_unfiltered[1:] / P_class[0] - 1``;
   * ``w_c`` (3,): an estimate of the simulation's own sightline fractions (LLS, subDLA, DLA) at (params, z), from the
@@ -634,19 +634,26 @@ def _members_cddf(ens, fn_mean, fn_std, x, tau):
     return jnp.stack([jnp.exp(m(x, tau)["f_nhi"] * fn_std + fn_mean) for m in ens.members])
 
 
-def _members_delta(ens, d_mean, d_std, x, tau):
-    """Per member: the difference between the unfiltered and the filtered class spectrum of LLS, subDLA and DLA,
-    in km/s, (M, 3, K): sinh(o sigma + mu), the inverse of the training encoding of the members' ``delta`` output
-    (``emulator.data.signed_log``). It is a further evaluation of the members, used for the unfiltered class
-    spectra; the spectra and the dN/dX of ``_members_forward`` are not touched by it."""
-    return jnp.stack([jnp.sinh(m(x, tau)["delta"] * d_std + d_mean) for m in ens.members])
+def _members_prediction(ens, pf, dn_mean, dn_std, d_mean, d_std, x, tau):
+    """Per member, in one evaluation, what a prediction is made from: the reconstructed per-class P_filt (M, 4, K)
+    and the physical Head-A dN/dX (M, 3), formed as in ``_members_forward``; and the difference between the
+    unfiltered and the filtered class spectrum of LLS, subDLA and DLA in km/s, (M, 3, K): sinh(o sigma + mu), the
+    inverse of the training encoding of the members' ``delta`` output (``emulator.data.signed_log``).
+    """
+    outs = [m(x, tau) for m in ens.members]
+    P = jnp.stack([reconstruct_P_filt_jax(o["P_filt_base"], o["P_filt_resid"], pf) for o in outs])
+    dn = jnp.stack([jnp.exp(o["dndx"] * dn_std + dn_mean) for o in outs])
+    D = jnp.stack([jnp.sinh(o["delta"] * d_std + d_mean) for o in outs])
+    return P, dn, D
 
 
-_forward_one = eqx.filter_jit(_members_forward)
 _cddf_one = eqx.filter_jit(_members_cddf)
 _cddf_many = eqx.filter_jit(eqx.filter_vmap(_members_cddf, in_axes=(None, None, None, 0, 0)))
-_delta_one = eqx.filter_jit(_members_delta)
-_delta_many = eqx.filter_jit(eqx.filter_vmap(_members_delta, in_axes=(None, None, None, 0, 0)))
+# every prediction goes through these two; _forward_many (below) serves the builders of the MF targets
+_predict_one = eqx.filter_jit(_members_prediction)
+_predict_many = eqx.filter_jit(
+    eqx.filter_vmap(_members_prediction, in_axes=(None, None, None, None, None, None, 0, 0))
+)
 # the P1D MF label's statement about w_c; replaced when the incidence is corrected too
 _W_C_STAYS_LF = "w_c stays the LF backbone's"
 _mf_g = eqx.filter_jit(lambda mf, x, tau: mf(x, tau))  # the MF correction g (4, K) at one input
@@ -812,9 +819,9 @@ class Prediction:
         spectrum. The normalisation is that of ``P_class``, the whole-sample mean flux of the
         filtered sample; the field is not renormalised to the mean flux of the unfiltered sample.
         Under LF+MF the filtered spectra carry the multi-fidelity correction and the added
-        difference is the low-fidelity one, because no correction exists for it; the flag
-        ``unfiltered_addback_is_lf`` is then True. A value that is not positive is returned as it
-        is, and the flag ``unfiltered_nonpositive`` is True. No held-out range is carried for this
+        difference is the low-fidelity one, because no correction exists for it;
+        ``labels["P_class_unfiltered"]`` then says so. A value that is not positive is returned as
+        it is, and the flag ``unfiltered_nonpositive`` is True. No held-out range is carried for this
         field in this release (the flag ``unfiltered_validation_available`` is False). ``add_hcd``
         and the likelihood mix the filtered spectra, not these. None on a ``Prediction`` built by
         hand without it.
@@ -1427,7 +1434,7 @@ class _PredictorBase:
                 labels["P_class_unfiltered"]
                 + "; under LF+MF the added difference is the low-fidelity one (no "
                 "multi-fidelity correction exists for it): the corrected filtered spectra plus the low-fidelity "
-                "difference, flagged unfiltered_addback_is_lf"
+                "difference"
             )
             out["mf_correction"] = (
                 "applied: the multi-fidelity (LF to HR) correction of the loaded MF record, "
@@ -1537,12 +1544,12 @@ class _PredictorBase:
         - ``z_downweighted`` and ``k_downweighted``: ``z`` is outside 2.2-4.6, or some ``k`` is
           below 1e-3 s/km, where training gave less weight.
         - ``w_c_xbar_extrapolated``: the w_c map is used outside the redshifts it was fitted on.
-        - For ``P_class_unfiltered`` and ``template_unfiltered``: ``unfiltered_addback_is_lf``, the
-          prediction is LF+MF and the difference added to the corrected filtered spectra is the
-          low-fidelity one; ``unfiltered_nonpositive``, some value of ``P_class_unfiltered`` is
-          not positive (it is returned as it is, never clipped);
-          ``unfiltered_validation_available``, False in this release: no held-out range is
-          carried for the two fields.
+        - For ``P_class_unfiltered`` and ``template_unfiltered``: ``unfiltered_nonpositive``, some
+          value of ``P_class_unfiltered`` is not positive (it is returned as it is, never
+          clipped); ``unfiltered_validation_available``, False in this release: no held-out range
+          is carried for the two fields. Under LF+MF the difference added to the corrected
+          filtered spectra is the low-fidelity one; that is said in
+          ``labels["P_class_unfiltered"]``, not by a flag.
         - With an MF record: ``mf_applied``; ``mf_z_clamped`` and ``mf_tau0_clamped``, the
           correction is held constant beyond its tables; ``mf_z_above_validated``, an LF+MF
           prediction above z 4.6, outside the frozen grouped-validation domain (z 2.2-4.6). The
@@ -1681,16 +1688,18 @@ class _PredictorBase:
         zu = (np.asarray(zs, dtype=np.float64) - Z_LIMITS[0]) / (Z_LIMITS[1] - Z_LIMITS[0])
         x = np.concatenate([np.tile(th, (len(zs), 1)), zu[:, None]], axis=1)
         ens = self._rb.ensemble
+        # one evaluation of the members: their spectra (.., M, 4, K), their dN/dX (.., M, 3) and their unfiltered
+        # minus filtered spectra of LLS, subDLA, DLA (.., M, 3, K)
         if single:
-            P, dn = _forward_one(ens, self._pf, *self._dn, jnp.asarray(x[0]), jnp.asarray(taus[0]))
-            P, dn = np.asarray(P)[None], np.asarray(dn)[None]
-            D = _delta_one(ens, *self._dl, jnp.asarray(x[0]), jnp.asarray(taus[0]))
-            D = np.asarray(D)[None]
+            P, dn, D = _predict_one(
+                ens, self._pf, *self._dn, *self._dl, jnp.asarray(x[0]), jnp.asarray(taus[0])
+            )
+            P, dn, D = np.asarray(P)[None], np.asarray(dn)[None], np.asarray(D)[None]
         else:
-            P, dn = _forward_many(ens, self._pf, *self._dn, jnp.asarray(x), jnp.asarray(taus))
-            P, dn = np.asarray(P), np.asarray(dn)  # (n_z, M, 4, K), (n_z, M, 3)
-            # the members' unfiltered minus filtered spectra of LLS, subDLA, DLA: (n_z, M, 3, K)
-            D = np.asarray(_delta_many(ens, *self._dl, jnp.asarray(x), jnp.asarray(taus)))
+            P, dn, D = _predict_many(
+                ens, self._pf, *self._dn, *self._dl, jnp.asarray(x), jnp.asarray(taus)
+            )
+            P, dn, D = np.asarray(P), np.asarray(dn), np.asarray(D)
         if use_mf:  # P_MF = P_LF exp(g), per member, on the modes
             g = np.stack(
                 [
@@ -1757,7 +1766,6 @@ class _PredictorBase:
         Pu[:, 1:, :] += D.mean(axis=1)
         template_u = Pu[:, 1:, :] / Pm[:, :1, :] - 1.0
         flags, labels, prov = self._flags(pv, th, zs, taus, kout), self.labels(), self.provenance
-        flags["unfiltered_addback_is_lf"] = bool(use_mf)
         flags["unfiltered_nonpositive"] = bool(np.any(~(Pu > 0)))
         flags["unfiltered_validation_available"] = False
         if (self._release or {}).get(

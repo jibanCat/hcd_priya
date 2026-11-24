@@ -142,7 +142,8 @@ def test_the_added_term_is_the_low_fidelity_one_under_both_fidelities(
     emu: hp.Bundle, emu_mf: hp.Bundle, info: RT.SyntheticBundle
 ) -> None:
     """Under LF+MF the filtered spectra carry the correction and the added term does not: the two fidelities differ
-    by exactly what ``P_class`` differs by, and a flag says that the added term is the low-fidelity one.
+    by exactly what ``P_class`` differs by. No flag marks it: the label of the field states it under LF+MF, so the
+    label of an LF+MF prediction is not the label of an LF one (its wording is not read here).
     """
     z = 3.0
     lf = emu_mf.predict(PARAMS, z, tau_eff=TAU[z], fidelity="LF")
@@ -161,9 +162,9 @@ def test_the_added_term_is_the_low_fidelity_one_under_both_fidelities(
         rtol=1e-11,
         atol=ATOL,
     )
-    assert mf.flags["unfiltered_addback_is_lf"] is True
-    assert lf.flags["unfiltered_addback_is_lf"] is False
-    assert emu.predict(PARAMS, z, tau_eff=TAU[z]).flags["unfiltered_addback_is_lf"] is False
+    lf_label = emu.predict(PARAMS, z, tau_eff=TAU[z]).labels["P_class_unfiltered"]
+    assert lf.labels["P_class_unfiltered"] == lf_label
+    assert mf.labels["P_class_unfiltered"] != lf_label
 
 
 def test_a_requested_k_is_served_as_p_class_is(emu: hp.Bundle) -> None:
@@ -191,11 +192,10 @@ def test_a_requested_k_is_served_as_p_class_is(emu: hp.Bundle) -> None:
 
 
 def test_the_flags_and_the_label_exist(emu: hp.Bundle) -> None:
-    """Every prediction carries the three flags as True or False and one label for the field. No held-out range is
+    """Every prediction carries the two flags as True or False and one label for the field. No held-out range is
     carried for the field, and a flag says so."""
     pred = emu.predict(PARAMS, 3.0, tau_eff=TAU[3.0])
     for name in (
-        "unfiltered_addback_is_lf",
         "unfiltered_nonpositive",
         "unfiltered_validation_available",
     ):

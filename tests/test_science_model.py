@@ -343,8 +343,6 @@ def test_the_unfiltered_class_spectra_keep_their_identities(emu, preds):
     name, params = science_points()[0]
     default = predict_case(emu, params, *DEFAULT_MEAN_FLUX)
     lf = emu.predict_many(params, z=list(Z), tau0_amp=1.0, dtau0=0.0, fidelity="LF")
-    assert lf.flags["unfiltered_addback_is_lf"] is False
-    assert default.flags["unfiltered_addback_is_lf"] is default.flags.get("mf_applied", False)
     scale = np.abs(default.P_class) + np.abs(default.P_class_unfiltered)
     np.testing.assert_allclose(
         (default.P_class_unfiltered - lf.P_class_unfiltered) / scale,
