@@ -35,6 +35,32 @@ def _code_cells() -> list[dict]:
     return [cell for cell in cells if cell["cell_type"] == "code"]
 
 
+def _text_without_image_data() -> str:
+    """Everything the committed notebook holds, as one text, except the encoded data of its images.
+
+    An image is stored as base64, a long run of letters, digits, ``+`` and ``/``. Such a run can hold the characters
+    of a path's beginning by chance, so a search of the raw file for private paths can fail on a clean notebook.
+    Here the notebook is read, the encoded data of every image (in an output, or attached to a text cell) is set
+    aside, and the rest is written back as text: the sources of all cells, the printed outputs, the text forms of
+    results, tracebacks and all metadata.
+
+    Returns
+    -------
+    str
+        The notebook as JSON text, with an empty string in place of each image's encoded data. An SVG image is
+        text, not encoded data, and stays.
+    """
+    notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+    for cell in notebook["cells"]:
+        bundles = [output["data"] for output in cell.get("outputs", []) if "data" in output]
+        bundles += list(cell.get("attachments", {}).values())
+        for bundle in bundles:
+            for kind in bundle:
+                if kind.startswith("image/") and kind != "image/svg+xml":
+                    bundle[kind] = ""
+    return json.dumps(notebook, ensure_ascii=False)
+
+
 def _as_python(cell: dict) -> str:
     """The source of a code cell with its Jupyter-only lines replaced, so that Python's parser can read it.
 
@@ -102,10 +128,10 @@ def test_every_code_cell_is_formatted_as_black_writes_it() -> None:
 
 def test_the_stored_outputs_are_one_run_in_order_without_an_error_or_a_private_path() -> None:
     """The committed notebook was run top to bottom, and holds no error output, no warning output and no path of
-    a private machine in a cell or an output."""
-    raw = NOTEBOOK.read_text(encoding="utf-8")
+    a private machine in a cell, in an output that is not image data, or in its metadata."""
+    scanned = _text_without_image_data()
     for private in PRIVATE_PATHS:
-        assert private not in raw, f"the committed notebook holds {private!r}"
+        assert private not in scanned, f"the committed notebook holds {private!r}"
     cells = _code_cells()
     counts = [cell["execution_count"] for cell in cells]
     assert counts == list(
