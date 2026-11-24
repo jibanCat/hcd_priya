@@ -1,10 +1,11 @@
 # The public tutorial
 
 `hcd_priya_tutorial.ipynb` is one notebook in three parts: the scientific motivation, the emulator, and the public
-likelihood with the repository's mock-recovery example. It teaches the public functions of the package in plain Python. It adds no
-method of its own, and it runs no script: every figure is drawn in the notebook from what the package returns.
-
-**UNAPPROVED (PI to review).**
+likelihood with the repository's mock-recovery example. It teaches the public functions of the package in plain
+Python. It adds no method of its own, and it runs no script: the figures of Parts II and III are drawn in the
+notebook from what the package returns, three of them beside published measurements or the training simulations.
+Fig. 1 is an image linked from the web, so it needs a network connection, and Fig. 2 is the schematic stored in
+this folder.
 
 ## How to run it
 
