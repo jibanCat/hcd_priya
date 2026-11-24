@@ -1,0 +1,117 @@
+"""The public tutorial notebook, notebooks/tutorial/hcd_priya_tutorial.ipynb, as it is committed.
+
+The notebook is edited by hand and committed with its outputs. These are mechanical checks of the file, none of them
+a rule on what the tutorial says or shows: the code cells parse, a function defined in a cell is annotated and
+documented, and the stored outputs are those of one run from top to bottom, without an error, a warning output or a
+path of a private machine.
+
+The format of the code cells is not checked here: the CI job "Format" checks it with the pinned black
+(tools/ci/check_notebook_format.py), which the test environment does not hold.
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+import pathlib
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+NOTEBOOK = ROOT / "notebooks" / "tutorial" / "hcd_priya_tutorial.ipynb"
+# beginnings of paths of a private machine; joined here so that this file does not hold them either
+PRIVATE_PATHS = tuple("/" + name + "/" for name in ("home", "nfs", "tmp", "sw", "Users"))
+
+
+def _code_cells() -> list[dict]:
+    """The code cells of the committed notebook.
+
+    Returns
+    -------
+    list of dict
+        The cells of type "code", in order, as the notebook's JSON holds them.
+    """
+    cells = json.loads(NOTEBOOK.read_text(encoding="utf-8"))["cells"]
+    return [cell for cell in cells if cell["cell_type"] == "code"]
+
+
+def _text_without_image_data() -> str:
+    """Everything the committed notebook holds, as one text, except the encoded data of its images.
+
+    An image is stored as base64, a long run of letters, digits, ``+`` and ``/``. Such a run can hold the characters
+    of a path's beginning by chance, so a search of the raw file for private paths can fail on a clean notebook.
+    Here the notebook is read, the encoded data of every image (in an output, or attached to a text cell) is set
+    aside, and the rest is written back as text: the sources of all cells, the printed outputs, the text forms of
+    results, tracebacks and all metadata.
+
+    Returns
+    -------
+    str
+        The notebook as JSON text, with an empty string in place of each image's encoded data. An SVG image is
+        text, not encoded data, and stays.
+    """
+    notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+    for cell in notebook["cells"]:
+        bundles = [output["data"] for output in cell.get("outputs", []) if "data" in output]
+        bundles += list(cell.get("attachments", {}).values())
+        for bundle in bundles:
+            for kind in bundle:
+                if kind.startswith("image/") and kind != "image/svg+xml":
+                    bundle[kind] = ""
+    return json.dumps(notebook, ensure_ascii=False)
+
+
+def _as_python(cell: dict) -> str:
+    """The source of a code cell with its Jupyter-only lines replaced, so that Python's parser can read it.
+
+    Parameters
+    ----------
+    cell : dict
+        A code cell. A line of its source that starts with ``!`` or ``%`` is a line of Jupyter, not Python.
+
+    Returns
+    -------
+    str
+        The source, each Jupyter-only line replaced by ``pass``. The number of lines is unchanged.
+    """
+    lines = "".join(cell["source"]).split("\n")
+    return "\n".join("pass" if line.startswith(("!", "%")) else line for line in lines)
+
+
+def test_every_code_cell_parses() -> None:
+    """Each code cell is valid Python once its Jupyter-only lines are set aside."""
+    for cell in _code_cells():
+        try:
+            ast.parse(_as_python(cell))
+        except SyntaxError as exc:  # pragma: no cover - the message is the point
+            raise AssertionError(f"cell {cell.get('id')} does not parse: {exc}") from None
+
+
+def test_every_function_defined_in_a_cell_has_annotations_and_a_docstring() -> None:
+    """A function that a cell defines says what it takes, what it returns and what it is for."""
+    for cell in _code_cells():
+        for node in ast.walk(ast.parse(_as_python(cell))):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            where = f"cell {cell.get('id')}: {node.name}"
+            arguments = node.args.posonlyargs + node.args.args + node.args.kwonlyargs
+            missing = [argument.arg for argument in arguments if argument.annotation is None]
+            assert not missing, f"{where} has no annotation for {missing}"
+            assert node.returns is not None, f"{where} has no return annotation"
+            assert ast.get_docstring(node), f"{where} has no docstring"
+
+
+def test_the_stored_outputs_are_one_run_in_order_without_an_error_or_a_private_path() -> None:
+    """The committed notebook was run top to bottom, and holds no error output, no warning output and no path of
+    a private machine in a cell, in an output that is not image data, or in its metadata."""
+    scanned = _text_without_image_data()
+    for private in PRIVATE_PATHS:
+        assert private not in scanned, f"the committed notebook holds {private!r}"
+    cells = _code_cells()
+    counts = [cell["execution_count"] for cell in cells]
+    assert counts == list(
+        range(1, len(cells) + 1)
+    ), "the outputs are not those of one run from top to bottom"
+    for cell in cells:
+        for output in cell["outputs"]:
+            assert output["output_type"] != "error", f"cell {cell.get('id')} ended in an error"
+            text = "".join(output.get("text", ""))[:200]
+            assert output.get("name") != "stderr", f"cell {cell.get('id')} wrote to stderr: {text}"
