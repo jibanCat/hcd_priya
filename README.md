@@ -400,6 +400,10 @@ the research code reads.
 - The API reference of the predictor and the loaders is on the documentation site, built from
   [`docs/api.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/api.md); a step-by-step guide to production and research bundles with executable examples
   is [`docs/tutorials/production_and_research_bundles.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/tutorials/production_and_research_bundles.md).
+- A tutorial notebook for new users covers the scientific motivation, the emulator's predictions and the public
+  likelihood on the mock of the example: `notebooks/tutorial/hcd_priya_tutorial.ipynb`, in a clone of the
+  repository (how to run it: `notebooks/tutorial/README.md`). It was added after release 1.0.0, so it is on the
+  `main` branch and not at the tag that the links of this page point to.
 - The research pipeline (catalogue construction) is described in [`docs/pipeline.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/pipeline.md).
 - Five short notebooks introduce the per-(sim, snap) HCD data products of the catalogue pipeline from the ground
   up, for readers who hold the simulation outputs. They need the raw spectra and the pipeline's outputs, which
@@ -462,6 +466,7 @@ model_package/                the companion package hcd-priya-models (the traine
 config/default.yaml           default pipeline config
 scripts/                      install, SLURM batch, cache build, LOSO sweep, plotting (research; tests/DEFERRED.md
                               lists the ones that do not run as they stand)
+notebooks/tutorial/           the tutorial notebook of the package: the emulator and the public likelihood
 notebooks/tutorials/          five starter notebooks for new students
 tests/                        the test suite; tests/ci_tiers.toml says when CI runs each file
 tools/ci/                     the CI tools: the test-tier runner, the distribution checks and content scan

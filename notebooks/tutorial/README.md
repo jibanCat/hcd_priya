@@ -32,7 +32,3 @@ notebook as above. The package's loaders check each file of that data set when t
 | `assets/figures/` | the schematic of the emulator shown in Part II, with `PROVENANCE.md` |
 
 Git ignores the example data set unpacked beside the notebook.
-
-## What is pending
-
-The image of Fig. 1 is a placeholder. No text cell is approved.
