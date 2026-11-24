@@ -60,9 +60,10 @@ echo "Installing hcd-priya and its dependencies..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$REPO_ROOT"
-# hcd-priya requires the model package hcd-priya-models, which is not on the package index yet: build a stand-in
-# with a synthetic bundle (untrained networks; tests and development only) and install both, then make the install
-# editable. With a real model wheel in hand, install that file in place of the stand-in.
+# hcd-priya requires the model package hcd-priya-models. This development install does not take the published one
+# from the package index: it builds a stand-in with a synthetic bundle (untrained networks; tests and development
+# only) and installs both, then makes the install editable. For the published model, install hcd-priya-models from
+# the package index, or a model wheel held as a file, in place of the stand-in.
 pip install build
 python -m build --wheel --outdir dist .
 tools/ci/install_with_synthetic_models.sh python "$(ls -t dist/hcd_priya-*.whl | head -n 1)[tutorials]" \

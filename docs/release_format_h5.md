@@ -6,14 +6,14 @@ its loader and a compatibility test with an older HDF5 library. That test runs i
 release format with an older libhdf5"): a synthetic two-member single-fidelity bundle (small untrained networks, a
 made-up lineage block and w_c map) written with the pinned stack is read bit for bit with h5py built against
 Ubuntu's libhdf5 1.10, and the loader's tests pass there. It covers the member files and the manifest of that
-synthetic bundle, not a trained release bundle or the multi-fidelity record. The trained models themselves are not
-distributed yet.
+synthetic bundle, not a trained release bundle or the multi-fidelity record. The trained model itself is distributed in the package `hcd-priya-models`
+and as files on the GitHub release of this version.
 The training
 checkpoints (`.eqx` + `.norm.pkl` + `.meta.json`, written by `train.save_checkpoint`) remain the working format; a
 release converts them once (`scripts/export_safe_bundle.py`). `hcd_priya.h5/2` adds to the earlier `hcd_priya.h5/1`
 a lineage block and the map from absorber incidence (dN/dX) to the class weights w_c; an `h5/1` bundle loads only
 through the separately named historical loaders (below). The earlier safetensors-layout prototype
-(`docs/release_format.md`) is kept as evidence only and is not a second release format.
+(`hcd_analysis/emulator/safe_io.py`) is kept as evidence only and is not a second release format.
 
 ## Scope: single fidelity
 
@@ -89,7 +89,7 @@ from hcd_analysis.emulator.predict import predict_P_filt
 ensemble, metas, norm = safe_h5.load_ensemble("path/to/bundle",
                                               expected_manifest_sha256="<the published manifest sha256>")
 # theta9_unit, z_unit, tau0: the emulator inputs (the nine parameters and the redshift scaled to the unit
-# interval, and the mean-flux input), built as in hcd_analysis/emulator/README.md, section 6
+# interval, and the mean-flux input)
 P_filt = predict_P_filt(ensemble, theta9_unit, z_unit, tau0, norm["P_filt"])   # (4, K): clean, LLS, subDLA, DLA
 ```
 

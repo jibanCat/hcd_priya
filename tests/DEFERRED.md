@@ -19,7 +19,7 @@ deferred cause (`raise_if_deferred`), so a retired interface cannot pass as abse
 - Some stop inside shipped scripts that are broken at this commit, and there is no runnable inference driver.
   For example: `scripts/run_real_fit.py` (`build_real_ctx` assumes the schema-1 checkpoint layout, and its
   `build_legb_ctx` call passes retired arguments); `scripts/run_prod_sbc_shard.py`, `make_legb_sites_golden.py`,
-  `make_legb_golden.py`, `run_legb_shard.py`, `run_dnuis_bias_shard.py`, `run_metal_smoothosc_shard.py` and
+  `make_legb_golden.py` (not in this repository), `run_legb_shard.py` (not in this repository), `run_dnuis_bias_shard.py`, `run_metal_smoothosc_shard.py` (not in this repository) and
   `run_stepA.py` (retired `build_legb_ctx` arguments).
 - Rebuilding or deleting them is follow-up work and needs scientific review: expected site lists and goldens change
   under gate E.

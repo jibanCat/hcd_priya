@@ -2,8 +2,7 @@
 HCD clustering — coordinate conversion, pair counters, ξ estimators,
 δ_F field builder.
 
-See ``docs/clustering_definitions.md`` for the formal spec and the
-locked-in design decisions.  Real-PRIYA validation gates run by
+Real-PRIYA validation gates run by
 ``scripts/run_test10.py`` and ``scripts/run_test11.py``; results
 written up in ``docs/clustering_test10_results.md`` and
 ``docs/clustering_test11_results.md``.
@@ -797,7 +796,7 @@ def _bin_volumes_2d(
 
 
 # ---------------------------------------------------------------------------
-# δ_F field builder (all-HCD masked, per docs/clustering_definitions.md §2)
+# δ_F field builder (all-HCD masked)
 # ---------------------------------------------------------------------------
 
 
@@ -849,7 +848,7 @@ def build_delta_F_field(
 ) -> DeltaFResult:
     """Build the all-HCD-masked Lyman-α flux field δ_F per pixel.
 
-    Per `docs/clustering_definitions.md` §2:
+    Definition:
 
         F_ij    = exp(−τ_ij)             on unmasked pixels
                 = ⟨F⟩                     on masked pixels  → δ_F = 0
@@ -1081,7 +1080,7 @@ def xi_auto_lya(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Lyman-α × Lyman-α flux auto-correlation ξ_FF(r_par, r_perp).
 
-    Estimator (per docs/clustering_definitions.md §5b):
+    Estimator:
 
         ξ_FF(r_par, r_perp) = Σ_{(ℓ, ℓ') ∈ bin}  δ_F_ℓ · δ_F_ℓ'
                               ──────────────────────────────────

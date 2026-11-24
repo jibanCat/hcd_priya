@@ -1,6 +1,12 @@
 """
 1D power spectrum P1D(k) computation.
 
+This module is the P1D of the catalogue pipeline (the ``hcd run-*`` commands of the command line). Its products
+(``p1d.npz``, ``p1d_per_class.h5``) use the cyclic wavenumber k_n = n / (N dv), and the per-class files normalise
+each subset of sightlines by its own mean flux. It is not the code behind the class spectra of the released model:
+those are computed by ``hcd_analysis/priya_p1d.py`` (angular wavenumber, one mean flux for the whole sample, the
+PRIYA filter) when the training cache is built.
+
 Definition
 ----------
 Let F(v) = exp(-tau(v)) be the transmitted flux along a sightline.

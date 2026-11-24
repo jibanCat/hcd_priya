@@ -219,15 +219,17 @@ cache and commit; every member is a **production member** (its recipe declares `
 fold key and no research marking); and `predictor.Bundle` recomputes all of this itself rather than trusting stored
 flags.
 
-**With the published release (optional, not executed here).** The real bundle is not shipped with the code; when you
-have it, the same call applies, with the digest published with the release:
+**With the published release (optional, not executed here).** The real bundle is not shipped with the code: the
+published model is loaded whole with `hp.load_published()` or `hp.load_release(dir, "<published release sha256>")`
+(the README, "Models and data"). On the backbone of a release whose files you hold, the same call applies, with
+the backbone's manifest digest, and gives the LF prediction:
 
 ```python
-emu = hp.load_bundle("<the release bundle directory>", "<the published manifest sha256>")
-assert emu.manifest_sha256 == "<the published manifest sha256>" and emu.lineage["release_eligible"]
+emu = hp.load_bundle("<the release directory>/backbone", "<the backbone manifest sha256>")
+assert emu.manifest_sha256 == "<the backbone manifest sha256>" and emu.lineage["release_eligible"]
 ```
 
-`sha256sum <the release bundle directory>/manifest.json` shows the digest the loader will check. The repository's
+`sha256sum <the release directory>/backbone/manifest.json` shows the digest the loader will check. The repository's
 integration tests (`tests/integration/`, run locally against the release data, not in CI) load the accepted bundle this
 way and check that its predictions are bitwise those recorded before these rules were added.
 

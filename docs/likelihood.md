@@ -622,6 +622,11 @@ Estimation - II. KODIAQ, SQUAD & XQ-100", [arXiv:2108.10870](https://arxiv.org/a
 Fernandez, M. A., Bird, S., Ho, M.-F. 2024, "Cosmological constraints from the eBOSS Lyman-alpha forest using the
 PRIYA simulations", JCAP 2024 (07) 029, [arXiv:2309.03943](https://arxiv.org/abs/2309.03943).
 
+Ho, M.-F., et al. 2026, "Small-scale Lyman alpha forest cosmology with PRIYA: constraints from XQ100 and
+KODIAQ-SQUAD one-dimensional flux power spectra", JCAP 2026 (07) 094,
+[doi:10.1088/1475-7516/2026/07/094](https://doi.org/10.1088/1475-7516/2026/07/094),
+[arXiv:2509.18271](https://arxiv.org/abs/2509.18271) (as given in the README of this repository).
+
 Wilson, B., Irsic, V., McQuinn, M. 2021, "A measurement of the Lyman-beta forest power spectrum and its cross with
 the Lyman-alpha forest in X-Shooter XQ-100", [arXiv:2106.04837](https://arxiv.org/abs/2106.04837) (title and authors
 read from the arXiv page; the journal fields were not verified).

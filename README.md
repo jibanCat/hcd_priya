@@ -157,8 +157,7 @@ What goes in and what comes out:
   damping-wing core (`pred.labels["omissions"]`).
 - **Conventions.** `pred.k` is the angular wavenumber, 2 pi divided by the wavelength in velocity, in s/km.
   `pred.P_class` is the power spectrum of `F / mean(F) - 1`, with `mean(F)` the mean flux of the whole sample, in
-  km/s ([`docs/p1d_definition.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/p1d_definition.md); that page writes k in the other common convention, one
-  over the wavelength). A spectrum in that other convention has a k smaller by a factor of 2 pi and the same P at
+  km/s. A spectrum written with k as one over the wavelength has a k smaller by a factor of 2 pi and the same P at
   the corresponding k: only k is converted, never P. Wavenumbers given to the likelihood must be in s/km too: a
   data set in h/Mpc with a bin at or above about 0.1 is refused, but one whose bins all lie below that may pass
   undetected ([`docs/likelihood.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/likelihood.md)).
@@ -401,20 +400,14 @@ the research code reads.
 - The API reference of the predictor and the loaders is on the documentation site, built from
   [`docs/api.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/api.md); a step-by-step guide to production and research bundles with executable examples
   is [`docs/tutorials/production_and_research_bundles.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/tutorials/production_and_research_bundles.md).
-- The research pipeline (catalogue construction, and the four stages from the simulation P1D to inference, a
-  historical record) is described in [`docs/pipeline.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/pipeline.md).
-- The emulator deep-dive covers the architecture, the τ₀ cache, the training
-  recipe, the forward model, the input contract and the conventions:
-  [`hcd_analysis/emulator/README.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/hcd_analysis/emulator/README.md).
+- The research pipeline (catalogue construction) is described in [`docs/pipeline.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/pipeline.md).
 - Five short notebooks introduce the per-(sim, snap) HCD data products of the catalogue pipeline from the ground
   up, for readers who hold the simulation outputs. They need the raw spectra and the pipeline's outputs, which
   are not distributed, and they do not use the emulator:
   [`notebooks/tutorials/README.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/notebooks/tutorials/README.md).
-- The science walkthrough and the record of bugs found on the catalog/P1D side
-  are in [`docs/analysis.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/analysis.md),
-  [`docs/bugs_found.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/bugs_found.md),
-  [`docs/data_layout.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/data_layout.md) and
-  [`docs/p1d_definition.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/p1d_definition.md).
+- The record of bugs found on the catalog/P1D side
+  is in [`docs/bugs_found.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/bugs_found.md) and
+  [`docs/data_layout.md`](https://github.com/jibanCat/hcd_priya/blob/v1.0.0/docs/data_layout.md).
 - The public validation summaries, all on simulations or mocks: the held-out errors of dN/dX and the CDDF that the
   model carries (`pred.dndx_err`, `pred.cddf_err`); the held-out prediction residual of the class spectra that
   the model carries (`pred.P_class_validation_rms_log`, with every residual vector in the model release and three
