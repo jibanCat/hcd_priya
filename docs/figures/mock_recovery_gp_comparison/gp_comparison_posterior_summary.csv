@@ -1,0 +1,19 @@
+# Posterior mean and standard deviation of the eleven sampled parameters, for two fits of one mock: the noiseless
+# P1D of one PRIYA high-resolution simulation on 121 KODIAQ-SQUAD bins (z 2.2 to 4.2), with the data covariance
+# alone. It is the mock of the example download of release 1.0.0 (docs/likelihood.md).
+# Columns: hcd_priya is the fold model of that download, trained without the simulation; gp is the Gaussian-process
+# emulator of Ho et al. (2026), trained with it. Per fit: four chains, the first 30 per cent of each dropped, the
+# rest pooled with the chains' sample weights. tau0 is the mean-flux amplitude (tau0_amp in hcd_priya).
+# Six significant digits. The chains are not published: see PROVENANCE.md beside this file.
+parameter,mean_hcd_priya,sd_hcd_priya,mean_gp,sd_gp
+ns,0.925177,0.0586043,0.910724,0.053654
+Ap,1.94101e-09,2.18235e-10,1.88454e-09,2.18722e-10
+herei,3.75182,0.151587,3.78432,0.144473
+heref,2.8908,0.170333,2.88639,0.163546
+alphaq,2.3287,0.374246,2.26173,0.372164
+hub,0.700293,0.0105797,0.699809,0.0103528
+omegamh2,0.142934,0.00173099,0.142853,0.00170936
+hireionz,7.29811,0.428397,7.24521,0.423242
+bhfeedback,0.049927,0.00353336,0.0500393,0.00350001
+tau0,1.00627,0.0244257,1.00996,0.0235066
+dtau0,0.00417399,0.0689132,0.00585174,0.0664182
