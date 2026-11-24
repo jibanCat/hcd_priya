@@ -195,6 +195,7 @@ release = "only with the real assets, before a release (the assets job); listed 
 "tests/test_tau0_rescale.py" = { tier = "wheel", level = "nightly" }
 "tests/test_tau_threshold_sensitivity.py" = { tier = "source", level = "nightly" }
 "tests/test_train_release_meta.py" = { tier = "source", level = "nightly" }
+"tests/test_tutorial_notebook.py" = { tier = "source", level = "pr" }
 "tests/test_tutorial_production_research.py" = { tier = "source", level = "pr" }
 "tests/test_xclass_cemu.py" = { tier = "wheel", level = "nightly" }
 "tests/test_zflat_alpha_guard.py" = { tier = "wheel", level = "nightly" }
@@ -882,14 +883,6 @@ skipped_by_design = [
     "test_the_normaliser_fingerprint_is_bitwise_in_an_exact_replay",
 ]
 reason = "the bit-level digest test needs a same-machine exact replay (HCD_EXACT_REPLAY=1 with HCD_PINNED_STACK=1 and the pinned stack), which a GitHub runner never is; the per-field tolerance tests of the file run instead"
-
-[files."tests/test_tutorial_notebook.py"]
-tier = "source"
-level = "pr"
-skipped_by_design = [
-    "test_every_code_cell_is_formatted_as_black_writes_it",
-]
-reason = "the Black check of the notebook's code cells needs black, which is not in the pinned test environment; the CI job Format runs the same check with the pinned black on every pull request (tools/ci/check_notebook_format.py)"
 
 [files."tests/test_wc_map.py"]
 tier = "source"

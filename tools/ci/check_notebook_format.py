@@ -7,8 +7,8 @@ starts with ``!`` or ``%`` is Jupyter's own, not Python, and is left as it is.
 
     python tools/ci/check_notebook_format.py notebooks/tutorial/hcd_priya_tutorial.ipynb
 
-It needs black (tools/ci/requirements-format.txt) and the standard library. The CI job "Format" runs it, and
-tests/test_tutorial_notebook.py calls it where black is installed.
+It needs black (tools/ci/requirements-format.txt) and the standard library. The CI job "Format" runs it on the
+tutorial notebook; no test of the test suite calls it, because the test environment does not hold black.
 """
 
 from __future__ import annotations

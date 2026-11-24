@@ -78,7 +78,10 @@ pip install -r tools/ci/requirements-format.txt
 black .
 ```
 
-The CI job "Format" runs `black --check .` and fails if any file would change. Two files are excluded and never
+The CI job "Format" runs `black --check .` and fails if any file would change. The job also checks the code cells of
+the tutorial notebook, which black does not read:
+`python tools/ci/check_notebook_format.py notebooks/tutorial/hcd_priya_tutorial.ipynb` prints what black would change
+in each cell and changes no file. Two files are excluded and never
 reformatted: `scripts/gen_analysis_lock.py`, the generator of the historical analysis lock (kept as it was at that
 lock, except for two personal paths removed), and
 `hcd_analysis/priya_p1d.py`, because a release record cites one of its lines by number (the MF record's mean-flux
