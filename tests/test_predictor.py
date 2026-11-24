@@ -478,6 +478,9 @@ FLAGS = {
     "z_downweighted",
     "k_downweighted",
     "w_c_xbar_extrapolated",
+    "unfiltered_addback_is_lf",
+    "unfiltered_nonpositive",
+    "unfiltered_validation_available",
 }
 
 

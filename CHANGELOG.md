@@ -2,6 +2,21 @@
 
 All notable changes to hcd_priya. Versions follow `hcd_analysis.__version__`.
 
+## Unreleased
+
+### Added
+- A prediction carries the class spectra without the PRIYA filter, from `predict` and `predict_many`:
+  `P_class_unfiltered` (clean, LLS, subDLA, DLA) and `template_unfiltered`
+  (`P_class_unfiltered[1:] / P_class[0] - 1`). The rows of LLS, subDLA and DLA are `P_class` plus the mean over the
+  members of their predicted difference between the unfiltered and the filtered class spectrum; the clean row is
+  `P_class[0]`. The normalisation is that of `P_class`: the fields are not renormalised to the mean flux of the
+  unfiltered sample. Under LF+MF the added difference is the low-fidelity one, because the multi-fidelity
+  correction exists for the filtered spectra only (flag `unfiltered_addback_is_lf`). A value that is not positive
+  is returned as it is and flagged (`unfiltered_nonpositive`). No held-out range is carried for the two fields
+  (`unfiltered_validation_available` is False). The published model files already hold what the fields need and
+  are not changed. `P_class`, `template`, `w_c`, `dndx`, `cddf`, their held-out fields, `add_hcd` and the
+  likelihood are not changed: they keep the filtered spectra.
+
 ## 1.0.0 (2026-11-19)
 
 ### Fixed
