@@ -1,13 +1,10 @@
-# The public tutorial
+# Tutorial for `hcd_priya`
 
-`hcd_priya_tutorial.ipynb` is one notebook in three parts: the scientific motivation, the emulator, and the public
-likelihood with the repository's mock-recovery example. It teaches the public functions of the package in plain
-Python. It adds no method of its own, and it runs no script: the figures of Parts II and III are drawn in the
-notebook from what the package returns, three of them beside published measurements or the training simulations.
-Fig. 1 is an image linked from the web, so it needs a network connection, and Fig. 2 is the schematic stored in
-this folder.
+In this tutorial, we will go through the scientific motivation behind `hcd_priya` and how to use the package.
 
-## How to run it
+We use the public functions of `hcd_priya` throughout the notebook, so you can use the code here as a starting point for your own analysis.
+
+## How to run the tutorial
 
 From a clone of the repository:
 
@@ -20,16 +17,14 @@ tar -xzf hcd_priya_example_download.tar.gz
 jupyter notebook hcd_priya_tutorial.ipynb
 ```
 
-The trained model comes with the package. The notebook needs the clone: three of its figures read published
-measurements and a table of the training simulations from `docs/figures/data/`, and Part III reads the list of the
-example's files from `examples/mock_recovery.py` and the example data set of the release, unpacked beside the
-notebook as above. The package's loaders check each file of that data set when they read it.
+The trained emulator comes with the package. We use some published measurements and simulation data available in `docs/figures/data/` for comparison. For the mock-recovery analysis in Part III, we use the example data set from the v1.0.0 release, which can be downloaded and unpacked using the commands above.
 
-## The files here
+## Files
 
-| File | What it is |
+| File | Description |
 |---|---|
-| `hcd_priya_tutorial.ipynb` | the notebook, committed with its outputs. It is the file to edit: after an edit, run it top to bottom and commit it with its outputs |
-| `assets/figures/` | the schematic of the emulator shown in Part II, with `PROVENANCE.md` |
+| `hcd_priya_tutorial.ipynb` | The tutorial notebook, including its outputs. |
+| `assets/figures/` | The schematic of the HCD emulator used in Part II and its provenance. |
 
-Git ignores the example data set unpacked beside the notebook.
+The downloaded example data set is excluded from Git.
+
