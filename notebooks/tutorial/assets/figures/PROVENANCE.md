@@ -5,7 +5,7 @@ four class spectra, the incidence outputs (dN/dX and the CDDF) and the mixture o
 or predicted number.
 
 **Where it comes from.** Figure 1 of the manuscript on hcd_priya prepared for the Journal of Open Source Software
-(Ho, Garg, Wells and Avestruz, in preparation). The file is the manuscript's `fig1_schematic.png`, unchanged:
+(Ho, Garg and Avestruz, in preparation). The file is the manuscript's `fig1_schematic.png`, unchanged:
 sha256 `5a88f31f9d247d3c1f5b3f854a051fb8c54fed728d8edc4d7ecafdfdab074c22`, 173,659 bytes. The manuscript's
 repository is not public until submission; the figure is published here first by decision of the project lead
 (2026-11-20).
