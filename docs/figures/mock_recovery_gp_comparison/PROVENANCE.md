@@ -36,6 +36,11 @@ published.**
 - The row `tau0` is the mean-flux amplitude, `tau0_amp` in `hcd_priya` and `tau0` in Ho et al. (2026). The rows are
   in the order of the stored reference of the example download.
 
+## The chains behind the table
+
+The table was made from the same eight chain files as Figure 3 of the JOSS paper; the figure's script pins their
+sha256.
+
 ## What can be checked against public files
 
 - The eleven values of `mean_hcd_priya` are the values of `mean` in the `reference.json` of the example download,
@@ -44,6 +49,39 @@ published.**
   request 26.
 - The standard deviations of both fits are in no other public file: the stored reference holds intervals, not
   standard deviations.
+
+## How to check this table
+
+Three steps, with public files only. The first two need the example download of release 1.0.0, unpacked
+(`docs/likelihood.md`, "The example download"); run the lines from the root of a clone, with the download beside
+it or its path in place of `hcd_priya_example_download`.
+
+```python
+import csv
+import json
+
+reference = json.load(open("hcd_priya_example_download/reference.json"))
+lines = open("docs/figures/mock_recovery_gp_comparison/gp_comparison_posterior_summary.csv")
+table = list(csv.DictReader(line for line in lines if not line.startswith("#")))
+for name, mean, (low, high), row in zip(
+    reference["param_names"], reference["mean"], reference["interval68"], table
+):
+    half_over_sd = (high - low) / 2 / float(row["sd_hcd_priya"])
+    print(f"{name:10s} {mean:.6g} {row['mean_hcd_priya']:>12s} {half_over_sd:.2f}")
+```
+
+1. **The means of `hcd_priya`.** The second and third columns printed are equal in every row: the `mean` of the
+   stored reference, written with six significant digits, and `mean_hcd_priya` of the table, in the same order of
+   parameters.
+2. **The widths of `hcd_priya`.** The last column is half of the stored reference's central 68 per cent interval
+   over `sd_hcd_priya`. It lies between 0.99 and 1.17 over the eleven parameters (it is 1.00 for a Gaussian), so
+   the standard deviations of the table are consistent with the intervals that are already public.
+3. **Both fits, rounded.** The table in the comment on pull request 26 gives, per parameter, the means of both fits,
+   their 68 per cent intervals and the ratio of the widths, rounded. Each of its means and ratios is this table's
+   value after rounding.
+
+**What cannot be checked from public files:** the numbers of the Gaussian-process fit beyond the rounding of that
+comment, and the standard deviations of both fits exactly. They rest on the chains, which are not published.
 
 ## The two numbers
 
