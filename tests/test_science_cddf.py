@@ -1,14 +1,16 @@
 """Science checks of the incidence and the CDDF of hcd_priya that need no trained model.
 
-- The decode of the incidence outputs (dN/dX and f(N_HI)) in the predictor is the inverse of the training encoding.
+- The decode of the incidence outputs (dN/dX and f(N_HI)) in the predictor is the inverse of the training encoding;
+  so is the decode of the difference between the unfiltered and the filtered class spectra (the ``delta`` output).
 - The CDDF routine of the pipeline has the documented normalisation: absorbers per unit N_HI (linear, cm^-2) per
   unit absorption distance X, with dX = (1 + z)^2 L_com H_0 / c per sightline.
 - On absorber counts, the CDDF summed over a class's column-density range IS that class's dN/dX for LLS and for
   subDLA + DLA; for subDLA and for DLA alone it lies in the interval the bin across 20.3 allows.
 
 Every number here is synthetic or a published constant. The decode tests call private functions of the predictor
-(_forward_many, _cddf_many, _forward_one, _cddf_one), the ones every prediction goes through: a rename
-breaks these tests, not the package.
+(_predict_many, _cddf_many, _predict_one, _cddf_one), the ones every prediction goes through: a rename
+breaks these tests, not the package. ``_forward_many``, which the builders of the multi-fidelity targets use, is
+checked to give the same spectra and dN/dX as ``_predict_many``, value for value.
 """
 
 import math
@@ -32,7 +34,7 @@ H0_PER_H = 100.0  # H_0 / h in km/s/Mpc
 # ===================================================================== the decode of the incidence
 class _Member(eqx.Module):
     """A stand-in network member: for the input whose first entry is r, it returns row r of its stored outputs (the
-    four outputs the predictor reads: P_filt_base, P_filt_resid, dndx, f_nhi). Synthetic values only.
+    five outputs the predictor reads: P_filt_base, P_filt_resid, dndx, f_nhi, delta). Synthetic values only.
     """
 
     out: dict
@@ -90,18 +92,22 @@ def _norm_for_predictor(norm):
     }
     dn = (jnp.asarray(norm["dndx"]["mean"]), jnp.asarray(norm["dndx"]["std"]))
     fn = (jnp.asarray(norm["f_nhi"]["mean"]), jnp.asarray(norm["f_nhi"]["std"]))
-    return pf, dn, fn
+    dl = (jnp.asarray(norm["delta"]["mean"]), jnp.asarray(norm["delta"]["std"]))
+    return pf, dn, fn, dl
 
 
 def test_the_predictor_decodes_the_incidence_with_the_inverse_of_the_training_encoding():
     """Training encodes dN/dX and f(N_HI) as (ln max(x, 1e-30) - mu) / sigma (``data.make_batch`` with the
     normaliser of ``data.fit_target_norm``, ``data.TARGET_TRANSFORMS``); the predictor decodes each member's output o
-    as exp(o sigma + mu) (``predictor._forward_many`` and ``predictor._cddf_many``, the jitted functions every
+    as exp(o sigma + mu) (``predictor._predict_many`` and ``predictor._cddf_many``, the jitted functions every
     stacked prediction uses) and then takes the linear mean over the members (that mean is done here as the
     predictor does it; the predictor's own mean is checked by test_predictor.py). Encode a synthetic cache with the
     training functions (two members: the values x 1.3 and x 0.7), feed the encodings to the predictor's decoders as
     the outputs of two stand-in members, and get the cache's values back to 1e-12 relative from the linear mean:
     dN/dX, f(N_HI) at every non-empty bin, and (in passing) P_filt.
+    The same for the ``delta`` output, the difference between the unfiltered and the filtered class spectra, which
+    training encodes as (arcsinh(x) - mu) / sigma and the predictor decodes as sinh(o sigma + mu): here the two
+    members hold the same values, of either sign, and the decode returns them.
     An empty bin (structural zero) is encoded at the floor and decodes to the floor 1e-30, not to zero (the
     predictor sets such bins NaN elsewhere); the never-populated bin keeps the placeholder normaliser mean 0, std 1.
     The training-side inverse ``data.untransform_prediction`` gives the same values. No trained model.
@@ -123,18 +129,23 @@ def test_the_predictor_decodes_the_incidence_with_the_inverse_of_the_training_en
                 "P_filt_resid": jnp.asarray(b["t_p_resid"]),
                 "dndx": jnp.asarray(b["t_dndx"]),
                 "f_nhi": jnp.asarray(b["t_f_nhi"]),
+                "delta": jnp.asarray(b["t_delta"]),
             }
         )
         for b in batches
     ]
     ens = _Ensemble(members)
-    pf, dn, fn = _norm_for_predictor(norm)
+    pf, dn, fn, dl = _norm_for_predictor(norm)
     x = np.zeros((rows.size, 10))
     x[:, 0] = rows
     tau = jnp.asarray(d["tau0"])
-    P_m, dn_m = hp._forward_many(
-        ens, pf, *dn, jnp.asarray(x), tau
-    )  # (rows, members, 4, K), (rows, members, 3)
+    P_m, dn_m, D_m = hp._predict_many(
+        ens, pf, *dn, *dl, jnp.asarray(x), tau
+    )  # (rows, members, 4, K), (rows, members, 3), (rows, members, 3, K)
+    # the function of the builders of the multi-fidelity targets gives the same spectra and dN/dX, value for value
+    P_b, dn_b = hp._forward_many(ens, pf, *dn, jnp.asarray(x), tau)
+    assert np.array_equal(np.asarray(P_b), np.asarray(P_m))
+    assert np.array_equal(np.asarray(dn_b), np.asarray(dn_m))
     f_m = hp._cddf_many(ens, *fn, jnp.asarray(x), tau)  # (rows, members, Nbin)
     dndx, cddf, P = (np.asarray(a, dtype=np.float64).mean(axis=1) for a in (dn_m, f_m, P_m))
 
@@ -145,6 +156,10 @@ def test_the_predictor_decodes_the_incidence_with_the_inverse_of_the_training_en
     np.testing.assert_allclose(cddf[full], want_f[full], rtol=1e-12, atol=0)
     np.testing.assert_allclose(cddf[~full], 1e-30, rtol=1e-12, atol=0)  # the floor of the encoding
     np.testing.assert_allclose(P, d["P_filt"], rtol=1e-12, atol=0)
+    delta = np.asarray(D_m, dtype=np.float64).mean(axis=1)
+    assert np.any(d["delta"] < 0) and np.any(d["delta"] > 0)
+    # values of order 1e-3 and of either sign: a relative comparison with no absolute tolerance
+    np.testing.assert_allclose(delta, d["delta"], rtol=1e-9, atol=0)
     # the training-side inverse agrees (per member, then the same linear mean)
     back = [
         D.untransform_prediction(
@@ -153,11 +168,15 @@ def test_the_predictor_decodes_the_incidence_with_the_inverse_of_the_training_en
                 "f_nhi": b["t_f_nhi"],
                 "P_filt_base": b["t_p_base"],
                 "P_filt_resid": b["t_p_resid"],
+                "delta": b["t_delta"],
             },
             norm,
         )
         for b in batches
     ]
+    np.testing.assert_allclose(
+        np.mean([b["delta"] for b in back], axis=0), d["delta"], rtol=1e-9, atol=0
+    )
     np.testing.assert_allclose(
         np.mean([b["dndx"] for b in back], axis=0), want_dndx, rtol=1e-12, atol=0
     )
@@ -169,28 +188,42 @@ def test_the_predictor_decodes_the_incidence_with_the_inverse_of_the_training_en
 def test_the_incidence_decode_gives_a_known_answer_written_by_hand():
     """mu = ln(0.25, 0.05, 0.02), sigma = (0.5, 1, 2) and network output o = (0, 1, -0.5) decode to dN/dX =
     (0.25, 0.05 e, 0.02 / e) = (0.25, 0.1359140914229523, 0.007357588823428847); mu = ln 1e-20, sigma = 2, o = -1 to
-    f = 1e-20 e^-2 = 1.353352832366127e-21 in every bin. Through the predictor's single-input decoders
-    (``_forward_one``, ``_cddf_one``) with two identical stand-in members; and the training encoding of those values
-    gives o back."""
+    f = 1e-20 e^-2 = 1.353352832366127e-21 in every bin. For the difference between the unfiltered and the filtered
+    class spectra: mu = (0.5, 0.5, -1), sigma = (2, 1, 0.5) and o = (0.25, -1, 6) decode to sinh(1, -0.5, 2) =
+    (1.1752011936438014, -0.5210953054937474, 3.626860407847019) at every mode. Through the predictor's single-input
+    decoders (``_predict_one``, ``_cddf_one``) with two identical stand-in members; and the training encoding of
+    those values gives o back."""
     mu_d, sd_d = np.log([0.25, 0.05, 0.02]), np.array([0.5, 1.0, 2.0])
     o_d = np.array([0.0, 1.0, -0.5])
     mu_f, sd_f = np.full(N_BINS, math.log(1e-20)), np.full(N_BINS, 2.0)
     o_f = np.full(N_BINS, -1.0)
+    mu_l = np.tile(np.array([0.5, 0.5, -1.0])[:, None], (1, K_SYN))
+    sd_l = np.tile(np.array([2.0, 1.0, 0.5])[:, None], (1, K_SYN))
+    o_l = np.tile(np.array([0.25, -1.0, 6.0])[:, None], (1, K_SYN))
+    want_l = np.tile(
+        np.array([1.1752011936438014, -0.5210953054937474, 3.626860407847019])[:, None], (1, K_SYN)
+    )
     out = {
         "P_filt_base": jnp.zeros((1, 4, K_SYN)),
         "P_filt_resid": jnp.zeros((1, 4, K_SYN)),
         "dndx": jnp.asarray(o_d[None]),
         "f_nhi": jnp.asarray(o_f[None]),
+        "delta": jnp.asarray(o_l[None]),
     }
     ens = _Ensemble([_Member(out), _Member(out)])
     pf = {k: jnp.zeros((4, K_SYN)) for k in ("mu_marg", "sig_marg", "sig_cosmo")}
     x, tau = jnp.zeros(10), jnp.asarray(0.5)
-    _, dn = hp._forward_one(ens, pf, jnp.asarray(mu_d), jnp.asarray(sd_d), x, tau)
+    _, dn, dl = hp._predict_one(
+        ens, pf, jnp.asarray(mu_d), jnp.asarray(sd_d), jnp.asarray(mu_l), jnp.asarray(sd_l), x, tau
+    )
     f = hp._cddf_one(ens, jnp.asarray(mu_f), jnp.asarray(sd_f), x, tau)
     np.testing.assert_allclose(
         np.asarray(dn), [[0.25, 0.1359140914229523, 0.007357588823428847]] * 2, rtol=1e-14, atol=0
     )
     np.testing.assert_allclose(np.asarray(f), 1.353352832366127e-21, rtol=1e-14, atol=0)
+    np.testing.assert_allclose(np.asarray(dl), [want_l] * 2, rtol=1e-14, atol=0)
+    enc_l = D.apply_norm(D.TARGET_TRANSFORMS["delta"][0](want_l), {"mean": mu_l, "std": sd_l})
+    np.testing.assert_allclose(enc_l, o_l, rtol=0, atol=1e-14)
     enc = D.apply_norm(
         D.TARGET_TRANSFORMS["dndx"][0](np.array([0.25, 0.1359140914229523, 0.007357588823428847])),
         {"mean": mu_d, "std": sd_d},

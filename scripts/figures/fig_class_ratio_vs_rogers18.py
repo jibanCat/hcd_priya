@@ -10,8 +10,8 @@ What is drawn, in four small panels (one per class, because the classes span ver
   ``docs/figures/data/class_ratio_ranges_z3p0_lf60.csv`` (its header says how it was made). The lighter band is the
   range, minimum to maximum, over the 60 simulations at all 20 mean-flux rungs; the darker band is the range over
   the 60 simulations at the mean-flux rung nearest 1, and the line is its median. The 60 simulations differ in the
-  nine cosmological and astrophysical parameters. The public predictor cannot produce these ratios: it returns the
-  filtered class spectra, and restoring the troughs is one of its two stated omissions;
+  nine cosmological and astrophysical parameters. The figure draws the simulations' own spectra, not a prediction of
+  the model;
 - the template, in a second hue: the line is Eq. 6 of Rogers et al. (2018) as published,
   ``hcd_analysis.hcd_template.class_ratio``. The band is c(z) + alpha * T(k, z) for alpha between 0.5 and 2, where
   T is the k-dependent term of Eq. 6 (``class_ratio`` minus its constant c). In a fit Rogers et al. leave the

@@ -6,6 +6,11 @@ trained model), and every test skips when no model is configured.
 - Every class spectrum is positive at every mode.
 - The total P1D, mixed with the model's own fractions, rises with A_p at every mode below k = 0.015 s/km, at the 12
   points and 3 redshifts. The response is asserted below that k only.
+- The class spectra without the PRIYA filter (``P_class_unfiltered``): the clean row is the filtered clean spectrum;
+  ``template_unfiltered`` is the three HCD rows over the clean spectrum, minus one; the two fidelities differ by what
+  ``P_class`` differs by; and at z = 3.0 and the midpoint, the low-fidelity ratios of LLS and subDLA to clean lie,
+  mode by mode, inside the range of the 60 training simulations of the table the repository ships
+  (``docs/figures/data/class_ratio_ranges_z3p0_lf60.csv``).
 - The fractions w_c lie in [0, 1] with a sum of at most 1; dN/dX is positive and inside its held-out range; the CDDF
   is inside its held-out range.
 - The held-out prediction residual of the class spectra: every value finite and not negative; the range is the
@@ -80,7 +85,14 @@ QUANTITIES = (
     # the held-out prediction residual of the class spectra (a release with a P1D held-out record)
     "P_class_validation_rms_log",
     "P_mix_validation_rms_log",
+    # the class spectra without the PRIYA filter
+    "P_class_unfiltered",
 )
+# the released table of the class power ratio of the 60 training simulations at z = 3.0, filtered pixels restored
+RATIO_TABLE = (
+    Path(__file__).resolve().parents[1] / "docs/figures/data/class_ratio_ranges_z3p0_lf60.csv"
+)
+RATIO_TABLE_Z = 3.0
 
 
 # ------------------------------------------------------------------------------------------- points and cases
@@ -168,6 +180,7 @@ def case_values(pred):
         "P_mix_validation_rms_log": _validation(pred, "P_mix_validation_rms_log")[
             :, list(K_INDICES)
         ],
+        "P_class_unfiltered": np.asarray(pred.P_class_unfiltered)[:, :, list(K_INDICES)],
     }
     return {k: np.asarray(v, dtype=np.float64) for k, v in vals.items()}, true_flags(pred)
 
@@ -235,6 +248,9 @@ def test_the_predictions_equal_the_golden_values(preds, golden):
     rtol = RTOL_PINNED if os.environ.get(PINNED_ENV) == "1" else RTOL_OTHER
     assert golden["settings"]["z"] == list(Z) and golden["settings"]["k_indices"] == list(K_INDICES)
     assert golden["settings"]["cddf_log_nhi"] == list(CDDF_LOG_NHI)
+    assert golden["settings"]["quantities"] == list(
+        QUANTITIES
+    ), "the golden file was made for another list of quantities"
     assert golden["points"] == [
         {"name": n, "params": p} for n, p in science_points()
     ], "the points changed"
@@ -304,6 +320,69 @@ def test_the_validation_range_of_the_spectra_is_the_record_s_and_the_record_reco
     assert PH.verify_tables(held_dir, held) > 1_000_000
     for text in (pred.labels["p1d_validation"], held.label(False)):
         assert "empirical validation diagnostics, not calibrated predictive uncertainties" in text
+
+
+# ------------------------------------------------------------------- the class spectra without the filter
+def test_the_unfiltered_class_spectra_keep_their_identities(emu, preds):
+    """On every golden prediction: the clean row of ``P_class_unfiltered`` is ``P_class[0]``, value for value;
+    ``template_unfiltered`` is the three HCD rows over the clean spectrum, minus one; no held-out range is carried.
+    At the midpoint, the low-fidelity prediction and the default one differ, in ``P_class_unfiltered``, by exactly
+    what ``P_class`` differs by: the added term is the same under both fidelities."""
+    n_values = 0
+    for pred in preds.values():
+        P, U = np.asarray(pred.P_class), np.asarray(pred.P_class_unfiltered)
+        assert U.shape == P.shape and np.all(np.isfinite(U))
+        assert np.array_equal(U[:, 0], P[:, 0])
+        np.testing.assert_allclose(
+            pred.template_unfiltered, U[:, 1:] / P[:, :1] - 1.0, rtol=1e-13, atol=1e-13
+        )
+        assert pred.flags["unfiltered_validation_available"] is False
+        assert pred.flags["unfiltered_nonpositive"] is bool(np.any(~(U > 0)))
+        n_values += U.size
+    assert n_values > 1000
+    name, params = science_points()[0]
+    default = predict_case(emu, params, *DEFAULT_MEAN_FLUX)
+    lf = emu.predict_many(params, z=list(Z), tau0_amp=1.0, dtau0=0.0, fidelity="LF")
+    scale = np.abs(default.P_class) + np.abs(default.P_class_unfiltered)
+    np.testing.assert_allclose(
+        (default.P_class_unfiltered - lf.P_class_unfiltered) / scale,
+        (default.P_class - lf.P_class) / scale,
+        rtol=0,
+        atol=1e-12,
+    )
+
+
+def test_the_unfiltered_ratios_at_z_3_lie_inside_the_range_of_the_training_simulations(emu):
+    """At z = 3.0 and the midpoint, low fidelity (the table's simulations are the low-fidelity ones): the ratio of
+    the unfiltered LLS and subDLA spectra to the clean one, ``1 + template_unfiltered``, lies at every mode of the
+    released table between the smallest and the largest value of the 60 training simulations at the mean-flux rung
+    nearest 1. The table is formed at fixed mode number, so the comparison is mode by mode."""
+    header = next(
+        line
+        for line in RATIO_TABLE.read_text(encoding="utf-8").splitlines()
+        if line.startswith("# k_s_per_km,")
+    )
+    names = header[2:].split(",")
+    table = np.loadtxt(RATIO_TABLE, delimiter=",", comments="#")
+    assert table.shape[1] == len(names) and table.shape[0] > 50
+    col = {n: table[:, i] for i, n in enumerate(names)}
+    n_modes = table.shape[0]
+    name, params = science_points()[0]
+    pred = emu.predict(params, z=RATIO_TABLE_Z, tau0_amp=1.0, dtau0=0.0, fidelity="LF")
+    k = np.asarray(pred.k)[:n_modes]
+    # the same box modes: the table's k is the simulations' mean wavenumber of each mode, one factor away from ours
+    np.testing.assert_allclose(k / col["k_s_per_km"], k[0] / col["k_s_per_km"][0], rtol=1e-6)
+    assert 0.9 < k[0] / col["k_s_per_km"][0] < 1.1
+    ratio = 1.0 + np.asarray(pred.template_unfiltered)[:, :n_modes]
+    outside = []
+    for c, cls in enumerate(("LLS", "subDLA")):
+        lo, hi = col[f"R_{cls}_sims60_rung1_min"], col[f"R_{cls}_sims60_rung1_max"]
+        assert np.all(lo < hi)
+        for i in np.where((ratio[c] < lo) | (ratio[c] > hi))[0]:
+            outside.append((cls, int(i), float(ratio[c, i]), float(lo[i]), float(hi[i])))
+    assert (
+        not outside
+    ), f"{len(outside)} of {2 * n_modes} values outside the simulations' range: {outside[:10]}"
 
 
 # ----------------------------------------------------------------------------------------------- positivity
