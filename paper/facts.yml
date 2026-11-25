@@ -1,0 +1,12 @@
+# The values that the figure scripts of the paper read. Each is checked against its source when the paper is built.
+
+facts:
+  logN_lls_min:
+    value: "17.2"
+    source: "hcd_analysis/catalog.py of github.com/jibanCat/hcd_priya"
+  logN_subdla_min:
+    value: "19.0"
+    source: "hcd_analysis/catalog.py of github.com/jibanCat/hcd_priya"
+  logN_dla_min:
+    value: "20.3"
+    source: "hcd_analysis/catalog.py of github.com/jibanCat/hcd_priya"
