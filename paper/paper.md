@@ -3,7 +3,7 @@ title: "hcd_priya: A High-Column-Density Absorber Emulator for Lyman-α Forest C
 tags: ["Python","JAX","cosmology","Lyman-alpha forest","emulator","absorbers","DLA","LLS"]
 authors: [{"name":"Ming-Feng Ho","orcid":"0000-0002-4457-890X","affiliation":"1,2"},{"name":"Shreyanshi Garg","affiliation":1},{"name":"Camille Avestruz","orcid":"0000-0001-8868-0810","affiliation":"1,2"}]
 affiliations: [{"name":"Department of Physics, University of Michigan, USA","index":1},{"name":"Leinweber Institute for Theoretical Physics, University of Michigan, USA","index":2}]
-date: 25 November 2026
+date: 26 November 2026
 bibliography: paper.bib
 ---
 
@@ -125,14 +125,12 @@ The CDDFs are evaluated at the midpoint of the PRIYA parameter prior ranges, wit
 
 # AI usage disclosure
 
-The authors thank Claude (Fable 5 and 5.2, Opus 4.7, 4.8, and 5.5, and Sonnet 4.6) through Claude Code, GPT (GPT 5.6 Sol and GPT 6 Astra), and GitHub Copilot for their contributions throughout the development of hcd_priya. AI agents contributed substantially to implementation, testing, documentation, and code review. The authors defined the scientific questions, emulator architecture, validation metrics, and inference workflow.
-
-AI also assisted in preparing the manuscript, including expanding the initial human-written draft, checking references and numerical results, and developing the plotting code.
-
-AI-assisted contributions were validated through automated tests and comparisons with analytical expectations, existing emulators, and existing scientific software. The authors evaluated alternative approaches, made the final scientific decisions, and take responsibility for the software and manuscript.
+The authors thank Claude (Fable 5 and 5.2, Opus 4.7, 4.8, and 5.5, and Sonnet 4.6) through Claude Code, GPT (GPT 5.6 Sol and GPT 6 Astra), and GitHub Copilot. These tools contributed substantially to the implementation, testing, documentation, and code review of hcd_priya. They also assisted with the manuscript: expanding the human-written draft; checking references and numerical results; and developing the plotting code. The authors defined the scientific questions, emulator architecture, validation metrics, and inference workflow. The authors evaluated alternative approaches and made the final scientific decisions. The authors reviewed, edited, and validated all AI-assisted outputs using automated tests and comparisons with analytical expectations, existing emulators, and existing scientific software. The authors take responsibility for the software and manuscript.
 
 # Acknowledgements
 
+The authors thank Simeon Bird and the PRIYA simulation group for sharing the simulated sightlines of PRIYA.
+MFH thanks Alexandra Wells for useful discussions on DLA clustering, and thanks Yanhui Yang and Mahdi (Sum) Qezlou for useful discussions on neural nets.
 MFH and CA are supported by the Leinweber Foundation and DOE grant DE-SC0019193.
 This research was supported in part through computational resources and services provided by Advanced Research Computing (ARC), a division of Information and Technology Services (ITS) at the University of Michigan, Ann Arbor.
 
