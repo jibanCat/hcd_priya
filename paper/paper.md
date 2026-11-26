@@ -1,7 +1,7 @@
 ---
 title: "hcd_priya: A High-Column-Density Absorber Emulator for Lyman-α Forest Cosmology"
 tags: ["Python","JAX","cosmology","Lyman-alpha forest","emulator","absorbers","DLA","LLS"]
-authors: [{"name":"Ming-Feng Ho","orcid":"0000-0002-4457-890X","affiliation":"1,2"},{"name":"Shreyanshi Garg","affiliation":1},{"name":"Camille Avestruz","orcid":"0000-0001-8868-0810","affiliation":"1,2"}]
+authors: [{"name":"Ming-Feng Ho","orcid":"0000-0002-4457-890X","corresponding":true,"affiliation":"1,2"},{"name":"Shreyanshi Garg","affiliation":1},{"name":"Camille Avestruz","orcid":"0000-0001-8868-0810","affiliation":"1,2"}]
 affiliations: [{"name":"Department of Physics, University of Michigan, USA","index":1},{"name":"Leinweber Institute for Theoretical Physics, University of Michigan, USA","index":2}]
 date: 26 November 2026
 bibliography: paper.bib
@@ -133,5 +133,7 @@ The authors thank Simeon Bird and the PRIYA simulation group for sharing the sim
 MFH thanks Alexandra Wells for useful discussions on DLA clustering, and thanks Yanhui Yang and Mahdi (Sum) Qezlou for useful discussions on neural nets.
 MFH and CA are supported by the Leinweber Foundation and DOE grant DE-SC0019193.
 This research was supported in part through computational resources and services provided by Advanced Research Computing (ARC), a division of Information and Technology Services (ITS) at the University of Michigan, Ann Arbor.
+The PRIYA simulations were run on Frontera at the Texas Advanced Computing Center (LRAC AST21005), made possible by National Science Foundation award OAC-1818253.
+This work made use of NumPy [@Harris2020NumPy], SciPy [@Virtanen2020SciPy], h5py [@Collette2013h5py], pandas [@McKinney2010pandas], Matplotlib [@Hunter2007Matplotlib], and Optax [@DeepMind2020JAX].
 
 # References
